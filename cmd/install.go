@@ -1,15 +1,10 @@
 package cmd
 
 import (
-	"crypto/sha256"
-	"fmt"
-	"io"
-	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/caarlos0/log"
-	"github.com/marcosnils/bin/pkg/assets"
 	"github.com/marcosnils/bin/pkg/config"
 	"github.com/marcosnils/bin/pkg/providers"
 	"github.com/spf13/cobra"
@@ -54,48 +49,19 @@ func newInstallCmd() *installCmd {
 			// TODO check if binary already exists in config
 			// and triger the update process if that's the case
 
-			p, err := providers.New(u, root.opts.provider)
-			if err != nil {
-				return err
-			}
-			log.Debugf("Using provider '%s' for '%s'", p.GetID(), u)
-
-			pResult, err := p.Fetch(&providers.FetchOpts{All: root.opts.all})
-			if err != nil {
-				return err
-			}
-
-			resolvedPath, err = checkFinalPath(resolvedPath, assets.SanitizeName(pResult.Name, pResult.Version))
-			if err != nil {
-				return err
-			}
-
-			hash, err := saveToDisk(pResult, resolvedPath, root.opts.force)
-			if err != nil {
-				return fmt.Errorf("error installing binary: %w", err)
-			}
-
-			// Convert to absolute path before storing in config
-			absPath, err := filepath.Abs(resolvedPath)
-			if err != nil {
-				return fmt.Errorf("error converting to absolute path: %w", err)
-			}
-
-			err = config.UpsertBinary(&config.Binary{
-				RemoteName:  pResult.Name,
-				Path:        absPath,
-				Version:     pResult.Version,
-				Hash:        fmt.Sprintf("%x", hash),
+			res, err := installBinary(InstallOpts{
 				URL:         u,
-				Provider:    p.GetID(),
-				PackagePath: pResult.PackagePath,
+				Provider:    root.opts.provider,
+				Path:        resolvedPath,
+				Force:       root.opts.force,
+				FetchOpts:   providers.FetchOpts{All: root.opts.all},
+				ResolvePath: true,
 			})
 			if err != nil {
 				return err
 			}
 
-			log.Infof("Done installing %s %s", pResult.Name, pResult.Version)
-
+			log.Infof("Done installing %s %s", res.Name, res.Version)
 			return nil
 		},
 	}
@@ -105,63 +71,4 @@ func newInstallCmd() *installCmd {
 	root.cmd.Flags().BoolVarP(&root.opts.all, "all", "a", false, "Show all possible download options (skip scoring & filtering)")
 	root.cmd.Flags().StringVarP(&root.opts.provider, "provider", "p", "", "Forces to use a specific provider")
 	return root
-}
-
-// checkFinalPath checks if path exists and if it's a dir or not
-// and returns the correct final file path. It also
-// checks if the path already exists and prompts
-// the user to override
-func checkFinalPath(path, fileName string) (string, error) {
-	fi, err := os.Stat(os.ExpandEnv(path))
-
-	// TODO implement file existence and override logic
-	if err != nil && !os.IsNotExist(err) {
-		return "", err
-	}
-
-	if fi != nil && fi.IsDir() {
-		return filepath.Join(path, fileName), nil
-	}
-
-	return path, nil
-}
-
-// saveToDisk saves the specified binary to the desired path
-// and makes it executable. It also checks if any other binary
-// has the same hash and exists if so.
-
-// TODO check if other binary has the same hash and warn about it.
-// TODO if the file is zipped, tared, whatever then extract it
-func saveToDisk(f *providers.File, path string, overwrite bool) ([]byte, error) {
-	epath := os.ExpandEnv((path))
-
-	extraFlags := os.O_EXCL
-
-	if overwrite {
-		extraFlags = 0
-		err := os.Remove(epath)
-		log.Debugf("Overwrite flag set, removing file %s\n", epath)
-		if err != nil && !os.IsNotExist(err) {
-			return nil, err
-		}
-	}
-
-	file, err := os.OpenFile(epath, os.O_RDWR|os.O_CREATE|extraFlags, 0o766)
-	if err != nil {
-		return nil, err
-	}
-
-	defer file.Close()
-
-	h := sha256.New()
-
-	tr := io.TeeReader(f.Data, h)
-
-	log.Infof("Copying for %s@%s into %s", f.Name, f.Version, epath)
-	_, err = io.Copy(file, tr)
-	if err != nil {
-		return nil, err
-	}
-
-	return h.Sum(nil), nil
 }
