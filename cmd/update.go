@@ -50,19 +50,9 @@ func newUpdateCmd() *updateCmd {
 
 			toUpdate := map[*updateInfo]*config.Binary{}
 			cfg := config.Get()
-			binsToProcess := map[string]*config.Binary{}
-
-			// Update specific binaries
-			if len(args) > 0 {
-				for _, a := range args {
-					bin, err := getBinPath(a)
-					if err != nil {
-						return err
-					}
-					binsToProcess[bin] = cfg.Bins[bin]
-				}
-			} else {
-				binsToProcess = cfg.Bins
+			binsToProcess, err := resolveBinsToProcess(cfg.Bins, args)
+			if err != nil {
+				return err
 			}
 
 			updateFailures := map[*config.Binary]error{}
@@ -110,18 +100,21 @@ func newUpdateCmd() *updateCmd {
 				}
 			}
 
-			// TODO	:S code smell here, this pretty much does
-			// the same thing as install logic. Refactor to
-			// use the same code in both places
 			for ui, b := range toUpdate {
-
-				p, err := providers.New(ui.url, b.Provider)
-				if err != nil {
-					return err
-				}
-				log.Debugf("Using provider '%s' for '%s'", p.GetID(), ui.url)
-
-				pResult, err := p.Fetch(&providers.FetchOpts{All: root.opts.all, PackagePath: b.PackagePath, SkipPatchCheck: root.opts.skipPathCheck, PackageName: b.RemoteName})
+				res, err := installBinary(InstallOpts{
+					URL:      ui.url,
+					Provider: b.Provider,
+					Path:     b.Path,
+					Force:    true,
+					FetchOpts: providers.FetchOpts{
+						All:            root.opts.all,
+						PackagePath:    b.PackagePath,
+						SkipPatchCheck: root.opts.skipPathCheck,
+						PackageName:    b.RemoteName,
+					},
+					ResolvePath: false,
+					ConfigPath:  b.Path,
+				})
 				if err != nil {
 					if root.opts.continueOnError {
 						updateFailures[b] = fmt.Errorf("Error while fetching %v: %w", ui.url, err)
@@ -130,25 +123,7 @@ func newUpdateCmd() *updateCmd {
 					return err
 				}
 
-				hash, err := saveToDisk(pResult, b.Path, true)
-				if err != nil {
-					return fmt.Errorf("error installing binary: %w", err)
-				}
-
-				err = config.UpsertBinary(&config.Binary{
-					RemoteName:  pResult.Name,
-					Path:        b.Path,
-					Version:     pResult.Version,
-					Hash:        fmt.Sprintf("%x", hash),
-					URL:         ui.url,
-					Provider:    p.GetID(),
-					PackagePath: pResult.PackagePath,
-				})
-				if err != nil {
-					return err
-				}
-
-				log.Infof("Done updating %s to %s", os.ExpandEnv(b.Path), color.GreenString(ui.version))
+				log.Infof("Done updating %s to %s", os.ExpandEnv(b.Path), color.GreenString(res.Version))
 			}
 			for _, err := range updateFailures {
 				log.Warnf("%v", err)

@@ -419,6 +419,16 @@ func (f *Filter) processGz(name string, r io.Reader) (*finalFile, error) {
 	return &finalFile{Source: gr, Name: gr.Name}, nil
 }
 
+// matchesPackagePath returns true if the entry name matches the configured
+// PackagePath by comparing base filenames. This allows archive entries
+// to match even when the directory name changes between versions.
+func (f *Filter) matchesPackagePath(entryName string) bool {
+	if f.opts.SkipPathCheck || len(f.opts.PackagePath) == 0 {
+		return true
+	}
+	return filepath.Base(entryName) == filepath.Base(f.opts.PackagePath)
+}
+
 func (f *Filter) processTar(name string, r io.Reader) (*finalFile, error) {
 	tr := tar.NewReader(r)
 	tarFiles := map[string][]byte{}
@@ -435,7 +445,7 @@ func (f *Filter) processTar(name string, r io.Reader) (*finalFile, error) {
 			continue
 		}
 
-		if !f.opts.SkipPathCheck && len(f.opts.PackagePath) > 0 && header.Name != f.opts.PackagePath {
+		if !f.matchesPackagePath(header.Name) {
 			continue
 		}
 
@@ -503,7 +513,7 @@ func (f *Filter) processZip(name string, r io.Reader) (*finalFile, error) {
 			continue
 		}
 
-		if !f.opts.SkipPathCheck && len(f.opts.PackagePath) > 0 && header.Name != f.opts.PackagePath {
+		if !f.matchesPackagePath(header.Name) {
 			continue
 		}
 

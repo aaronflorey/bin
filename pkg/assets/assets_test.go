@@ -1,6 +1,8 @@
 package assets
 
 import (
+	"archive/tar"
+	"bytes"
 	"fmt"
 	"strings"
 	"testing"
@@ -367,4 +369,34 @@ func TestIsSupportedExt(t *testing.T) {
 		}
 	}
 
+}
+
+func TestProcessTarMatchesByBasename(t *testing.T) {
+	// Build a tar with a new version in directory name
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	files := map[string]string{
+		"tool-v2.0.0-aarch64-apple-darwin/LICENSE": "license text",
+		"tool-v2.0.0-aarch64-apple-darwin/tool":    "binary content",
+	}
+	for name, content := range files {
+		hdr := &tar.Header{Name: name, Mode: 0755, Size: int64(len(content))}
+		if err := tw.WriteHeader(hdr); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write([]byte(content)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tw.Close()
+
+	// PackagePath has old version in directory name but same basename
+	f := NewFilter(&FilterOpts{PackagePath: "tool-v1.0.0-aarch64-apple-darwin/tool"})
+	result, err := f.processTar("tool", &buf)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Name != "tool" {
+		t.Fatalf("expected file name 'tool', got %q", result.Name)
+	}
 }
