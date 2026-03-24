@@ -157,8 +157,8 @@ func write() error {
 	return nil
 }
 
-// GetArch is the running program's operating system target:
-// one of darwin, freebsd, linux, and so on.
+// GetArch returns the running program's architecture target
+// and common aliases (e.g. aarch64 for arm64).
 func GetArch() []string {
 	res := []string{runtime.GOARCH}
 	switch runtime.GOARCH {
@@ -174,8 +174,8 @@ func GetArch() []string {
 	return res
 }
 
-// GetOS is the running program's architecture target:
-// one of 386, amd64, arm, s390x, and so on.
+// GetOS returns the running program's operating system target
+// and common aliases (e.g. macos for darwin).
 func GetOS() []string {
 	res := []string{runtime.GOOS}
 	switch runtime.GOOS {
