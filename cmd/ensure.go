@@ -1,9 +1,6 @@
 package cmd
 
 import (
-	"crypto/sha256"
-	"fmt"
-	"io"
 	"os"
 
 	"github.com/caarlos0/log"
@@ -28,78 +25,48 @@ func newEnsureCmd() *ensureCmd {
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := config.Get()
-			binsToProcess := map[string]*config.Binary{}
-
-			// Update specific binaries
-			if len(args) > 0 {
-				for _, a := range args {
-					bin, err := getBinPath(a)
-					if err != nil {
-						return err
-					}
-					binsToProcess[bin] = cfg.Bins[bin]
-				}
-			} else {
-				binsToProcess = cfg.Bins
+			binsToProcess, err := resolveBinsToProcess(cfg.Bins, args)
+			if err != nil {
+				return err
 			}
 
-			// TODO: code smell here, this pretty much does
-			// the same thing as install logic. Refactor to
-			// use the same code in both places
 			for _, binCfg := range binsToProcess {
 				ep := os.ExpandEnv(binCfg.Path)
-				_, err := os.Stat(ep)
+				_, statErr := os.Stat(ep)
 
-				if err == nil {
-					f, err := os.Open(ep)
+				if statErr == nil {
+					hash, err := hashFile(ep)
 					if err != nil {
 						return err
 					}
 
-					h := sha256.New()
-					if _, err := io.Copy(h, f); err != nil {
-						return err
-					}
-
-					if fmt.Sprintf("%x", h.Sum(nil)) == binCfg.Hash {
+					if hash == binCfg.Hash {
 						continue
 					}
 
 					log.Infof("%s hash does not match with config's, re-installing", ep)
 
-				} else if !os.IsNotExist(err) {
-					continue
+				} else if !os.IsNotExist(statErr) {
+					return statErr
 				}
 
-				p, err := providers.New(binCfg.URL, binCfg.Provider)
-				if err != nil {
-					return err
-				}
-				log.Debugf("Using provider '%s' for '%s'", p.GetID(), binCfg.URL)
-
-				pResult, err := p.Fetch(&providers.FetchOpts{Version: binCfg.Version})
-				if err != nil {
-					return err
-				}
-
-				hash, err := saveToDisk(pResult, ep, true)
-				if err != nil {
-					return fmt.Errorf("error installing binary: %w", err)
-				}
-
-				err = config.UpsertBinary(&config.Binary{
-					RemoteName:  pResult.Name,
-					Path:        binCfg.Path,
-					Version:     pResult.Version,
-					Hash:        fmt.Sprintf("%x", hash),
-					URL:         binCfg.URL,
-					Provider:    p.GetID(),
-					PackagePath: binCfg.PackagePath,
+				res, err := installBinary(InstallOpts{
+					URL:      binCfg.URL,
+					Provider: binCfg.Provider,
+					Path:     ep,
+					Force:    true,
+					FetchOpts: providers.FetchOpts{
+						Version:     binCfg.Version,
+						PackagePath: binCfg.PackagePath,
+						PackageName: binCfg.RemoteName,
+					},
+					ResolvePath: false,
+					ConfigPath:  binCfg.Path,
 				})
 				if err != nil {
 					return err
 				}
-				log.Infof("Done ensuring %s to %s", os.ExpandEnv(binCfg.Path), color.GreenString(binCfg.Version))
+				log.Infof("Done ensuring %s to %s", os.ExpandEnv(binCfg.Path), color.GreenString(res.Version))
 			}
 			return nil
 		},
