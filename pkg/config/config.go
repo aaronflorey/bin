@@ -124,6 +124,17 @@ func UpsertBinary(c *Binary) error {
 	return nil
 }
 
+// UpsertBinaries adds or updates multiple binary resources
+// in the config, writing to disk once.
+func UpsertBinaries(binaries []*Binary) error {
+	for _, c := range binaries {
+		if c != nil {
+			cfg.Bins[c.Path] = c
+		}
+	}
+	return write()
+}
+
 // RemoveBinaries removes the specified paths
 // from bin configuration. It doesn't care about the order
 func RemoveBinaries(paths []string) error {

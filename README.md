@@ -53,6 +53,8 @@ scoop install extras/bin
 | --------------------------- | ------------------------------------------ | -------------------------------- |
 | `bin install <repo> [path]` | Install binary from GitHub or Docker       | `bin install github.com/cli/cli` |
 | `bin list`                  | List installed binaries and versions       | `bin list`                       |
+| `bin export [file]`         | Export installed binaries as JSON          | `bin export bins.json`           |
+| `bin import [file]`         | Import binaries from JSON                  | `bin import bins.json`           |
 | `bin update [binary...]`    | Update binaries (all or specified)         | `bin update`                     |
 | `bin remove <binary...>`    | Remove one or more binaries                | `bin remove gh kubectl`          |
 | `bin ensure`                | Ensure all configured binaries are present | `bin ensure`                     |
@@ -62,6 +64,15 @@ scoop install extras/bin
 | `bin help`                  | Show help for any command                  | `bin help install`               |
 
 **Tips**: if `bin` is unable to found the right package, try `bin install -a` to show all possible download options (skip scoring & filtering).
+
+`bin export` writes JSON to stdout by default and can write to a file when `[file]` is provided.  
+`bin import` reads JSON from stdin by default and can read from a file when `[file]` is provided.  
+Imported binaries are mapped to your local default path using the exported binary `name`.
+
+```shell
+bin export > bins.json
+bin import < bins.json
+```
 
 ## 🎯 Supported providers
 
