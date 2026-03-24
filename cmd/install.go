@@ -1,11 +1,13 @@
 package cmd
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 
 	"github.com/caarlos0/log"
 	"github.com/marcosnils/bin/pkg/config"
+	"github.com/marcosnils/bin/pkg/prompt"
 	"github.com/marcosnils/bin/pkg/providers"
 	"github.com/spf13/cobra"
 )
@@ -33,6 +35,26 @@ func newInstallCmd() *installCmd {
 		Args:          cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			u := args[0]
+			normalizedURL, requestedVersion, hasExplicitVersion, err := providers.NormalizeGitHubURL(u, root.opts.provider)
+			if err != nil {
+				return err
+			}
+
+			pinVersion := false
+			if hasExplicitVersion {
+				err := prompt.Confirm(fmt.Sprintf("Detected release URL for version %s. Do you want to pin this version?", requestedVersion))
+				if err == nil {
+					pinVersion = true
+				} else if err.Error() != "command aborted" {
+					return err
+				}
+			}
+
+			fetchOpts := providers.FetchOpts{All: root.opts.all}
+			if requestedVersion != "" {
+				fetchOpts.Version = requestedVersion
+			}
+
 			defaultPath := config.Get().DefaultPath
 
 			var resolvedPath string
@@ -50,11 +72,12 @@ func newInstallCmd() *installCmd {
 			// and triger the update process if that's the case
 
 			res, err := installBinary(InstallOpts{
-				URL:         u,
+				URL:         normalizedURL,
 				Provider:    root.opts.provider,
 				Path:        resolvedPath,
 				Force:       root.opts.force,
-				FetchOpts:   providers.FetchOpts{All: root.opts.all},
+				Pinned:      pinVersion,
+				FetchOpts:   fetchOpts,
 				ResolvePath: true,
 			})
 			if err != nil {
