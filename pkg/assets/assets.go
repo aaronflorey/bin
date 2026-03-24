@@ -251,37 +251,79 @@ func (f *Filter) FilterAssets(repoName string, as []*Asset) (*FilteredAsset, err
 func SanitizeName(name, version string) string {
 	name = strings.ToLower(name)
 	replacements := []string{}
+	separators := []string{"_", "-", "."}
+	innerSeparators := []string{"_", "-", "."}
+
+	osNames := appendUnique(
+		resolver.GetOS(),
+		"darwin", "macos", "osx", "apple",
+		"linux",
+		"windows", "win",
+		"freebsd", "openbsd", "netbsd", "dragonfly",
+		"android",
+	)
+	archNames := appendUnique(
+		resolver.GetArch(),
+		"amd64", "x86_64", "x64",
+		"arm64", "aarch64", "armv7", "armv6", "arm",
+		"386", "i386", "x86",
+	)
 
 	// TODO maybe instead of doing this put everything in a map (set) and then
 	// generate the replacements? IDK.
-	firstPass := true
-	for _, osName := range resolver.GetOS() {
-		for _, archName := range resolver.GetArch() {
-			replacements = append(replacements, "_"+osName+archName, "")
-			replacements = append(replacements, "-"+osName+archName, "")
-			replacements = append(replacements, "."+osName+archName, "")
-
-			if firstPass {
-				replacements = append(replacements, "_"+archName, "")
-				replacements = append(replacements, "-"+archName, "")
-				replacements = append(replacements, "."+archName, "")
+	for _, osName := range osNames {
+		for _, archName := range archNames {
+			for _, sep := range separators {
+				replacements = append(replacements, sep+osName+archName, "")
+				replacements = append(replacements, sep+archName+osName, "")
+				for _, innerSep := range innerSeparators {
+					replacements = append(replacements, sep+osName+innerSep+archName, "")
+					replacements = append(replacements, sep+archName+innerSep+osName, "")
+				}
 			}
 		}
 
-		replacements = append(replacements, "_"+osName, "")
-		replacements = append(replacements, "-"+osName, "")
-		replacements = append(replacements, "."+osName, "")
-
-		firstPass = false
-
+		for _, sep := range separators {
+			replacements = append(replacements, sep+osName, "")
+		}
 	}
 
-	replacements = append(replacements, "_"+version, "")
-	replacements = append(replacements, "_"+strings.TrimPrefix(version, "v"), "")
-	replacements = append(replacements, "-"+version, "")
-	replacements = append(replacements, "-"+strings.TrimPrefix(version, "v"), "")
+	for _, archName := range archNames {
+		for _, sep := range separators {
+			replacements = append(replacements, sep+archName, "")
+		}
+	}
+
+	trimmedVersion := strings.TrimPrefix(strings.ToLower(version), "v")
+	for _, sep := range separators {
+		replacements = append(replacements, sep+trimmedVersion, "")
+		replacements = append(replacements, sep+"v"+trimmedVersion, "")
+	}
+
 	r := strings.NewReplacer(replacements...)
-	return r.Replace(name)
+	name = r.Replace(name)
+	name = strings.Trim(name, "._-")
+	name = strings.ReplaceAll(name, "__", "_")
+	name = strings.ReplaceAll(name, "--", "-")
+	name = strings.ReplaceAll(name, "..", ".")
+	return strings.Trim(name, "._-")
+}
+
+func appendUnique(values []string, additions ...string) []string {
+	out := make([]string, 0, len(values)+len(additions))
+	seen := map[string]struct{}{}
+	for _, v := range append(values, additions...) {
+		v = strings.ToLower(v)
+		if v == "" {
+			continue
+		}
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	return out
 }
 
 // ProcessURL processes a FilteredAsset by uncompressing/unarchiving the URL of the asset.
