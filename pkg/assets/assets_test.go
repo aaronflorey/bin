@@ -45,6 +45,7 @@ func TestSanitizeName(t *testing.T) {
 		{"launchpad-linux-x64", "1.2.0-rc.1", "launchpad", testLinuxAMDResolver},
 		{"launchpad-win-x64.exe", "1.2.0-rc.1", "launchpad.exe", testWindowsAMDResolver},
 		{"bin_0.0.1_Windows_x86_64.exe", "0.0.1", "bin.exe", testWindowsAMDResolver},
+		{"dummyhttp-1.1.3-aarch64-apple-darwin", "v1.1.3", "dummyhttp", testDarwinARMResolver},
 	}
 
 	for _, c := range cases {
