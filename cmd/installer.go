@@ -42,6 +42,9 @@ type InstallOpts struct {
 	// ConfigPath, if set, is stored in config instead of the resolved
 	// path. Used by ensure where the config stores unexpanded env vars.
 	ConfigPath string
+
+	// Pinned marks this binary as pinned in config after installation.
+	Pinned bool
 }
 
 // InstallResult holds the outcome of a successful installation.
@@ -88,6 +91,11 @@ func installBinary(opts InstallOpts) (*InstallResult, error) {
 		}
 	}
 
+	pinned := opts.Pinned
+	if existing, ok := config.Get().Bins[configPath]; ok {
+		pinned = pinned || existing.Pinned
+	}
+
 	err = config.UpsertBinary(&config.Binary{
 		RemoteName:  pResult.Name,
 		Path:        configPath,
@@ -96,6 +104,7 @@ func installBinary(opts InstallOpts) (*InstallResult, error) {
 		URL:         opts.URL,
 		Provider:    p.GetID(),
 		PackagePath: pResult.PackagePath,
+		Pinned:      pinned,
 	})
 	if err != nil {
 		return nil, err
