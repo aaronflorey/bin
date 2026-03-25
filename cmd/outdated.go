@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/marcosnils/bin/pkg/config"
-	"github.com/marcosnils/bin/pkg/providers"
+	"github.com/aaronflorey/bin/pkg/config"
+	"github.com/aaronflorey/bin/pkg/providers"
 	"github.com/spf13/cobra"
 )
 

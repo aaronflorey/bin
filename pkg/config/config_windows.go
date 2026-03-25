@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/aaronflorey/bin/pkg/options"
 	"github.com/caarlos0/log"
-	"github.com/marcosnils/bin/pkg/options"
 )
 
 // getDefaultPath reads the user's PATH variable

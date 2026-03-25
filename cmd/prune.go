@@ -3,9 +3,9 @@ package cmd
 import (
 	"os"
 
+	"github.com/aaronflorey/bin/pkg/config"
+	"github.com/aaronflorey/bin/pkg/prompt"
 	"github.com/caarlos0/log"
-	"github.com/marcosnils/bin/pkg/config"
-	"github.com/marcosnils/bin/pkg/prompt"
 	"github.com/spf13/cobra"
 )
 

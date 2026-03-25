@@ -8,9 +8,9 @@ import (
 	"os"
 	"strings"
 
+	"github.com/aaronflorey/bin/pkg/assets"
 	"github.com/caarlos0/log"
 	"github.com/google/go-github/v73/github"
-	"github.com/marcosnils/bin/pkg/assets"
 	"golang.org/x/oauth2"
 )
 

@@ -9,9 +9,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/aaronflorey/bin/pkg/assets"
 	"github.com/caarlos0/log"
 	"github.com/coreos/go-semver/semver"
-	"github.com/marcosnils/bin/pkg/assets"
 	"github.com/yuin/goldmark"
 	goldast "github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/text"

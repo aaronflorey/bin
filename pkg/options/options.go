@@ -5,7 +5,7 @@ import (
 	"io"
 	"strconv"
 
-	"github.com/marcosnils/bin/pkg/spinner"
+	"github.com/aaronflorey/bin/pkg/spinner"
 )
 
 type LiteralStringer string
