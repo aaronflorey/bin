@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/aaronflorey/bin/pkg/options"
@@ -19,6 +20,12 @@ import (
 // TODO add feature to prompt the user which to select
 // if many paths are found
 func getDefaultPath() (string, error) {
+	localBin, err := ensureUserLocalBinDir()
+	if err == nil {
+		return localBin, nil
+	}
+	log.Debugf("Could not prepare ~/.local/bin: %v", err)
+
 	penv := os.Getenv("PATH")
 	log.Debugf("User PATH is [%s]", penv)
 	opts := map[fmt.Stringer]struct{}{}
@@ -52,6 +59,24 @@ func getDefaultPath() (string, error) {
 		return "", err
 	}
 	return choice.(fmt.Stringer).String(), nil
+}
+
+func ensureUserLocalBinDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+
+	dir := filepath.Join(home, ".local", "bin")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+
+	if err := checkDirExistsAndWritable(dir); err != nil {
+		return "", err
+	}
+
+	return dir, nil
 }
 
 func checkDirExistsAndWritable(dir string) error {
