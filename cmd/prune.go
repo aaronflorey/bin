@@ -54,6 +54,7 @@ func newPruneCmd() *pruneCmd {
 	}
 
 	root.cmd = cmd
+	enableSpinner(root.cmd)
 	root.cmd.Flags().BoolVarP(&root.opts.force, "force", "f", false, "Bypass confirmation prompt")
 	return root
 }

@@ -64,6 +64,7 @@ func newOutdatedCmd() *outdatedCmd {
 	}
 
 	root.cmd = cmd
+	enableSpinner(root.cmd)
 	root.cmd.Flags().StringVar(&root.opts.format, "format", "text", "Output format: text|json")
 	return root
 }

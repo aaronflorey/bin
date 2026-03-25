@@ -37,7 +37,7 @@ func newRemoveCmd() *removeCmd {
 				bp, err := getBinPath(p)
 
 				if errors.Is(err, exec.ErrNotFound) || errors.Is(err, os.ErrNotExist) {
-					fmt.Fprintf(os.Stderr, "binary %s not found in PATH, skipping\n", p)
+					fmt.Fprintf(cmd.ErrOrStderr(), "binary %s not found in PATH, skipping\n", p)
 				} else if err != nil {
 					return err
 				}
@@ -60,5 +60,6 @@ func newRemoveCmd() *removeCmd {
 	}
 
 	root.cmd = cmd
+	enableSpinner(root.cmd)
 	return root
 }
