@@ -120,7 +120,7 @@ func installBinary(opts InstallOpts) (*InstallResult, error) {
 	if len(opts.ConfigPath) > 0 {
 		configPath = opts.ConfigPath
 	} else {
-		configPath, err = filepath.Abs(resolvedPath)
+		configPath, err = absExpandedPath(resolvedPath)
 		if err != nil {
 			return nil, fmt.Errorf("error converting to absolute path: %w", err)
 		}
@@ -159,13 +159,17 @@ func existingConfigBinary(opts InstallOpts) (*config.Binary, bool) {
 		return b, ok
 	}
 
-	absPath, err := filepath.Abs(opts.Path)
+	absPath, err := absExpandedPath(opts.Path)
 	if err != nil {
 		return nil, false
 	}
 
 	b, ok := config.Get().Bins[absPath]
 	return b, ok
+}
+
+func absExpandedPath(path string) (string, error) {
+	return filepath.Abs(os.ExpandEnv(path))
 }
 
 func ensureReleaseAge(providerID, version string, publishedAt *time.Time, minAgeDays int) error {
