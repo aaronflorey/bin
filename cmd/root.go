@@ -88,6 +88,7 @@ func newRootCmd(version string, exit func(int)) *rootCmd {
 	cmd.AddCommand(
 		newInstallCmd().cmd,
 		newEnsureCmd().cmd,
+		newOutdatedCmd().cmd,
 		newUpdateCmd().cmd,
 		newExportCmd().cmd,
 		newImportCmd().cmd,
