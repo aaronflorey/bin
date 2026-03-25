@@ -83,12 +83,12 @@ func (g *hashiCorp) Fetch(opts *FetchOpts) (*File, error) {
 		log.Infof("Getting %s release for %s", g.tag, g.repo)
 		release, err = g.getRelease(g.repo, g.tag)
 	} else {
-		var version string
-		version, _, err = g.GetLatestVersion()
+		var releaseInfo *ReleaseInfo
+		releaseInfo, err = g.GetLatestVersion()
 		if err != nil {
 			return nil, err
 		}
-		release, err = g.getRelease(g.repo, version)
+		release, err = g.getRelease(g.repo, releaseInfo.Version)
 	}
 
 	if err != nil {
@@ -124,15 +124,15 @@ func (g *hashiCorp) Fetch(opts *FetchOpts) (*File, error) {
 
 // GetLatestVersion checks the latest repo release and
 // returns the corresponding name and url to fetch the version
-func (g *hashiCorp) GetLatestVersion() (string, string, error) {
+func (g *hashiCorp) GetLatestVersion() (*ReleaseInfo, error) {
 	log.Debugf("Getting latest release for %s", g.repo)
 
 	releases, err := g.listReleases(g.repo)
 	if err != nil {
-		return "", "", err
+		return nil, err
 	}
 	if len(releases.Versions) == 0 {
-		return "", "", fmt.Errorf("no releases found for %s", g.repo)
+		return nil, fmt.Errorf("no releases found for %s", g.repo)
 	}
 	var svs semver.Versions
 	for _, version := range releases.Versions {
@@ -146,7 +146,7 @@ func (g *hashiCorp) GetLatestVersion() (string, string, error) {
 		}
 	}
 	if len(svs) == 0 {
-		return "", "", fmt.Errorf("no semver versions found for %s", g.repo)
+		return nil, fmt.Errorf("no semver versions found for %s", g.repo)
 	}
 	sort.Sort(svs)
 	highestVersion := svs[len(svs)-1]
@@ -169,16 +169,19 @@ func (g *hashiCorp) GetLatestVersion() (string, string, error) {
 		}
 		choice, err := options.Select("Select file to download:", generic)
 		if err != nil {
-			return "", "", err
+			return nil, err
 		}
 		highestVersion = choice.(*semver.Version)
 	}
 	release, err := g.getRelease(g.repo, highestVersion.String())
 	if err != nil {
-		return "", "", err
+		return nil, err
 	}
 
-	return release.Version, g.buildHashiCorpAPIURL(g.repo, release.Version), nil
+	return &ReleaseInfo{
+		Version: release.Version,
+		URL:     g.buildHashiCorpAPIURL(g.repo, release.Version),
+	}, nil
 }
 
 func newHashiCorp(u *url.URL) (Provider, error) {

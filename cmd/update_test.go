@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/aaronflorey/bin/pkg/config"
 	"github.com/aaronflorey/bin/pkg/providers"
@@ -10,16 +12,28 @@ import (
 
 type mockProvider struct {
 	providers.Provider
+	id               string
 	latestVersion    string
 	latestVersionURL string
+	publishedAt      *time.Time
 	err              error
 }
 
-func (m mockProvider) GetLatestVersion() (string, string, error) {
-	return m.latestVersion, m.latestVersionURL, m.err
+func (m mockProvider) GetLatestVersion() (*providers.ReleaseInfo, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return &providers.ReleaseInfo{
+		Version:     m.latestVersion,
+		URL:         m.latestVersionURL,
+		PublishedAt: m.publishedAt,
+	}, nil
 }
 
 func (m mockProvider) GetID() string {
+	if m.id != "" {
+		return m.id
+	}
 	return "github"
 }
 
@@ -27,12 +41,16 @@ func TestGetLatestVersion(t *testing.T) {
 	type mockValues struct {
 		latestVersion    string
 		latestVersionURL string
+		publishedAt      *time.Time
 		err              error
 	}
+	oldRelease := time.Now().AddDate(0, 0, -10)
+	newRelease := time.Now().AddDate(0, 0, -2)
 	cases := []struct {
 		in  *config.Binary
 		m   mockValues
 		out *updateInfo
+		err string
 	}{
 		{
 			&config.Binary{
@@ -42,11 +60,12 @@ func TestGetLatestVersion(t *testing.T) {
 				RemoteName: "tool-linux-x64",
 				Provider:   "github",
 			},
-			mockValues{"1.1.1", "https://example.test/acme/tool/releases/download/1.1.1/tool-linux-x64", nil},
+			mockValues{"1.1.1", "https://example.test/acme/tool/releases/download/1.1.1/tool-linux-x64", &oldRelease, nil},
 			&updateInfo{
 				version: "1.1.1",
 				url:     "https://example.test/acme/tool/releases/download/1.1.1/tool-linux-x64",
 			},
+			"",
 		},
 		{
 			&config.Binary{
@@ -56,18 +75,48 @@ func TestGetLatestVersion(t *testing.T) {
 				RemoteName: "tool-linux-x64",
 				Provider:   "github",
 			},
-			mockValues{"1.1.1", "https://example.test/acme/tool/releases/download/1.1.1/tool-linux-x64", nil},
+			mockValues{"1.1.1", "https://example.test/acme/tool/releases/download/1.1.1/tool-linux-x64", &oldRelease, nil},
 			nil,
+			"",
+		},
+		{
+			&config.Binary{
+				Path:       "/home/user/bin/tool",
+				Version:    "1.1.0",
+				URL:        "https://example.test/acme/tool/releases/download/1.1.0/tool-linux-x64",
+				RemoteName: "tool-linux-x64",
+				Provider:   "github",
+				MinAgeDays: 7,
+			},
+			mockValues{"1.1.1", "https://example.test/acme/tool/releases/download/1.1.1/tool-linux-x64", &newRelease, nil},
+			nil,
+			"",
+		},
+		{
+			&config.Binary{
+				Path:       "/home/user/bin/tool",
+				Version:    "1.1.0",
+				URL:        "https://example.test/acme/tool/releases/download/1.1.0/tool-linux-x64",
+				RemoteName: "tool-linux-x64",
+				Provider:   "docker",
+				MinAgeDays: 7,
+			},
+			mockValues{"1.1.1", "https://example.test/acme/tool/releases/download/1.1.1/tool-linux-x64", nil, nil},
+			nil,
+			`provider "docker" does not expose release publication time`,
 		},
 	}
 
 	for _, c := range cases {
-		p := mockProvider{latestVersion: c.m.latestVersion, latestVersionURL: c.m.latestVersionURL, err: c.m.err}
-		if v, err := getLatestVersion(c.in, p); err != nil {
+		p := mockProvider{id: c.in.Provider, latestVersion: c.m.latestVersion, latestVersionURL: c.m.latestVersionURL, publishedAt: c.m.publishedAt, err: c.m.err}
+		if v, err := getLatestVersion(c.in, p); c.err != "" {
+			if err == nil || !strings.Contains(err.Error(), c.err) {
+				t.Fatalf("expected error %q, got %v", c.err, err)
+			}
+		} else if err != nil {
 			t.Fatalf("Error during getLatestVersion(%#v, %#v): %v", c.in, p, err)
 		} else if !reflect.DeepEqual(v, c.out) {
 			t.Fatalf("For case %#v: %#v does not match %#v", c.in, v, c.out)
 		}
 	}
-
 }

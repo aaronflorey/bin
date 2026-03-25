@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/aaronflorey/bin/pkg/assets"
 	"github.com/caarlos0/log"
@@ -75,25 +76,42 @@ func (g *gitHub) Fetch(opts *FetchOpts) (*File, error) {
 	// TODO calculate file hash. Not sure if we can / should do it here
 	// since we don't want to read the file unnecesarily. Additionally, sometimes
 	// releases have .sha256 files, so it'd be nice to check for those also
-	file := &File{Data: outFile.Source, Name: outFile.Name, Version: version, PackagePath: outFile.PackagePath}
+	file := &File{
+		Data:        outFile.Source,
+		Name:        outFile.Name,
+		Version:     version,
+		PackagePath: outFile.PackagePath,
+		PublishedAt: githubPublishedAt(release),
+	}
 
 	return file, nil
 }
 
 // GetLatestVersion checks the latest repo release and
 // returns the corresponding name and url to fetch the version
-func (g *gitHub) GetLatestVersion() (string, string, error) {
+func (g *gitHub) GetLatestVersion() (*ReleaseInfo, error) {
 	log.Debugf("Getting latest release for %s/%s", g.owner, g.repo)
 	release, _, err := g.client.Repositories.GetLatestRelease(context.TODO(), g.owner, g.repo)
 	if err != nil {
-		return "", "", err
+		return nil, err
 	}
 
-	return release.GetTagName(), release.GetHTMLURL(), nil
+	return &ReleaseInfo{
+		Version:     release.GetTagName(),
+		URL:         release.GetHTMLURL(),
+		PublishedAt: githubPublishedAt(release),
+	}, nil
 }
 
 func (g *gitHub) GetID() string {
 	return "github"
+}
+
+func githubPublishedAt(release *github.RepositoryRelease) *time.Time {
+	if release == nil || release.PublishedAt == nil {
+		return nil
+	}
+	return PtrTime(release.PublishedAt.Time)
 }
 
 func newGitHub(u *url.URL) (Provider, error) {

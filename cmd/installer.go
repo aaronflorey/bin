@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/aaronflorey/bin/pkg/assets"
 	"github.com/aaronflorey/bin/pkg/config"
@@ -62,6 +63,10 @@ type InstallOpts struct {
 
 	// Pinned marks this binary as pinned in config after installation.
 	Pinned bool
+
+	// MinAgeDays, when set, persists the minimum allowed release age
+	// for this binary in config.
+	MinAgeDays *int
 }
 
 // InstallResult holds the outcome of a successful installation.
@@ -82,6 +87,19 @@ func installBinary(opts InstallOpts) (*InstallResult, error) {
 
 	pResult, err := p.Fetch(&opts.FetchOpts)
 	if err != nil {
+		return nil, err
+	}
+
+	existing, _ := existingConfigBinary(opts)
+
+	minAgeDays := 0
+	if existing != nil {
+		minAgeDays = existing.MinAgeDays
+	}
+	if opts.MinAgeDays != nil {
+		minAgeDays = *opts.MinAgeDays
+	}
+	if err := ensureReleaseAge(p.GetID(), pResult.Version, pResult.PublishedAt, minAgeDays); err != nil {
 		return nil, err
 	}
 
@@ -109,7 +127,7 @@ func installBinary(opts InstallOpts) (*InstallResult, error) {
 	}
 
 	pinned := opts.Pinned
-	if existing, ok := config.Get().Bins[configPath]; ok {
+	if existing != nil {
 		pinned = pinned || existing.Pinned
 	}
 
@@ -122,6 +140,7 @@ func installBinary(opts InstallOpts) (*InstallResult, error) {
 		Provider:    p.GetID(),
 		PackagePath: pResult.PackagePath,
 		Pinned:      pinned,
+		MinAgeDays:  minAgeDays,
 	})
 	if err != nil {
 		return nil, err
@@ -132,6 +151,43 @@ func installBinary(opts InstallOpts) (*InstallResult, error) {
 		Version: pResult.Version,
 		Path:    configPath,
 	}, nil
+}
+
+func existingConfigBinary(opts InstallOpts) (*config.Binary, bool) {
+	if len(opts.ConfigPath) > 0 {
+		b, ok := config.Get().Bins[opts.ConfigPath]
+		return b, ok
+	}
+
+	absPath, err := filepath.Abs(opts.Path)
+	if err != nil {
+		return nil, false
+	}
+
+	b, ok := config.Get().Bins[absPath]
+	return b, ok
+}
+
+func ensureReleaseAge(providerID, version string, publishedAt *time.Time, minAgeDays int) error {
+	if minAgeDays == 0 {
+		return nil
+	}
+	if publishedAt == nil {
+		return providers.ReleaseAgeError(providerID, version)
+	}
+
+	minAllowedTime := time.Now().AddDate(0, 0, -minAgeDays)
+	if publishedAt.After(minAllowedTime) {
+		return fmt.Errorf(
+			"release %s from provider %q is only %d days old; requires at least %d days",
+			version,
+			providerID,
+			int(time.Since(*publishedAt).Hours()/24),
+			minAgeDays,
+		)
+	}
+
+	return nil
 }
 
 // checkFinalPath checks if path exists and if it's a dir or not
