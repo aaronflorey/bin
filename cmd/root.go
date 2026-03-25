@@ -67,6 +67,10 @@ func newRootCmd(version string, exit func(int)) *rootCmd {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			if cmd.Name() == "version" {
+				return
+			}
+
 			if root.debug {
 				log.SetLevel(log.DebugLevel)
 				log.Debugf("debug logs enabled, version: %s\n", version)
@@ -92,6 +96,7 @@ func newRootCmd(version string, exit func(int)) *rootCmd {
 		newRemoveCmd().cmd,
 		newListCmd().cmd,
 		newPruneCmd().cmd,
+		newVersionCmd(version).cmd,
 	)
 
 	root.cmd = cmd
