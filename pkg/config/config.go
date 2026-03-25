@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"runtime"
@@ -32,6 +33,59 @@ type config struct {
 	DefaultPath  string             `json:"default_path"`
 	DefaultChmod string             `json:"default_chmod,omitempty"`
 	Bins         map[string]*Binary `json:"bins"`
+	Hooks        []RunHook          `json:"hooks,omitempty"`
+}
+
+// HookType is a string alias representing lifecycle hook event names.
+type HookType = string
+
+const (
+	// PreInstall is triggered before an installation begins.
+	PreInstall HookType = "pre-install"
+	// PostInstall is triggered after an installation completes.
+	PostInstall HookType = "post-install"
+	// PreUpdate is triggered before an update begins.
+	PreUpdate HookType = "pre-update"
+	// PostUpdate is triggered after an update completes.
+	PostUpdate HookType = "post-update"
+	// PreRemove is triggered before a removal begins.
+	PreRemove HookType = "pre-remove"
+	// PostRemove is triggered after a removal completes.
+	PostRemove HookType = "post-remove"
+)
+
+// RunHook defines a shell command to run at a specific lifecycle event.
+type RunHook struct {
+	Type    HookType `json:"type"`
+	Command string   `json:"command"`
+	Args    []string `json:"args,omitempty"`
+}
+
+// GetHooks returns all configured hooks matching the given HookType.
+func GetHooks(t HookType) []RunHook {
+	hooks := make([]RunHook, 0)
+	for _, hook := range cfg.Hooks {
+		if hook.Type == t {
+			hooks = append(hooks, hook)
+		}
+	}
+	return hooks
+}
+
+// ExecuteHooks runs each hook in sequence, logging errors without aborting.
+func ExecuteHooks(hooks []RunHook) {
+	for _, hook := range hooks {
+		if hook.Command == "" {
+			continue
+		}
+		log.Infof("Executing %s hook: %s %v", hook.Type, hook.Command, hook.Args)
+		output, err := exec.Command(hook.Command, hook.Args...).CombinedOutput()
+		if err != nil {
+			log.Errorf("Hook %s failed: %v — output: %s", hook.Command, err, string(output))
+			continue
+		}
+		log.Debugf("Hook %s completed successfully", hook.Command)
+	}
 }
 
 type Binary struct {

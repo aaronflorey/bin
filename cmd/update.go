@@ -69,6 +69,8 @@ func newUpdateCmd() *updateCmd {
 				return wrapErrorWithCode(fmt.Errorf("Updates found, exit (dry-run mode)."), 3, "")
 			}
 
+			config.ExecuteHooks(config.GetHooks(config.PreUpdate))
+
 			if len(updates) > 0 && !root.opts.yesToUpdate {
 				for _, err := range updateFailures {
 					log.Warnf("%v", err)
@@ -111,6 +113,9 @@ func newUpdateCmd() *updateCmd {
 			for _, err := range updateFailures {
 				log.Warnf("%v", err)
 			}
+
+			config.ExecuteHooks(config.GetHooks(config.PostUpdate))
+
 			// TODO: Return wrapping error with specific exit code if len(updateFailures) > 0?
 			return nil
 		},
