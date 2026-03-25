@@ -36,27 +36,27 @@ func TestGetLatestVersion(t *testing.T) {
 	}{
 		{
 			&config.Binary{
-				Path:       "/home/user/bin/launchpad",
+				Path:       "/home/user/bin/tool",
 				Version:    "1.1.0",
-				URL:        "https://github.com/Mirantis/launchpad/releases/download/1.1.0/launchpad-linux-x64",
-				RemoteName: "launchpad-linux-x64",
+				URL:        "https://example.test/acme/tool/releases/download/1.1.0/tool-linux-x64",
+				RemoteName: "tool-linux-x64",
 				Provider:   "github",
 			},
-			mockValues{"1.1.1", "https://github.com/Mirantis/launchpad/releases/download/1.1.1/launchpad-linux-x64", nil},
+			mockValues{"1.1.1", "https://example.test/acme/tool/releases/download/1.1.1/tool-linux-x64", nil},
 			&updateInfo{
 				version: "1.1.1",
-				url:     "https://github.com/Mirantis/launchpad/releases/download/1.1.1/launchpad-linux-x64",
+				url:     "https://example.test/acme/tool/releases/download/1.1.1/tool-linux-x64",
 			},
 		},
 		{
 			&config.Binary{
-				Path:       "/home/user/bin/launchpad",
+				Path:       "/home/user/bin/tool",
 				Version:    "1.2.0-rc.1",
-				URL:        "https://github.com/Mirantis/launchpad/releases/download/1.2.0-rc.1/launchpad-linux-x64",
-				RemoteName: "launchpad-linux-x64",
+				URL:        "https://example.test/acme/tool/releases/download/1.2.0-rc.1/tool-linux-x64",
+				RemoteName: "tool-linux-x64",
 				Provider:   "github",
 			},
-			mockValues{"1.1.1", "https://github.com/Mirantis/launchpad/releases/download/1.1.1/launchpad-linux-x64", nil},
+			mockValues{"1.1.1", "https://example.test/acme/tool/releases/download/1.1.1/tool-linux-x64", nil},
 			nil,
 		},
 	}

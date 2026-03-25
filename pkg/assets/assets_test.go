@@ -11,6 +11,7 @@ import (
 type mockOSResolver struct {
 	OS                   []string
 	Arch                 []string
+	LibC                 []string
 	OSSpecificExtensions []string
 }
 
@@ -22,12 +23,17 @@ func (m *mockOSResolver) GetArch() []string {
 	return m.Arch
 }
 
+func (m *mockOSResolver) GetLibC() []string {
+	return m.LibC
+}
+
 func (m *mockOSResolver) GetOSSpecificExtensions() []string {
 	return m.OSSpecificExtensions
 }
 
 var (
-	testLinuxAMDResolver   = &mockOSResolver{OS: []string{"linux"}, Arch: []string{"amd64", "x86_64", "x64", "64"}, OSSpecificExtensions: []string{"AppImage"}}
+	testLinuxAMDResolver   = &mockOSResolver{OS: []string{"linux"}, Arch: []string{"amd64", "x86_64", "x64", "64"}, LibC: []string{"glibc", "gnu"}, OSSpecificExtensions: []string{"AppImage"}}
+	testLinuxMuslResolver  = &mockOSResolver{OS: []string{"linux"}, Arch: []string{"amd64", "x86_64", "x64", "64"}, LibC: []string{"musl"}, OSSpecificExtensions: []string{"AppImage"}}
 	testWindowsAMDResolver = &mockOSResolver{OS: []string{"windows", "win"}, Arch: []string{"amd64", "x86_64", "x64", "64"}, OSSpecificExtensions: []string{"exe"}}
 	testDarwinARMResolver  = &mockOSResolver{OS: []string{"darwin", "macos", "osx"}, Arch: []string{"arm64", "aarch64"}}
 )
@@ -42,12 +48,12 @@ func TestSanitizeName(t *testing.T) {
 		{"bin_amd64_linux", "v0.0.1", "bin", testLinuxAMDResolver},
 		{"bin_0.0.1_amd64_linux", "0.0.1", "bin", testLinuxAMDResolver},
 		{"bin_0.0.1_amd64_linux", "v0.0.1", "bin", testLinuxAMDResolver},
-		{"gitlab-runner-linux-amd64", "v13.2.1", "gitlab-runner", testLinuxAMDResolver},
-		{"jq-linux64", "jq-1.5", "jq", testLinuxAMDResolver},
-		{"launchpad-linux-x64", "1.2.0-rc.1", "launchpad", testLinuxAMDResolver},
-		{"launchpad-win-x64.exe", "1.2.0-rc.1", "launchpad.exe", testWindowsAMDResolver},
+		{"tool-linux-amd64", "v13.2.1", "tool", testLinuxAMDResolver},
+		{"tool-linux64", "tool-1.5", "tool", testLinuxAMDResolver},
+		{"tool-linux-x64", "1.2.0-rc.1", "tool", testLinuxAMDResolver},
+		{"tool-win-x64.exe", "1.2.0-rc.1", "tool.exe", testWindowsAMDResolver},
 		{"bin_0.0.1_Windows_x86_64.exe", "0.0.1", "bin.exe", testWindowsAMDResolver},
-		{"dummyhttp-1.1.3-aarch64-apple-darwin", "v1.1.3", "dummyhttp", testDarwinARMResolver},
+		{"tool-1.1.3-aarch64-apple-darwin", "v1.1.3", "tool", testDarwinARMResolver},
 	}
 
 	for _, c := range cases {
@@ -79,78 +85,78 @@ func TestFilterAssets(t *testing.T) {
 		resolver platformResolver
 	}{
 		{args{"bin", []*Asset{
-			{Name: "bin_0.0.1_Linux_x86_64", URL: "https://github.com/marcosnils/bin/releases/download/v0.0.1/bin_0.0.1_Linux_x86_64"},
-			{Name: "bin_0.0.1_Linux_i386", URL: "https://github.com/marcosnils/bin/releases/download/v0.0.1/bin_0.0.1_Linux_i386"},
-			{Name: "bin_0.0.1_Darwin_x86_64", URL: "https://github.com/marcosnils/bin/releases/download/v0.0.1/bin_0.0.1_Darwin_x86_64"},
+			{Name: "bin_0.0.1_Linux_x86_64", URL: "https://example.test/acme/bin/releases/download/v0.0.1/bin_0.0.1_Linux_x86_64"},
+			{Name: "bin_0.0.1_Linux_i386", URL: "https://example.test/acme/bin/releases/download/v0.0.1/bin_0.0.1_Linux_i386"},
+			{Name: "bin_0.0.1_Darwin_x86_64", URL: "https://example.test/acme/bin/releases/download/v0.0.1/bin_0.0.1_Darwin_x86_64"},
 		}}, "bin_0.0.1_Linux_x86_64", testLinuxAMDResolver},
 		{args{"bin", []*Asset{
-			{Name: "bin_0.1.0_Windows_i386.exe", URL: "https://github.com/marcosnils/bin/releases/download/v0.0.1/bin_0.1.0_Windows_i386.exe"},
-			{Name: "bin_0.1.0_Linux_x86_64", URL: "https://github.com/marcosnils/bin/releases/download/v0.0.1/bin_0.1.0_Linux_x86_64"},
-			{Name: "bin_0.1.0_Darwin_x86_64", URL: "https://github.com/marcosnils/bin/releases/download/v0.0.1/bin_0.1.0_Darwin_x86_64"},
+			{Name: "bin_0.1.0_Windows_i386.exe", URL: "https://example.test/acme/bin/releases/download/v0.0.1/bin_0.1.0_Windows_i386.exe"},
+			{Name: "bin_0.1.0_Linux_x86_64", URL: "https://example.test/acme/bin/releases/download/v0.0.1/bin_0.1.0_Linux_x86_64"},
+			{Name: "bin_0.1.0_Darwin_x86_64", URL: "https://example.test/acme/bin/releases/download/v0.0.1/bin_0.1.0_Darwin_x86_64"},
 		}}, "bin_0.1.0_Linux_x86_64", testLinuxAMDResolver},
 		{args{"bin", []*Asset{
-			{Name: "bin_0.1.0_Windows_i386.exe", URL: "https://github.com/marcosnils/bin/releases/download/v0.0.1/bin_0.1.0_Windows_i386.exe"},
-			{Name: "bin_0.1.0_Linux_x86_64", URL: "https://github.com/marcosnils/bin/releases/download/v0.0.1/bin_0.1.0_Linux_x86_64"},
-			{Name: "bin_0.1.0_Darwin_x86_64", URL: "https://github.com/marcosnils/bin/releases/download/v0.0.1/bin_0.1.0_Darwin_x86_64"},
+			{Name: "bin_0.1.0_Windows_i386.exe", URL: "https://example.test/acme/bin/releases/download/v0.0.1/bin_0.1.0_Windows_i386.exe"},
+			{Name: "bin_0.1.0_Linux_x86_64", URL: "https://example.test/acme/bin/releases/download/v0.0.1/bin_0.1.0_Linux_x86_64"},
+			{Name: "bin_0.1.0_Darwin_x86_64", URL: "https://example.test/acme/bin/releases/download/v0.0.1/bin_0.1.0_Darwin_x86_64"},
 		}}, "bin_0.1.0_Linux_x86_64", testLinuxAMDResolver},
-		{args{"gitlab-runner", []*Asset{
-			{Name: "gitlab-runner-windows-amd64", URL: "https://gitlab-runner-downloads.s3.amazonaws.com/v13.2.1/binaries/gitlab-runner-windows-amd64.zip"},
-			{Name: "gitlab-runner-linux-amd64", URL: "https://gitlab-runner-downloads.s3.amazonaws.com/v13.2.1/binaries/gitlab-runner-linux-amd64"},
-			{Name: "gitlab-runner-darwin-amd64", URL: "https://gitlab-runner-downloads.s3.amazonaws.com/v13.2.1/binaries/gitlab-runner-darwin-amd64"},
-		}}, "gitlab-runner-linux-amd64", testLinuxAMDResolver},
-		{args{"yq", []*Asset{
-			{Name: "yq_freebsd_amd64", URL: "https://github.com/mikefarah/yq/releases/download/3.3.2/yq_freebsd_amd64"},
-			{Name: "yq_linux_amd64", URL: "https://github.com/mikefarah/yq/releases/download/3.3.2/yq_linux_amd64"},
-			{Name: "yq_windows_amd64.exe", URL: "https://github.com/mikefarah/yq/releases/download/3.3.2/yq_windows_amd64.exe"},
-		}}, "yq_linux_amd64", testLinuxAMDResolver},
-		{args{"jq", []*Asset{
-			{Name: "jq-win64.exe", URL: "https://github.com/stedolan/jq/releases/download/jq-1.6/jq-win64.exe"},
-			{Name: "jq-linux64", URL: "https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64"},
-			{Name: "jq-osx-amd64", URL: "https://github.com/stedolan/jq/releases/download/jq-1.6/jq-osx-amd64"},
-		}}, "jq-linux64", testLinuxAMDResolver},
+		{args{"tool", []*Asset{
+			{Name: "tool-windows-amd64", URL: "https://downloads.example.test/v13.2.1/binaries/tool-windows-amd64.zip"},
+			{Name: "tool-linux-amd64", URL: "https://downloads.example.test/v13.2.1/binaries/tool-linux-amd64"},
+			{Name: "tool-darwin-amd64", URL: "https://downloads.example.test/v13.2.1/binaries/tool-darwin-amd64"},
+		}}, "tool-linux-amd64", testLinuxAMDResolver},
+		{args{"tool", []*Asset{
+			{Name: "tool_freebsd_amd64", URL: "https://example.test/acme/tool/releases/download/3.3.2/tool_freebsd_amd64"},
+			{Name: "tool_linux_amd64", URL: "https://example.test/acme/tool/releases/download/3.3.2/tool_linux_amd64"},
+			{Name: "tool_windows_amd64.exe", URL: "https://example.test/acme/tool/releases/download/3.3.2/tool_windows_amd64.exe"},
+		}}, "tool_linux_amd64", testLinuxAMDResolver},
+		{args{"tool", []*Asset{
+			{Name: "tool-win64.exe", URL: "https://example.test/acme/tool/releases/download/tool-1.6/tool-win64.exe"},
+			{Name: "tool-linux64", URL: "https://example.test/acme/tool/releases/download/tool-1.6/tool-linux64"},
+			{Name: "tool-osx-amd64", URL: "https://example.test/acme/tool/releases/download/tool-1.6/tool-osx-amd64"},
+		}}, "tool-linux64", testLinuxAMDResolver},
 		{args{"bin", []*Asset{
-			{Name: "bin_0.0.1_Windows_x86_64.exe", URL: "https://github.com/marcosnils/bin/releases/download/v0.0.1/bin_0.0.1_Windows_x86_64.exe"},
-			{Name: "bin_0.1.0_Linux_x86_64", URL: "https://github.com/marcosnils/bin/releases/download/v0.0.1/bin_0.1.0_Linux_x86_64"},
-			{Name: "bin_0.1.0_Darwin_x86_64", URL: "https://github.com/marcosnils/bin/releases/download/v0.0.1/bin_0.1.0_Darwin_x86_64"},
+			{Name: "bin_0.0.1_Windows_x86_64.exe", URL: "https://example.test/acme/bin/releases/download/v0.0.1/bin_0.0.1_Windows_x86_64.exe"},
+			{Name: "bin_0.1.0_Linux_x86_64", URL: "https://example.test/acme/bin/releases/download/v0.0.1/bin_0.1.0_Linux_x86_64"},
+			{Name: "bin_0.1.0_Darwin_x86_64", URL: "https://example.test/acme/bin/releases/download/v0.0.1/bin_0.1.0_Darwin_x86_64"},
 		}}, "bin_0.0.1_Windows_x86_64.exe", testWindowsAMDResolver},
-		{args{"tezos", []*Asset{
-			{Name: "x86_64-linux-tezos-binaries.tar.gz", URL: "https://gitlab.com/api/v4/projects/3836952/packages/generic/tezos/8.2.0/x86_64-linux-tezos-binaries.tar.gz"},
-		}}, "x86_64-linux-tezos-binaries.tar.gz", testLinuxAMDResolver},
-		{args{"launchpad", []*Asset{
-			{Name: "launchpad-linux-x64", URL: "https://github.com/Mirantis/launchpad/releases/download/1.2.0-rc.1/launchpad-linux-x64"},
-			{Name: "launchpad-win-x64.exe", URL: "https://github.com/Mirantis/launchpad/releases/download/1.2.0-rc.1/launchpad-win-x64.exe"},
-		}}, "launchpad-linux-x64", testLinuxAMDResolver},
-		{args{"launchpad", []*Asset{
-			{Name: "launchpad-linux-x64", URL: "https://github.com/Mirantis/launchpad/releases/download/1.2.0-rc.1/launchpad-linux-x64"},
-			{Name: "launchpad-win-x64.exe", URL: "https://github.com/Mirantis/launchpad/releases/download/1.2.0-rc.1/launchpad-win-x64.exe"},
-		}}, "launchpad-win-x64.exe", testWindowsAMDResolver},
-		{args{"Cura", []*Asset{
-			{Name: "Ultimaker_Cura-4.7.1-Darwin.dmg", URL: "https://github.com/Ultimaker/Cura/releases/download/4.7.1/Ultimaker_Cura-4.7.1-Darwin.dmg"},
-			{Name: "Ultimaker_Cura-4.7.1-win64.exe", URL: "https://github.com/Ultimaker/Cura/releases/download/4.7.1/Ultimaker_Cura-4.7.1-win64.exe"},
-			{Name: "Ultimaker_Cura-4.7.1-win64.msi", URL: "https://github.com/Ultimaker/Cura/releases/download/4.7.1/Ultimaker_Cura-4.7.1-win64.msi"},
-			{Name: "Ultimaker_Cura-4.7.1.AppImage", URL: "https://github.com/Ultimaker/Cura/releases/download/4.7.1/Ultimaker_Cura-4.7.1.AppImage"},
-			{Name: "Ultimaker_Cura-4.7.1.AppImage.asc", URL: "https://github.com/Ultimaker/Cura/releases/download/4.7.1/Ultimaker_Cura-4.7.1.AppImage.asc"},
-		}}, "Ultimaker_Cura-4.7.1.AppImage", testLinuxAMDResolver},
-		{args{"Cura", []*Asset{
-			{Name: "Ultimaker_Cura-4.7.1-Darwin.dmg", URL: "https://github.com/Ultimaker/Cura/releases/download/4.7.1/Ultimaker_Cura-4.7.1-Darwin.dmg"},
-			{Name: "Ultimaker_Cura-4.7.1-win64.exe", URL: "https://github.com/Ultimaker/Cura/releases/download/4.7.1/Ultimaker_Cura-4.7.1-win64.exe"},
-			{Name: "Ultimaker_Cura-4.7.1-win64.msi", URL: "https://github.com/Ultimaker/Cura/releases/download/4.7.1/Ultimaker_Cura-4.7.1-win64.msi"},
-			{Name: "Ultimaker_Cura-4.7.1.AppImage", URL: "https://github.com/Ultimaker/Cura/releases/download/4.7.1/Ultimaker_Cura-4.7.1.AppImage"},
-			{Name: "Ultimaker_Cura-4.7.1.AppImage.asc", URL: "https://github.com/Ultimaker/Cura/releases/download/4.7.1/Ultimaker_Cura-4.7.1.AppImage.asc"},
-		}}, "Ultimaker_Cura-4.7.1-win64.exe", testWindowsAMDResolver},
-		{args{"usql", []*Asset{
-			{Name: "usql-0.8.2-darwin-amd64.tar.bz2", URL: "https://github.com/xo/usql/releases/download/v0.8.2/usql-0.8.2-darwin-amd64.tar.bz2"},
-			{Name: "usql-0.8.2-linux-amd64.tar.bz2", URL: "https://github.com/xo/usql/releases/download/v0.8.2/usql-0.8.2-linux-amd64.tar.bz2"},
-			{Name: "usql-0.8.2-windows-amd64.zip", URL: "https://github.com/xo/usql/releases/download/v0.8.2/usql-0.8.2-windows-amd64.zip"},
-		}}, "usql-0.8.2-linux-amd64.tar.bz2", testLinuxAMDResolver},
-		{args{"usql", []*Asset{
-			{Name: "usql-0.8.2-darwin-amd64.tar.bz2", URL: "https://github.com/xo/usql/releases/download/v0.8.2/usql-0.8.2-darwin-amd64.tar.bz2"},
-			{Name: "usql-0.8.2-linux-amd64.tar.bz2", URL: "https://github.com/xo/usql/releases/download/v0.8.2/usql-0.8.2-linux-amd64.tar.bz2"},
-			{Name: "usql-0.8.2-windows-amd64.zip", URL: "https://github.com/xo/usql/releases/download/v0.8.2/usql-0.8.2-windows-amd64.zip"},
-		}}, "usql-0.8.2-windows-amd64.zip", testWindowsAMDResolver},
+		{args{"toolset", []*Asset{
+			{Name: "x86_64-linux-toolset-binaries.tar.gz", URL: "https://packages.example.test/api/v4/projects/123/packages/generic/toolset/8.2.0/x86_64-linux-toolset-binaries.tar.gz"},
+		}}, "x86_64-linux-toolset-binaries.tar.gz", testLinuxAMDResolver},
+		{args{"tool", []*Asset{
+			{Name: "tool-linux-x64", URL: "https://example.test/acme/tool/releases/download/1.2.0-rc.1/tool-linux-x64"},
+			{Name: "tool-win-x64.exe", URL: "https://example.test/acme/tool/releases/download/1.2.0-rc.1/tool-win-x64.exe"},
+		}}, "tool-linux-x64", testLinuxAMDResolver},
+		{args{"tool", []*Asset{
+			{Name: "tool-linux-x64", URL: "https://example.test/acme/tool/releases/download/1.2.0-rc.1/tool-linux-x64"},
+			{Name: "tool-win-x64.exe", URL: "https://example.test/acme/tool/releases/download/1.2.0-rc.1/tool-win-x64.exe"},
+		}}, "tool-win-x64.exe", testWindowsAMDResolver},
+		{args{"suite", []*Asset{
+			{Name: "suite-4.7.1-Darwin.dmg", URL: "https://example.test/acme/suite/releases/download/4.7.1/suite-4.7.1-Darwin.dmg"},
+			{Name: "suite-4.7.1-win64.exe", URL: "https://example.test/acme/suite/releases/download/4.7.1/suite-4.7.1-win64.exe"},
+			{Name: "suite-4.7.1-win64.msi", URL: "https://example.test/acme/suite/releases/download/4.7.1/suite-4.7.1-win64.msi"},
+			{Name: "suite-4.7.1.AppImage", URL: "https://example.test/acme/suite/releases/download/4.7.1/suite-4.7.1.AppImage"},
+			{Name: "suite-4.7.1.AppImage.asc", URL: "https://example.test/acme/suite/releases/download/4.7.1/suite-4.7.1.AppImage.asc"},
+		}}, "suite-4.7.1.AppImage", testLinuxAMDResolver},
+		{args{"suite", []*Asset{
+			{Name: "suite-4.7.1-Darwin.dmg", URL: "https://example.test/acme/suite/releases/download/4.7.1/suite-4.7.1-Darwin.dmg"},
+			{Name: "suite-4.7.1-win64.exe", URL: "https://example.test/acme/suite/releases/download/4.7.1/suite-4.7.1-win64.exe"},
+			{Name: "suite-4.7.1-win64.msi", URL: "https://example.test/acme/suite/releases/download/4.7.1/suite-4.7.1-win64.msi"},
+			{Name: "suite-4.7.1.AppImage", URL: "https://example.test/acme/suite/releases/download/4.7.1/suite-4.7.1.AppImage"},
+			{Name: "suite-4.7.1.AppImage.asc", URL: "https://example.test/acme/suite/releases/download/4.7.1/suite-4.7.1.AppImage.asc"},
+		}}, "suite-4.7.1-win64.exe", testWindowsAMDResolver},
+		{args{"toolset", []*Asset{
+			{Name: "toolset-0.8.2-darwin-amd64.tar.bz2", URL: "https://example.test/acme/toolset/releases/download/v0.8.2/toolset-0.8.2-darwin-amd64.tar.bz2"},
+			{Name: "toolset-0.8.2-linux-amd64.tar.bz2", URL: "https://example.test/acme/toolset/releases/download/v0.8.2/toolset-0.8.2-linux-amd64.tar.bz2"},
+			{Name: "toolset-0.8.2-windows-amd64.zip", URL: "https://example.test/acme/toolset/releases/download/v0.8.2/toolset-0.8.2-windows-amd64.zip"},
+		}}, "toolset-0.8.2-linux-amd64.tar.bz2", testLinuxAMDResolver},
+		{args{"toolset", []*Asset{
+			{Name: "toolset-0.8.2-darwin-amd64.tar.bz2", URL: "https://example.test/acme/toolset/releases/download/v0.8.2/toolset-0.8.2-darwin-amd64.tar.bz2"},
+			{Name: "toolset-0.8.2-linux-amd64.tar.bz2", URL: "https://example.test/acme/toolset/releases/download/v0.8.2/toolset-0.8.2-linux-amd64.tar.bz2"},
+			{Name: "toolset-0.8.2-windows-amd64.zip", URL: "https://example.test/acme/toolset/releases/download/v0.8.2/toolset-0.8.2-windows-amd64.zip"},
+		}}, "toolset-0.8.2-windows-amd64.zip", testWindowsAMDResolver},
 		{args{"cli", []*Asset{
-			{Name: "dapr", URL: ""},
-		}}, "dapr", testLinuxAMDResolver},
+			{Name: "cli-tool", URL: ""},
+		}}, "cli-tool", testLinuxAMDResolver},
 		{args{"mytool", []*Asset{
 			{Name: "mytool-v1.0.0-aarch64-apple-darwin.tar.gz", URL: "https://example.com/mytool-v1.0.0-aarch64-apple-darwin.tar.gz"},
 			{Name: "mytool-v1.0.0-aarch64-apple-darwin.tar.gz.sha256", URL: "https://example.com/mytool-v1.0.0-aarch64-apple-darwin.tar.gz.sha256"},
@@ -162,6 +168,20 @@ func TestFilterAssets(t *testing.T) {
 			{Name: "mytool-linux-aarch64.zip", URL: "https://example.com/mytool-linux-aarch64.zip"},
 			{Name: "mytool-macos-aarch64.zip", URL: "https://example.com/mytool-macos-aarch64.zip"},
 		}}, "mytool-macos-aarch64.zip", testDarwinARMResolver},
+		{args{"cli", []*Asset{
+			{Name: "cli-linux-amd64-musl.gz", URL: "https://example.test/cli-linux-amd64-musl.gz"},
+			{Name: "cli-linux-amd64.gz", URL: "https://example.test/cli-linux-amd64.gz"},
+			{Name: "cli-linux-amd64-gnu.gz", URL: "https://example.test/cli-linux-amd64-gnu.gz"},
+		}}, "cli-linux-amd64-gnu.gz", testLinuxAMDResolver},
+		{args{"cli", []*Asset{
+			{Name: "cli-linux-amd64-musl.gz", URL: "https://example.test/cli-linux-amd64-musl.gz"},
+			{Name: "cli-linux-amd64.gz", URL: "https://example.test/cli-linux-amd64.gz"},
+			{Name: "cli-linux-amd64-gnu.gz", URL: "https://example.test/cli-linux-amd64-gnu.gz"},
+		}}, "cli-linux-amd64-musl.gz", testLinuxMuslResolver},
+		{args{"cli", []*Asset{
+			{Name: "cli-linux-amd64.gz", URL: "https://example.test/cli-linux-amd64.gz"},
+			{Name: "cli-linux-amd64-musl.gz", URL: "https://example.test/cli-linux-amd64-musl.gz"},
+		}}, "cli-linux-amd64.gz", testLinuxAMDResolver},
 	}
 
 	f := NewFilter(&FilterOpts{SkipScoring: false})
@@ -177,6 +197,38 @@ func TestFilterAssets(t *testing.T) {
 		}
 	}
 
+}
+
+func TestFilterAssetsPromptsWhenLibCRankingStillTies(t *testing.T) {
+	originalResolver := resolver
+	originalSelect := selectOption
+	defer func() {
+		resolver = originalResolver
+		selectOption = originalSelect
+	}()
+
+	resolver = testLinuxAMDResolver
+	prompted := false
+	selectOption = func(msg string, opts []fmt.Stringer) (interface{}, error) {
+		prompted = true
+		if len(opts) != 2 {
+			t.Fatalf("expected 2 tied options, got %d", len(opts))
+		}
+		return opts[0], nil
+	}
+
+	f := NewFilter(&FilterOpts{})
+	_, err := f.FilterAssets("cli", []*Asset{
+		{Name: "cli-linux-amd64-gnu.gz", URL: "https://example.test/cli-linux-amd64-gnu.gz"},
+		{Name: "cli-linux-amd64-gnu.zip", URL: "https://example.test/cli-linux-amd64-gnu.zip"},
+		{Name: "cli-linux-amd64-musl.gz", URL: "https://example.test/cli-linux-amd64-musl.gz"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !prompted {
+		t.Fatalf("expected prompt to be used when libc ranking still ties")
+	}
 }
 
 func TestLooksLikeMetadataAsset(t *testing.T) {
@@ -353,11 +405,11 @@ func TestIsSupportedExt(t *testing.T) {
 		out bool
 	}{
 		{
-			"Ultimaker_Cura-4.8.0.AppImage",
+			"suite-4.8.0.AppImage",
 			true,
 		},
 		{
-			"Ultimaker_Cura-4.7.1-win64.msi",
+			"suite-4.7.1-win64.msi",
 			false,
 		},
 	}
