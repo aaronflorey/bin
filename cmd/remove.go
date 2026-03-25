@@ -54,12 +54,15 @@ func newRemoveCmd() *removeCmd {
 					continue
 				}
 			}
-			config.ExecuteHooks(config.GetHooks(config.PreRemove))
-			err := config.RemoveBinaries(existingToRemove)
-			if err != nil {
+			if err := config.ExecuteHooks(config.GetHooks(config.PreRemove)); err != nil {
 				return err
 			}
-			config.ExecuteHooks(config.GetHooks(config.PostRemove))
+			if err := config.RemoveBinaries(existingToRemove); err != nil {
+				return err
+			}
+			if err := config.ExecuteHooks(config.GetHooks(config.PostRemove)); err != nil {
+				return err
+			}
 			return nil
 		},
 	}

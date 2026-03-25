@@ -151,10 +151,10 @@ func NewFilter(opts *FilterOpts) *Filter {
 	return &Filter{opts: opts}
 }
 
-// GetAutoSelection parses the autoSelect string which may contain a colon-separated
+// ParseAutoSelection parses the autoSelect string which may contain a colon-separated
 // outer file and inner path (e.g. "archive.tar.gz:binary"). It stores the inner path
 // in f.containedFile and returns the outer filename for asset matching.
-func (f *Filter) GetAutoSelection(autoSelect string) string {
+func (f *Filter) ParseAutoSelection(autoSelect string) string {
 	if autoSelect == "" {
 		return ""
 	}

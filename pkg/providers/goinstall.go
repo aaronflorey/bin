@@ -37,25 +37,24 @@ func parseRepo(path string) (string, string, string, string) {
 
 func newGoInstall(repo string) (Provider, error) {
 	repoUrl := strings.TrimPrefix(repo, "goinstall://")
+	repo, tag, name, latestURL := parseRepo(repoUrl)
+	return &goinstall{repo: repo, tag: tag, name: name, latestURL: latestURL}, nil
+}
 
-	// Strip any version suffix before probing for the module root so that
-	// baseModulePath only receives a plain import path.
-	repoUrlNoVer := moduleRemoveVersion(repoUrl)
+// resolveSubPath probes for the Go module root and splits the repo into a
+// base module path and sub-path. This is deferred to Fetch time to avoid
+// shelling out to "go list -m" during provider construction.
+func (g *goinstall) resolveSubPath() {
+	repoUrlNoVer := moduleRemoveVersion(g.repo)
 
-	subPath := ""
-	if baseRepo, found := baseModulePath(repoUrlNoVer); found && baseRepo != repoUrlNoVer {
-		subPath = strings.TrimPrefix(repoUrlNoVer, baseRepo)
-		// Reattach any @version suffix from the original URL to the base module path.
-		if i := strings.LastIndex(repoUrl, "@"); i > -1 {
-			repoUrl = baseRepo + repoUrl[i:]
-		} else {
-			repoUrl = baseRepo
-		}
-		log.Debugf("Using base module %s with sub path %q", baseRepo, subPath)
+	baseRepo, found := baseModulePath(repoUrlNoVer)
+	if !found || baseRepo == repoUrlNoVer {
+		return
 	}
 
-	repo, tag, name, latestURL := parseRepo(repoUrl)
-	return &goinstall{repo: repo, subPath: subPath, tag: tag, name: name, latestURL: latestURL}, nil
+	g.subPath = strings.TrimPrefix(repoUrlNoVer, baseRepo)
+	g.repo = baseRepo
+	log.Debugf("Using base module %s with sub path %q", baseRepo, g.subPath)
 }
 
 // moduleRemoveVersion strips an @version suffix from a module path.
@@ -111,6 +110,8 @@ func getGoPath() (string, error) {
 }
 
 func (g *goinstall) Fetch(opts *FetchOpts) (*File, error) {
+	g.resolveSubPath()
+
 	goPath, err := getGoPath()
 	if err != nil {
 		return nil, err

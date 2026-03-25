@@ -36,8 +36,8 @@ type config struct {
 	Hooks        []RunHook          `json:"hooks,omitempty"`
 }
 
-// HookType is a string alias representing lifecycle hook event names.
-type HookType = string
+// HookType represents lifecycle hook event names.
+type HookType string
 
 const (
 	// PreInstall is triggered before an installation begins.
@@ -72,8 +72,9 @@ func GetHooks(t HookType) []RunHook {
 	return hooks
 }
 
-// ExecuteHooks runs each hook in sequence, logging errors without aborting.
-func ExecuteHooks(hooks []RunHook) {
+// ExecuteHooks runs each hook in sequence. If any hook fails, execution
+// stops and the error is returned to the caller.
+func ExecuteHooks(hooks []RunHook) error {
 	for _, hook := range hooks {
 		if hook.Command == "" {
 			continue
@@ -81,11 +82,11 @@ func ExecuteHooks(hooks []RunHook) {
 		log.Infof("Executing %s hook: %s %v", hook.Type, hook.Command, hook.Args)
 		output, err := exec.Command(hook.Command, hook.Args...).CombinedOutput()
 		if err != nil {
-			log.Errorf("Hook %s failed: %v — output: %s", hook.Command, err, string(output))
-			continue
+			return fmt.Errorf("hook %s failed: %v — output: %s", hook.Command, err, string(output))
 		}
 		log.Debugf("Hook %s completed successfully", hook.Command)
 	}
+	return nil
 }
 
 type Binary struct {
@@ -171,7 +172,7 @@ func CheckAndLoad() error {
 	}
 
 	if runtime.GOOS == "linux" && len(cfg.DefaultChmod) == 0 {
-		cfg.DefaultChmod = "0766"
+		cfg.DefaultChmod = "0755"
 	}
 
 	log.Debugf("Download path set to %s", cfg.DefaultPath)
@@ -197,7 +198,7 @@ func ForceInstallationDir() string {
 	return exeDir
 }
 
-// UpsertBinary adds or updats an existing
+// UpsertBinary adds or updates an existing
 // binary resource in the config
 func UpsertBinary(c *Binary) error {
 	if c != nil {
