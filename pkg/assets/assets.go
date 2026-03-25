@@ -93,6 +93,7 @@ type finalFile struct {
 type platformResolver interface {
 	GetOS() []string
 	GetArch() []string
+	GetLibC() []string
 	GetOSSpecificExtensions() []string
 }
 
@@ -127,11 +128,16 @@ func (runtimeResolver) GetArch() []string {
 	return config.GetArch()
 }
 
+func (runtimeResolver) GetLibC() []string {
+	return config.GetLibC()
+}
+
 func (runtimeResolver) GetOSSpecificExtensions() []string {
 	return config.GetOSSpecificExtensions()
 }
 
 var resolver platformResolver = runtimeResolver{}
+var selectOption = options.Select
 
 func (g FilteredAsset) String() string {
 	if g.DisplayName != "" {
@@ -211,6 +217,7 @@ func (f *Filter) FilterAssets(repoName string, as []*Asset) (*FilteredAsset, err
 					log.Debugf("Keeping %v (URL %v) with highest score %v", matches[i].Name, matches[i].URL, matches[i].score)
 				}
 			}
+			matches = rankLinuxLibCMatches(matches)
 
 		} else {
 			log.Debugf("--all flag was supplied, skipping scoring")
@@ -233,7 +240,7 @@ func (f *Filter) FilterAssets(repoName string, as []*Asset) (*FilteredAsset, err
 			return generic[i].String() < generic[j].String()
 		})
 
-		choice, err := options.Select("Multiple matches found, please select one:", generic)
+		choice, err := selectOption("Multiple matches found, please select one:", generic)
 		if err != nil {
 			return nil, err
 		}
@@ -244,6 +251,81 @@ func (f *Filter) FilterAssets(repoName string, as []*Asset) (*FilteredAsset, err
 	}
 
 	return gf, nil
+}
+
+func rankLinuxLibCMatches(matches []*FilteredAsset) []*FilteredAsset {
+	if len(matches) <= 1 {
+		return matches
+	}
+
+	preferred := resolver.GetLibC()
+	if len(preferred) == 0 {
+		return matches
+	}
+
+	preferredSet := make(map[string]struct{}, len(preferred))
+	for _, token := range preferred {
+		preferredSet[strings.ToLower(token)] = struct{}{}
+	}
+
+	bestRank := libCRankUnknown
+	filtered := make([]*FilteredAsset, 0, len(matches))
+	for _, match := range matches {
+		rank := classifyLibC(match.Name, preferredSet)
+		if rank < bestRank {
+			bestRank = rank
+			filtered = filtered[:0]
+			filtered = append(filtered, match)
+			continue
+		}
+		if rank == bestRank {
+			filtered = append(filtered, match)
+		}
+	}
+
+	if len(filtered) == len(matches) {
+		return matches
+	}
+
+	for _, match := range filtered {
+		log.Debugf("Keeping %v after Linux libc ranking", match.Name)
+	}
+	return filtered
+}
+
+type libCRank int
+
+const (
+	libCRankPreferred libCRank = iota
+	libCRankGeneric
+	libCRankOpposite
+	libCRankUnknown
+)
+
+var knownLibCTokens = []string{"gnu", "glibc", "musl"}
+
+func classifyLibC(candidate string, preferredSet map[string]struct{}) libCRank {
+	lower := strings.ToLower(candidate)
+
+	hasPreferred := false
+	hasKnownLibC := false
+	for _, token := range knownLibCTokens {
+		if strings.Contains(lower, token) {
+			hasKnownLibC = true
+			if _, ok := preferredSet[token]; ok {
+				hasPreferred = true
+			}
+		}
+	}
+
+	switch {
+	case hasPreferred:
+		return libCRankPreferred
+	case !hasKnownLibC:
+		return libCRankGeneric
+	default:
+		return libCRankOpposite
+	}
 }
 
 // SanitizeName removes irrelevant information from the

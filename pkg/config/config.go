@@ -10,11 +10,20 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/caarlos0/log"
 )
 
 var cfg config
+
+var (
+	osStat    = os.Stat
+	globFiles = filepath.Glob
+
+	linuxLibCOnce   sync.Once
+	linuxLibCCached []string
+)
 
 type config struct {
 	// DefaultPath might not be expanded so it's important that
@@ -198,6 +207,34 @@ func GetOS() []string {
 		res = append(res, "win")
 	}
 	return res
+}
+
+// GetLibC returns Linux libc preference aliases for release asset matching.
+// Non-Linux platforms do not expose libc aliases.
+func GetLibC() []string {
+	if runtime.GOOS != "linux" {
+		return nil
+	}
+	linuxLibCOnce.Do(func() {
+		linuxLibCCached = detectLinuxLibC()
+	})
+	return linuxLibCCached
+}
+
+func detectLinuxLibC() []string {
+	if _, err := osStat("/etc/alpine-release"); err == nil {
+		return []string{"musl"}
+	}
+
+	for _, pattern := range []string{"/lib/ld-musl*", "/lib64/ld-musl*"} {
+		matches, err := globFiles(pattern)
+		if err == nil && len(matches) > 0 {
+			return []string{"musl"}
+		}
+	}
+
+	log.Debugf("No musl markers found, defaulting to glibc")
+	return []string{"glibc", "gnu"}
 }
 
 // getConfigPath returns the path to the configuration directory respecting
