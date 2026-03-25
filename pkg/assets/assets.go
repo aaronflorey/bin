@@ -98,10 +98,11 @@ type platformResolver interface {
 }
 
 type Filter struct {
-	opts        *FilterOpts
-	repoName    string
-	name        string
-	packagePath string
+	opts          *FilterOpts
+	repoName      string
+	name          string
+	packagePath   string
+	containedFile string
 }
 
 type FilterOpts struct {
@@ -150,10 +151,25 @@ func NewFilter(opts *FilterOpts) *Filter {
 	return &Filter{opts: opts}
 }
 
+// GetAutoSelection parses the autoSelect string which may contain a colon-separated
+// outer file and inner path (e.g. "archive.tar.gz:binary"). It stores the inner path
+// in f.containedFile and returns the outer filename for asset matching.
+func (f *Filter) GetAutoSelection(autoSelect string) string {
+	if autoSelect == "" {
+		return ""
+	}
+	parts := strings.SplitN(autoSelect, ":", 2)
+	if len(parts) == 2 {
+		f.containedFile = parts[1]
+		return parts[0]
+	}
+	return autoSelect
+}
+
 // FilterAssets receives a slice of GL assets and tries to
 // select the proper one and ask the user to manually select one
 // in case it can't determine it
-func (f *Filter) FilterAssets(repoName string, as []*Asset) (*FilteredAsset, error) {
+func (f *Filter) FilterAssets(repoName string, as []*Asset, autoSelect string) (*FilteredAsset, error) {
 	as = filterInstallableAssets(as)
 
 	matches := []*FilteredAsset{}
@@ -231,6 +247,15 @@ func (f *Filter) FilterAssets(repoName string, as []*Asset) (*FilteredAsset, err
 	if len(matches) == 0 {
 		return nil, fmt.Errorf("Could not find any compatible files")
 	} else if len(matches) > 1 {
+		// If an auto-selection was provided, find the first match by name
+		if autoSelect != "" {
+			for _, m := range matches {
+				if m.String() == autoSelect {
+					return m, nil
+				}
+			}
+		}
+
 		generic := make([]fmt.Stringer, 0)
 		for _, f := range matches {
 			generic = append(generic, f)
@@ -456,7 +481,7 @@ func (f *Filter) processReader(r io.Reader) (*finalFile, error) {
 
 	outputFile := io.MultiReader(&buf, r)
 
-	type processorFunc func(repoName string, r io.Reader) (*finalFile, error)
+	type processorFunc func(repoName string, r io.Reader, autoSelect string) (*finalFile, error)
 	var processor processorFunc
 	switch t {
 	case matchers.TypeGz:
@@ -473,7 +498,7 @@ func (f *Filter) processReader(r io.Reader) (*finalFile, error) {
 
 	if processor != nil {
 		// log.Debugf("Processing %s file %s with %s", repoName, name, runtime.FuncForPC(reflect.ValueOf(processor).Pointer()).Name())
-		outFile, err := processor(f.repoName, outputFile)
+		outFile, err := processor(f.repoName, outputFile, f.containedFile)
 		if err != nil {
 			return nil, err
 		}
@@ -492,7 +517,7 @@ func (f *Filter) processReader(r io.Reader) (*finalFile, error) {
 
 // processGz receives a tar.gz file and returns the
 // correct file for bin to download
-func (f *Filter) processGz(name string, r io.Reader) (*finalFile, error) {
+func (f *Filter) processGz(name string, r io.Reader, _ string) (*finalFile, error) {
 	gr, err := gzip.NewReader(r)
 	if err != nil {
 		return nil, err
@@ -511,7 +536,7 @@ func (f *Filter) matchesPackagePath(entryName string) bool {
 	return filepath.Base(entryName) == filepath.Base(f.opts.PackagePath)
 }
 
-func (f *Filter) processTar(name string, r io.Reader) (*finalFile, error) {
+func (f *Filter) processTar(name string, r io.Reader, autoSelect string) (*finalFile, error) {
 	tr := tar.NewReader(r)
 	tarFiles := map[string][]byte{}
 	if len(f.opts.PackagePath) > 0 {
@@ -552,7 +577,7 @@ func (f *Filter) processTar(name string, r io.Reader) (*finalFile, error) {
 		as = append(as, &Asset{Name: f, URL: ""})
 	}
 	as = filterArchiveAssets(as)
-	choice, err := f.FilterAssets(name, as)
+	choice, err := f.FilterAssets(name, as, autoSelect)
 	if err != nil {
 		return nil, err
 	}
@@ -563,13 +588,13 @@ func (f *Filter) processTar(name string, r io.Reader) (*finalFile, error) {
 	return &finalFile{Source: bytes.NewReader(tf), Name: filepath.Base(selectedFile), PackagePath: selectedFile}, nil
 }
 
-func (f *Filter) processBz2(name string, r io.Reader) (*finalFile, error) {
+func (f *Filter) processBz2(name string, r io.Reader, _ string) (*finalFile, error) {
 	br := bzip2.NewReader(r)
 
 	return &finalFile{Source: br, Name: name}, nil
 }
 
-func (f *Filter) processXz(name string, r io.Reader) (*finalFile, error) {
+func (f *Filter) processXz(name string, r io.Reader, _ string) (*finalFile, error) {
 	xr, err := xz.NewReader(r, 0)
 	if err != nil {
 		return nil, err
@@ -578,7 +603,7 @@ func (f *Filter) processXz(name string, r io.Reader) (*finalFile, error) {
 	return &finalFile{Source: xr, Name: name}, nil
 }
 
-func (f *Filter) processZip(name string, r io.Reader) (*finalFile, error) {
+func (f *Filter) processZip(name string, r io.Reader, autoSelect string) (*finalFile, error) {
 	zr := zipstream.NewReader(r)
 
 	zipFiles := map[string][]byte{}
@@ -619,7 +644,7 @@ func (f *Filter) processZip(name string, r io.Reader) (*finalFile, error) {
 		as = append(as, &Asset{Name: f, URL: ""})
 	}
 	as = filterArchiveAssets(as)
-	choice, err := f.FilterAssets(name, as)
+	choice, err := f.FilterAssets(name, as, autoSelect)
 	if err != nil {
 		return nil, err
 	}

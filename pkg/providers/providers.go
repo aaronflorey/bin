@@ -30,6 +30,7 @@ func (f *File) Hash() ([]byte, error) {
 
 type FetchOpts struct {
 	All            bool
+	AutoSelect     string
 	PackageName    string
 	PackagePath    string
 	SkipPatchCheck bool
@@ -86,5 +87,5 @@ func New(u, provider string) (Provider, error) {
 		return newHashiCorp(purl)
 	}
 
-	return nil, fmt.Errorf("Can't find provider for url %s", u)
+	return nil, fmt.Errorf("can't find provider for url %s", u)
 }
