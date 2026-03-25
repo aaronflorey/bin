@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/marcosnils/bin/pkg/config"
+	"github.com/aaronflorey/bin/pkg/config"
 )
 
 func TestExportWritesInstalledBinsToStdout(t *testing.T) {

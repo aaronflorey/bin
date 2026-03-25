@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/marcosnils/bin/pkg/config"
-	"github.com/marcosnils/bin/pkg/providers"
+	"github.com/aaronflorey/bin/pkg/config"
+	"github.com/aaronflorey/bin/pkg/providers"
 )
 
 func TestOutdatedTextOutput(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/marcosnils/bin/cmd"
+	"github.com/aaronflorey/bin/cmd"
 )
 
 // nolint: gochecknoglobals

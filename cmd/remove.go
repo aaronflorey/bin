@@ -6,7 +6,7 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/marcosnils/bin/pkg/config"
+	"github.com/aaronflorey/bin/pkg/config"
 	"github.com/spf13/cobra"
 )
 

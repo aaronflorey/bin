@@ -7,11 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/aaronflorey/bin/pkg/config"
+	"github.com/aaronflorey/bin/pkg/spinner"
 	"github.com/caarlos0/log"
 	"github.com/charmbracelet/colorprofile"
 	"github.com/fatih/color"
-	"github.com/marcosnils/bin/pkg/config"
-	"github.com/marcosnils/bin/pkg/spinner"
 	"github.com/spf13/cobra"
 )
 

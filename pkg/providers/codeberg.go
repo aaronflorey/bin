@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"code.gitea.io/sdk/gitea"
+	"github.com/aaronflorey/bin/pkg/assets"
 	"github.com/caarlos0/log"
-	"github.com/marcosnils/bin/pkg/assets"
 )
 
 type codeberg struct {

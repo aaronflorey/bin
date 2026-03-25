@@ -1,8 +1,6 @@
 # bin - Effortless Binary Manager
 
-[![GitHub release](https://img.shields.io/github/release/marcosnils/bin.svg)](https://github.com/marcosnils/bin/releases)
-[![Go Report Card](https://goreportcard.com/badge/github.com/marcosnils/bin)](https://goreportcard.com/report/github.com/marcosnils/bin)
-[![License](https://img.shields.io/github/license/marcosnils/bin.svg)](https://github.com/marcosnils/bin/blob/main/LICENSE)
+> **Note:** This is a fork of [marcosnils/bin](https://github.com/marcosnils/bin) with additional features including lifecycle hooks, configurable file permissions, non-interactive asset selection, `goinstall://` sub-path support, and more.
 
 A lightweight, cross-platform binary manager that simplifies downloading, installing, and managing binaries without requiring root privileges.
 
@@ -27,14 +25,14 @@ While this makes distribution easier, it creates challenges for updates and trac
   - [Hashicorp Releases](#hashicorp-releases)
   - [Go Install](#go-install)
 
-For a comprehensive list, see the [Tools Wiki](https://github.com/marcosnils/bin/wiki/Tools-list).
+For a comprehensive list, see the [Tools Wiki](https://github.com/aaronflorey/bin/wiki/Tools-list).
 
 ## 📦 Installation
 
 ### Quick Install
 
-1. Download `bin` from the [releases](https://github.com/marcosnils/bin/releases)
-2. Run `./bin install github.com/marcosnils/bin` so `bin` is managed by `bin` itself
+1. Download `bin` from the [releases](https://github.com/aaronflorey/bin/releases)
+2. Run `./bin install github.com/aaronflorey/bin` so `bin` is managed by `bin` itself
 3. Run `bin ls` to make sure bin has been installed correctly. You can now remove the first file you downloaded.
 4. Enjoy!
 
@@ -263,7 +261,7 @@ Ensure this directory is in your `$PATH`.
 
 There are some bugs, and the code has not been tested due to a lack of time, but contributions are welcome, and I’ll be happy to discuss and review them.
 
-- Report bugs or request features via [GitHub Issues](https://github.com/marcosnils/bin/issues)
+- Report bugs or request features via [GitHub Issues](https://github.com/aaronflorey/bin/issues)
 - Submit pull requests for improvements
 - Update documentation
 
@@ -271,7 +269,7 @@ There are some bugs, and the code has not been tested due to a lack of time, but
 
 ```shell
 # Clone the repository
-git clone https://github.com/marcosnils/bin.git
+git clone https://github.com/aaronflorey/bin.git
 cd bin
 
 # Clean and init

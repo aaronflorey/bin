@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/marcosnils/bin/pkg/spinner"
+	"github.com/aaronflorey/bin/pkg/spinner"
 )
 
 var stdin io.Reader = os.Stdin

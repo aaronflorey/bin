@@ -13,15 +13,15 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/aaronflorey/bin/pkg/config"
+	"github.com/aaronflorey/bin/pkg/options"
+	bstrings "github.com/aaronflorey/bin/pkg/strings"
 	"github.com/caarlos0/log"
 	"github.com/cheggaaa/pb"
 	"github.com/h2non/filetype"
 	"github.com/h2non/filetype/matchers"
 	"github.com/h2non/filetype/types"
 	"github.com/krolaw/zipstream"
-	"github.com/marcosnils/bin/pkg/config"
-	"github.com/marcosnils/bin/pkg/options"
-	bstrings "github.com/marcosnils/bin/pkg/strings"
 	"github.com/xi2/xz"
 )
 

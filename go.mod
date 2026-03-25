@@ -1,4 +1,4 @@
-module github.com/marcosnils/bin
+module github.com/aaronflorey/bin
 
 go 1.24.4
 

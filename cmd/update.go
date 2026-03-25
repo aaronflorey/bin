@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/aaronflorey/bin/pkg/config"
+	"github.com/aaronflorey/bin/pkg/prompt"
+	"github.com/aaronflorey/bin/pkg/providers"
 	"github.com/caarlos0/log"
 	"github.com/fatih/color"
 	"github.com/hashicorp/go-version"
-	"github.com/marcosnils/bin/pkg/config"
-	"github.com/marcosnils/bin/pkg/prompt"
-	"github.com/marcosnils/bin/pkg/providers"
 	"github.com/spf13/cobra"
 )
 
