@@ -106,6 +106,7 @@ func newRootCmd(version string, exit func(int)) *rootCmd {
 		newEnsureCmd().cmd,
 		newOutdatedCmd().cmd,
 		newUpdateCmd().cmd,
+		newSetConfigCmd().cmd,
 		newExportCmd().cmd,
 		newImportCmd().cmd,
 		newPinCmd().cmd,

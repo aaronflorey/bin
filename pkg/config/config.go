@@ -3,6 +3,7 @@ package config
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -17,6 +18,8 @@ import (
 )
 
 var cfg config
+
+var ErrInvalidConfigKey = errors.New("invalid config key")
 
 var (
 	osStat    = os.Stat
@@ -181,6 +184,17 @@ func CheckAndLoad() error {
 
 func Get() *config {
 	return &cfg
+}
+
+func Set(key, value string) error {
+	switch key {
+	case "default_path":
+		cfg.DefaultPath = value
+	default:
+		return fmt.Errorf("%w: %s", ErrInvalidConfigKey, key)
+	}
+
+	return write()
 }
 
 // ForceInstallationDir returns the directory specified by the BIN_EXE_DIR
