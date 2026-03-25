@@ -55,6 +55,7 @@ scoop install extras/bin
 | `bin list`                  | List installed binaries and versions       | `bin list`                       |
 | `bin export [file]`         | Export installed binaries as JSON          | `bin export bins.json`           |
 | `bin import [file]`         | Import binaries from JSON                  | `bin import bins.json`           |
+| `bin outdated`              | Show binaries with newer versions available | `bin outdated --format=json`     |
 | `bin update [binary...]`    | Update binaries (all or specified)         | `bin update`                     |
 | `bin remove <binary...>`    | Remove one or more binaries                | `bin remove gh kubectl`          |
 | `bin ensure`                | Ensure all configured binaries are present | `bin ensure`                     |
@@ -67,6 +68,7 @@ scoop install extras/bin
 
 `bin export` writes JSON to stdout by default and can write to a file when `[file]` is provided.  
 `bin import` reads JSON from stdin by default and can read from a file when `[file]` is provided.  
+`bin outdated` supports `--format=text` (default) and `--format=json`.  
 Imported binaries are mapped to your local default path using the exported binary `name`.
 
 ```shell

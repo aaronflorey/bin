@@ -14,8 +14,9 @@ import (
 )
 
 type updateCmd struct {
-	cmd  *cobra.Command
-	opts updateOpts
+	cmd         *cobra.Command
+	opts        updateOpts
+	newProvider providerFactory
 }
 
 type updateOpts struct {
@@ -29,7 +30,7 @@ type updateOpts struct {
 type updateInfo struct{ version, url string }
 
 func newUpdateCmd() *updateCmd {
-	root := &updateCmd{}
+	root := &updateCmd{newProvider: providers.New}
 	// nolint: dupl
 	cmd := &cobra.Command{
 		Use:           "update [binary_path]",
@@ -48,38 +49,18 @@ func newUpdateCmd() *updateCmd {
 			// It's very likely that we have to extend the provider
 			// interface to support this use-case
 
-			toUpdate := map[*updateInfo]*config.Binary{}
 			cfg := config.Get()
 			binsToProcess, err := resolveBinsToProcess(cfg.Bins, args)
 			if err != nil {
 				return err
 			}
 
-			updateFailures := map[*config.Binary]error{}
-
-			for p, b := range binsToProcess {
-				if cfg.Bins[p].Pinned {
-					log.Infof("%s is a pinned binary", p)
-					continue
-				}
-				p, err := providers.New(b.URL, b.Provider)
-				if err != nil {
-					return err
-				}
-				log.Debugf("Using provider '%s' for '%s'", p.GetID(), b.URL)
-
-				if ui, err := getLatestVersion(b, p); err != nil {
-					if root.opts.continueOnError {
-						updateFailures[b] = fmt.Errorf("Error while getting latest version of %v: %v", b.Path, err)
-						continue
-					}
-					return err
-				} else if ui != nil {
-					toUpdate[ui] = b
-				}
+			updates, updateFailures, err := collectAvailableUpdates(binsToProcess, root.newProvider, root.opts.continueOnError)
+			if err != nil {
+				return err
 			}
 
-			if len(toUpdate) == 0 && len(updateFailures) == 0 {
+			if len(updates) == 0 && len(updateFailures) == 0 {
 				log.Infof("All binaries are up to date")
 				return nil
 			}
@@ -88,7 +69,7 @@ func newUpdateCmd() *updateCmd {
 				return wrapErrorWithCode(fmt.Errorf("Updates found, exit (dry-run mode)."), 3, "")
 			}
 
-			if len(toUpdate) > 0 && !root.opts.yesToUpdate {
+			if len(updates) > 0 && !root.opts.yesToUpdate {
 				for _, err := range updateFailures {
 					log.Warnf("%v", err)
 				}
@@ -100,7 +81,9 @@ func newUpdateCmd() *updateCmd {
 				}
 			}
 
-			for ui, b := range toUpdate {
+			for _, update := range updates {
+				b := update.binary
+				ui := update.info
 				res, err := installBinary(InstallOpts{
 					URL:      ui.url,
 					Provider: b.Provider,
