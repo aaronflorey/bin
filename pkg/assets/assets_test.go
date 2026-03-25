@@ -187,7 +187,7 @@ func TestFilterAssets(t *testing.T) {
 	f := NewFilter(&FilterOpts{SkipScoring: false})
 	for _, c := range cases {
 		resolver = c.resolver
-		if n, err := f.FilterAssets(c.in.repoName, c.in.as); err != nil {
+		if n, err := f.FilterAssets(c.in.repoName, c.in.as, ""); err != nil {
 			for _, a := range c.in.as {
 				fmt.Println(a.Name, c.resolver)
 			}
@@ -197,6 +197,34 @@ func TestFilterAssets(t *testing.T) {
 		}
 	}
 
+}
+
+func TestFilterAssetsSelect(t *testing.T) {
+	originalResolver := resolver
+	originalSelect := selectOption
+	defer func() {
+		resolver = originalResolver
+		selectOption = originalSelect
+	}()
+
+	resolver = testLinuxAMDResolver
+	// selectOption should NOT be called when autoSelect matches a candidate
+	selectOption = func(msg string, opts []fmt.Stringer) (interface{}, error) {
+		t.Fatal("selectOption should not be called when autoSelect matches a candidate")
+		return nil, nil
+	}
+
+	f := NewFilter(&FilterOpts{})
+	result, err := f.FilterAssets("tool", []*Asset{
+		{Name: "tool-linux-amd64", URL: "https://example.test/tool-linux-amd64"},
+		{Name: "tool-linux-amd64.gz", URL: "https://example.test/tool-linux-amd64.gz"},
+	}, "tool-linux-amd64")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Name != "tool-linux-amd64" {
+		t.Fatalf("expected tool-linux-amd64, got %s", result.Name)
+	}
 }
 
 func TestFilterAssetsPromptsWhenLibCRankingStillTies(t *testing.T) {
@@ -222,7 +250,7 @@ func TestFilterAssetsPromptsWhenLibCRankingStillTies(t *testing.T) {
 		{Name: "cli-linux-amd64-gnu.gz", URL: "https://example.test/cli-linux-amd64-gnu.gz"},
 		{Name: "cli-linux-amd64-gnu.zip", URL: "https://example.test/cli-linux-amd64-gnu.zip"},
 		{Name: "cli-linux-amd64-musl.gz", URL: "https://example.test/cli-linux-amd64-musl.gz"},
-	})
+	}, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -444,7 +472,7 @@ func TestProcessTarMatchesByBasename(t *testing.T) {
 
 	// PackagePath has old version in directory name but same basename
 	f := NewFilter(&FilterOpts{PackagePath: "tool-v1.0.0-aarch64-apple-darwin/tool"})
-	result, err := f.processTar("tool", &buf)
+	result, err := f.processTar("tool", &buf, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
