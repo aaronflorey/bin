@@ -71,6 +71,8 @@ func newInstallCmd() *installCmd {
 			// TODO check if binary already exists in config
 			// and triger the update process if that's the case
 
+			config.ExecuteHooks(config.GetHooks(config.PreInstall))
+
 			res, err := installBinary(InstallOpts{
 				URL:         normalizedURL,
 				Provider:    root.opts.provider,
@@ -83,6 +85,8 @@ func newInstallCmd() *installCmd {
 			if err != nil {
 				return err
 			}
+
+			config.ExecuteHooks(config.GetHooks(config.PostInstall))
 
 			log.Infof("Done installing %s %s", res.Name, res.Version)
 			return nil
