@@ -29,8 +29,9 @@ type config struct {
 	// DefaultPath might not be expanded so it's important that
 	// the caller expands this variable with os.ExpandEnv(string)
 	// if necessary
-	DefaultPath string             `json:"default_path"`
-	Bins        map[string]*Binary `json:"bins"`
+	DefaultPath  string             `json:"default_path"`
+	DefaultChmod string             `json:"default_chmod,omitempty"`
+	Bins         map[string]*Binary `json:"bins"`
 }
 
 type Binary struct {
@@ -109,6 +110,10 @@ func CheckAndLoad() error {
 
 	if cfg.Bins == nil {
 		cfg.Bins = map[string]*Binary{}
+	}
+
+	if runtime.GOOS == "linux" && len(cfg.DefaultChmod) == 0 {
+		cfg.DefaultChmod = "0766"
 	}
 
 	log.Debugf("Download path set to %s", cfg.DefaultPath)
