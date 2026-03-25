@@ -5,17 +5,18 @@ go 1.24.4
 require (
 	code.gitea.io/sdk/gitea v0.22.0
 	github.com/caarlos0/log v0.5.1
+	github.com/charmbracelet/colorprofile v0.3.1
 	github.com/cheggaaa/pb v2.0.7+incompatible
 	github.com/coreos/go-semver v0.3.1
 	github.com/docker/docker v28.3.2+incompatible
 	github.com/fatih/color v1.18.0
-	github.com/google/go-github/v31 v31.0.0
+	github.com/google/go-github/v73 v73.0.0
 	github.com/h2non/filetype v1.1.3
 	github.com/hashicorp/go-version v1.7.0
 	github.com/krolaw/zipstream v0.0.0-20241109034754-4a67be70fe31
 	github.com/spf13/cobra v1.9.1
 	github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8
-	github.com/yuin/goldmark v1.7.12
+	github.com/yuin/goldmark v1.8.1
 	gitlab.com/gitlab-org/api/client-go v0.137.0
 	golang.org/x/oauth2 v0.30.0
 	golang.org/x/sys v0.34.0
@@ -26,7 +27,6 @@ require (
 	github.com/42wim/httpsig v1.2.3 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
-	github.com/charmbracelet/colorprofile v0.3.1 // indirect
 	github.com/charmbracelet/lipgloss/v2 v2.0.0-beta1 // indirect
 	github.com/charmbracelet/x/ansi v0.9.3 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.13 // indirect
