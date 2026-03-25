@@ -104,6 +104,7 @@ type Binary struct {
 	// the path again when upgrading
 	PackagePath string `json:"package_path"`
 	Pinned      bool   `json:"pinned"`
+	MinAgeDays  int    `json:"min_age_days,omitempty"`
 }
 
 func CheckAndLoad() error {

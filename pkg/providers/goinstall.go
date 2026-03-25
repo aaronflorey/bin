@@ -9,12 +9,19 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/caarlos0/log"
 )
 
 type goinstall struct {
 	name, repo, subPath, tag, latestURL string
+	cachedVersionInfo                   *goInstallVersionInfo
+}
+
+type goInstallVersionInfo struct {
+	Version string    `json:"Version"`
+	Time    time.Time `json:"Time"`
 }
 
 func parseRepo(path string) (string, string, string, string) {
@@ -33,6 +40,10 @@ func parseRepo(path string) (string, string, string, string) {
 	latestURL := fmt.Sprintf("https://proxy.golang.org/%s/@latest", repo)
 
 	return repo, tag, name, latestURL
+}
+
+func versionInfoURL(repo, version string) string {
+	return fmt.Sprintf("https://proxy.golang.org/%s/@v/%s.info", repo, version)
 }
 
 func newGoInstall(repo string) (Provider, error) {
@@ -125,11 +136,12 @@ func (g *goinstall) Fetch(opts *FetchOpts) (*File, error) {
 		log.Infof("Getting %s release for %s", g.tag, g.repo)
 	} else {
 		log.Infof("Getting latest release for %s", g.repo)
-		if name, _, err := g.GetLatestVersion(); err != nil {
+		versionInfo, err := g.getVersionInfo(g.latestURL)
+		if err != nil {
 			return nil, fmt.Errorf("failed to get latest version: %w", err)
-		} else {
-			g.tag = name
 		}
+		g.tag = versionInfo.Version
+		g.cachedVersionInfo = versionInfo
 	}
 
 	cmd := exec.Command("go", "install", fmt.Sprintf("%s%s@%s", g.repo, g.subPath, g.tag))
@@ -150,36 +162,55 @@ func (g *goinstall) Fetch(opts *FetchOpts) (*File, error) {
 	// don't close and keep it for Data, bin is short lived CLI tool
 	// defer file.Close()
 
+	versionInfo := g.cachedVersionInfo
+	if versionInfo == nil {
+		versionInfo, err = g.getVersionInfo(versionInfoURL(g.repo, g.tag))
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return &File{
-		Data:    file,
-		Name:    g.name,
-		Version: g.tag,
+		Data:        file,
+		Name:        g.name,
+		Version:     g.tag,
+		PublishedAt: PtrTime(versionInfo.Time),
 	}, nil
 }
 
-func (g *goinstall) GetLatestVersion() (string, string, error) {
-	resp, err := http.Get(g.latestURL)
+func (g *goinstall) GetLatestVersion() (*ReleaseInfo, error) {
+	releaseInfo, err := g.getVersionInfo(g.latestURL)
 	if err != nil {
-		return "", "", err
+		return nil, err
+	}
+
+	return &ReleaseInfo{
+		Version:     releaseInfo.Version,
+		URL:         g.repo,
+		PublishedAt: PtrTime(releaseInfo.Time),
+	}, nil
+}
+
+func (g *goinstall) getVersionInfo(versionURL string) (*goInstallVersionInfo, error) {
+	resp, err := http.Get(versionURL)
+	if err != nil {
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", "", err
+		return nil, err
 	}
 
-	var result map[string]interface{}
+	var result goInstallVersionInfo
 	if err := json.Unmarshal(body, &result); err != nil {
-		return "", "", err
+		return nil, err
 	}
-
-	version, ok := result["Version"].(string)
-	if !ok {
-		return "", "", fmt.Errorf("version not found in response")
+	if result.Version == "" {
+		return nil, fmt.Errorf("version not found in response")
 	}
-
-	return version, g.repo, nil
+	return &result, nil
 }
 
 func (g *goinstall) GetID() string {

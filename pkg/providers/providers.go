@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 )
 
 var ErrInvalidProvider = errors.New("invalid provider")
@@ -18,6 +19,13 @@ type File struct {
 	Version     string
 	Length      int64
 	PackagePath string
+	PublishedAt *time.Time
+}
+
+type ReleaseInfo struct {
+	Version     string
+	URL         string
+	PublishedAt *time.Time
 }
 
 func (f *File) Hash() ([]byte, error) {
@@ -43,7 +51,7 @@ type Provider interface {
 	Fetch(*FetchOpts) (*File, error)
 	// GetLatestVersion returns the version and the URL of the
 	// latest version for this binary
-	GetLatestVersion() (string, string, error)
+	GetLatestVersion() (*ReleaseInfo, error)
 
 	// GetID returns the unique identiifer of this provider
 	GetID() string

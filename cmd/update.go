@@ -137,22 +137,33 @@ func newUpdateCmd() *updateCmd {
 
 func getLatestVersion(b *config.Binary, p providers.Provider) (*updateInfo, error) {
 	log.Debugf("Checking updates for %s", b.Path)
-	v, u, err := p.GetLatestVersion()
+	releaseInfo, err := p.GetLatestVersion()
 	if err != nil {
 		return nil, fmt.Errorf("Error checking updates for %s, %w", b.Path, err)
 	}
+	if releaseInfo == nil {
+		return nil, nil
+	}
 
-	if b.Version == v {
+	if err := ensureReleaseAge(p.GetID(), releaseInfo.Version, releaseInfo.PublishedAt, b.MinAgeDays); err != nil {
+		if releaseInfo.PublishedAt != nil {
+			log.Infof("Skipping %s update to %s because it is newer than the configured %d day minimum age", b.Path, releaseInfo.Version, b.MinAgeDays)
+			return nil, nil
+		}
+		return nil, fmt.Errorf("Error checking updates for %s, %w", b.Path, err)
+	}
+
+	if b.Version == releaseInfo.Version {
 		return nil, nil
 	}
 
 	bSemver, bSemverErr := version.NewVersion(b.Version)
-	vSemver, vSemverErr := version.NewVersion(v)
+	vSemver, vSemverErr := version.NewVersion(releaseInfo.Version)
 	if bSemverErr == nil && vSemverErr == nil && vSemver.LessThanOrEqual(bSemver) {
 		return nil, nil
 	}
 
-	log.Debugf("Found new version %s for %s at %s", v, b.Path, u)
-	log.Infof("%s %s -> %s (%s)", b.Path, color.YellowString(b.Version), color.GreenString(v), u)
-	return &updateInfo{v, u}, nil
+	log.Debugf("Found new version %s for %s at %s", releaseInfo.Version, b.Path, releaseInfo.URL)
+	log.Infof("%s %s -> %s (%s)", b.Path, color.YellowString(b.Version), color.GreenString(releaseInfo.Version), releaseInfo.URL)
+	return &updateInfo{releaseInfo.Version, releaseInfo.URL}, nil
 }

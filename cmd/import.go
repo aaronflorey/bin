@@ -63,6 +63,7 @@ func newImportCmd() *importCmd {
 					Provider:    b.Provider,
 					PackagePath: b.PackagePath,
 					Pinned:      b.Pinned,
+					MinAgeDays:  b.MinAgeDays,
 				}
 
 				status := "installed"
@@ -131,5 +132,6 @@ func equalBinaryConfig(a, b *config.Binary) bool {
 		a.URL == b.URL &&
 		a.Provider == b.Provider &&
 		a.PackagePath == b.PackagePath &&
-		a.Pinned == b.Pinned
+		a.Pinned == b.Pinned &&
+		a.MinAgeDays == b.MinAgeDays
 }

@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/aaronflorey/bin/pkg/assets"
 	"github.com/caarlos0/log"
@@ -44,10 +45,11 @@ func (g *gitLab) Fetch(opts *FetchOpts) (*File, error) {
 		// TODO: handle case when repo doesn't have releases?
 		log.Infof("Getting latest release for %s/%s", g.owner, g.repo)
 		var name string
-		name, _, err = g.GetLatestVersion()
-		if err != nil {
-			return nil, err
+		releaseInfo, releaseErr := g.GetLatestVersion()
+		if releaseErr != nil {
+			return nil, releaseErr
 		}
+		name = releaseInfo.Version
 		release, _, err = g.client.Releases.GetRelease(projectPath, name, gitlab.WithContext(context.TODO()))
 	}
 
@@ -179,7 +181,12 @@ func (g *gitLab) Fetch(opts *FetchOpts) (*File, error) {
 	// TODO calculate file hash. Not sure if we can / should do it here
 	// since we don't want to read the file unnecesarily. Additionally, sometimes
 	// releases have .sha256 files, so it'd be nice to check for those also
-	file := &File{Data: outFile.Source, Name: outFile.Name, Version: version}
+	file := &File{
+		Data:        outFile.Source,
+		Name:        outFile.Name,
+		Version:     version,
+		PublishedAt: gitLabPublishedAt(release),
+	}
 
 	return file, nil
 }
@@ -190,7 +197,7 @@ func (g *gitLab) GetID() string {
 
 // GetLatestVersion checks the latest repo release and
 // returns the corresponding name and url to fetch the version
-func (g *gitLab) GetLatestVersion() (string, string, error) {
+func (g *gitLab) GetLatestVersion() (*ReleaseInfo, error) {
 	log.Debugf("Getting latest release for %s/%s", g.owner, g.repo)
 	projectPath := fmt.Sprintf("%s/%s", g.owner, g.repo)
 
@@ -198,12 +205,13 @@ func (g *gitLab) GetLatestVersion() (string, string, error) {
 		ListOptions: gitlab.ListOptions{PerPage: 100},
 	})
 	if err != nil {
-		return "", "", err
+		return nil, err
 	}
 	if len(releases) == 0 {
-		return "", "", fmt.Errorf("no releases found for %s/%s", g.owner, g.repo)
+		return nil, fmt.Errorf("no releases found for %s/%s", g.owner, g.repo)
 	}
 	highestTagName := releases[0].TagName
+	highestRelease := releases[0]
 	var svs semver.Versions
 	svToTagName := map[string]string{}
 	tagNameToRelease := map[string]*gitlab.Release{}
@@ -222,9 +230,28 @@ func (g *gitLab) GetLatestVersion() (string, string, error) {
 	if len(svs) > 0 {
 		sort.Sort(svs)
 		highestTagName = svToTagName[svs[len(svs)-1].String()]
+		highestRelease = tagNameToRelease[highestTagName]
 	}
 
-	return highestTagName, tagNameToRelease[highestTagName].Commit.WebURL, nil
+	if highestRelease == nil {
+		return nil, fmt.Errorf("no release metadata found for %s/%s", g.owner, g.repo)
+	}
+
+	return &ReleaseInfo{
+		Version:     highestTagName,
+		URL:         highestRelease.Commit.WebURL,
+		PublishedAt: gitLabPublishedAt(highestRelease),
+	}, nil
+}
+
+func gitLabPublishedAt(release *gitlab.Release) *time.Time {
+	if release == nil {
+		return nil
+	}
+	if release.ReleasedAt != nil {
+		return release.ReleasedAt
+	}
+	return release.CreatedAt
 }
 
 func newGitLab(u *url.URL) (Provider, error) {

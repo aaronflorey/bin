@@ -22,6 +22,7 @@ type installOpts struct {
 	provider   string
 	all        bool
 	autoSelect string
+	minAgeDays int
 }
 
 func newInstallCmd() *installCmd {
@@ -35,6 +36,10 @@ func newInstallCmd() *installCmd {
 		SilenceErrors: true,
 		Args:          cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if cmd.Flags().Changed("min-age-days") && root.opts.minAgeDays <= 0 {
+				return fmt.Errorf("--min-age-days must be a positive integer")
+			}
+
 			u := args[0]
 			normalizedURL, requestedVersion, hasExplicitVersion, err := providers.NormalizeGitHubURL(u, root.opts.provider)
 			if err != nil {
@@ -76,12 +81,18 @@ func newInstallCmd() *installCmd {
 				return err
 			}
 
+			var minAgeDays *int
+			if cmd.Flags().Changed("min-age-days") {
+				minAgeDays = &root.opts.minAgeDays
+			}
+
 			res, err := installBinary(InstallOpts{
 				URL:         normalizedURL,
 				Provider:    root.opts.provider,
 				Path:        resolvedPath,
 				Force:       root.opts.force,
 				Pinned:      pinVersion,
+				MinAgeDays:  minAgeDays,
 				FetchOpts:   fetchOpts,
 				ResolvePath: true,
 			})
@@ -104,5 +115,6 @@ func newInstallCmd() *installCmd {
 	root.cmd.Flags().BoolVarP(&root.opts.all, "all", "a", false, "Show all possible download options (skip scoring & filtering)")
 	root.cmd.Flags().StringVarP(&root.opts.provider, "provider", "p", "", "Forces to use a specific provider")
 	root.cmd.Flags().StringVarP(&root.opts.autoSelect, "select", "s", "", "Auto select installation file (skips interactive prompt)")
+	root.cmd.Flags().IntVar(&root.opts.minAgeDays, "min-age-days", 0, "Require the selected release to be at least this many days old")
 	return root
 }

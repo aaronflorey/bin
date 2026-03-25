@@ -47,8 +47,8 @@ func (d *docker) Fetch(opts *FetchOpts) (*File, error) {
 }
 
 // TODO: missing implementation here
-func (d *docker) GetLatestVersion() (string, string, error) {
-	return d.tag, "", nil
+func (d *docker) GetLatestVersion() (*ReleaseInfo, error) {
+	return &ReleaseInfo{Version: d.tag}, nil
 }
 
 func (d *docker) GetID() string {

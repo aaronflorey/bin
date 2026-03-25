@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"code.gitea.io/sdk/gitea"
 	"github.com/aaronflorey/bin/pkg/assets"
@@ -73,25 +74,42 @@ func (c *codeberg) Fetch(opts *FetchOpts) (*File, error) {
 	// TODO calculate file hash. Not sure if we can / should do it here
 	// since we don't want to read the file unnecesarily. Additionally, sometimes
 	// releases have .sha256 files, so it'd be nice to check for those also
-	file := &File{Data: outFile.Source, Name: outFile.Name, Version: version, PackagePath: outFile.PackagePath}
+	file := &File{
+		Data:        outFile.Source,
+		Name:        outFile.Name,
+		Version:     version,
+		PackagePath: outFile.PackagePath,
+		PublishedAt: codebergPublishedAt(release),
+	}
 
 	return file, nil
 }
 
 // GetLatestVersion checks the latest repo release and
 // returns the corresponding name and url to fetch the version
-func (c *codeberg) GetLatestVersion() (string, string, error) {
+func (c *codeberg) GetLatestVersion() (*ReleaseInfo, error) {
 	log.Debugf("Getting latest release for %s/%s", c.owner, c.repo)
 	release, _, err := c.client.GetLatestRelease(c.owner, c.repo)
 	if err != nil {
-		return "", "", err
+		return nil, err
 	}
 
-	return release.TagName, release.HTMLURL, nil
+	return &ReleaseInfo{
+		Version:     release.TagName,
+		URL:         release.HTMLURL,
+		PublishedAt: codebergPublishedAt(release),
+	}, nil
 }
 
 func (c *codeberg) GetID() string {
 	return "codeberg"
+}
+
+func codebergPublishedAt(release *gitea.Release) *time.Time {
+	if release == nil || release.PublishedAt.IsZero() {
+		return nil
+	}
+	return PtrTime(release.PublishedAt)
 }
 
 func newCodeberg(u *url.URL) (Provider, error) {
