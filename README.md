@@ -31,10 +31,31 @@ For a comprehensive list, see the [Tools Wiki](https://github.com/aaronflorey/bi
 
 ### Quick Install
 
-1. Download `bin` from the [releases](https://github.com/aaronflorey/bin/releases)
-2. Run `./bin install github.com/aaronflorey/bin` so `bin` is managed by `bin` itself
-3. Run `bin ls` to make sure bin has been installed correctly. You can now remove the first file you downloaded.
-4. Enjoy!
+Linux and macOS can install the latest release with the repo installer:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/aaronflorey/bin/master/install.sh | sh
+```
+
+To install system-wide into `/usr/local/bin`, run it with `sudo`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/aaronflorey/bin/master/install.sh | sudo sh
+```
+
+The script detects your OS, architecture, user, and home directory, downloads the matching release binary to `/tmp/bin`, and then runs `bin install --force github.com/aaronflorey/bin` into:
+
+- `~/.local/bin` for regular users
+- `/usr/local/bin` for `sudo` or root
+
+When `~/.config/bin/config.json` does not already exist, it also sets `default_path` to that install directory.
+
+If you prefer not to pipe to a shell, download the script first and inspect it:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/aaronflorey/bin/master/install.sh
+sh install.sh
+```
 
 ### Quick install from Scoop (Windows)
 
