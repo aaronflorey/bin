@@ -14,7 +14,7 @@ import (
 )
 
 type goinstall struct {
-	name, repo, tag, latestURL string
+	name, repo, subPath, tag, latestURL string
 }
 
 func parseRepo(path string) (string, string, string, string) {
@@ -37,8 +37,68 @@ func parseRepo(path string) (string, string, string, string) {
 
 func newGoInstall(repo string) (Provider, error) {
 	repoUrl := strings.TrimPrefix(repo, "goinstall://")
+
+	// Strip any version suffix before probing for the module root so that
+	// baseModulePath only receives a plain import path.
+	repoUrlNoVer := moduleRemoveVersion(repoUrl)
+
+	subPath := ""
+	if baseRepo, found := baseModulePath(repoUrlNoVer); found && baseRepo != repoUrlNoVer {
+		subPath = strings.TrimPrefix(repoUrlNoVer, baseRepo)
+		// Reattach any @version suffix from the original URL to the base module path.
+		if i := strings.LastIndex(repoUrl, "@"); i > -1 {
+			repoUrl = baseRepo + repoUrl[i:]
+		} else {
+			repoUrl = baseRepo
+		}
+		log.Debugf("Using base module %s with sub path %q", baseRepo, subPath)
+	}
+
 	repo, tag, name, latestURL := parseRepo(repoUrl)
-	return &goinstall{repo: repo, tag: tag, name: name, latestURL: latestURL}, nil
+	return &goinstall{repo: repo, subPath: subPath, tag: tag, name: name, latestURL: latestURL}, nil
+}
+
+// moduleRemoveVersion strips an @version suffix from a module path.
+func moduleRemoveVersion(mod string) string {
+	if i := strings.LastIndex(mod, "@"); i > -1 {
+		return mod[:i]
+	}
+	return mod
+}
+
+// baseModulePath walks the import path from longest to shortest, calling
+// "go list -m" to find the longest prefix that is a valid Go module root.
+// It returns the module path and true if a shorter root was found, or
+// ("", false) if the import path itself is already the module root (or
+// if no module could be found at all).
+func baseModulePath(noVer string) (string, bool) {
+	return baseModulePathWith(noVer, func(mod string) (string, error) {
+		out, err := exec.Command("go", "list", "-m", "-f", "{{.Path}}", mod+"@latest").Output()
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(string(out)), nil
+	})
+}
+
+// baseModulePathWith is the testable core of baseModulePath. lister should
+// return the resolved module path for the given import path, or a non-nil
+// error if the path is not a known module.
+func baseModulePathWith(noVer string, lister func(mod string) (string, error)) (string, bool) {
+	parts := strings.Split(noVer, "/")
+	for len(parts) > 0 {
+		mod := strings.Join(parts, "/")
+		if found, err := lister(mod); err == nil {
+			found = strings.TrimSpace(found)
+			// Only report a sub-path case when the resolved root is shorter.
+			if found != noVer {
+				return found, true
+			}
+			return found, false
+		}
+		parts = parts[:len(parts)-1]
+	}
+	return "", false
 }
 
 func getGoPath() (string, error) {
@@ -71,7 +131,7 @@ func (g *goinstall) Fetch(opts *FetchOpts) (*File, error) {
 		}
 	}
 
-	cmd := exec.Command("go", "install", fmt.Sprintf("%s@%s", g.repo, g.tag))
+	cmd := exec.Command("go", "install", fmt.Sprintf("%s%s@%s", g.repo, g.subPath, g.tag))
 
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
