@@ -13,6 +13,23 @@ import (
 	"github.com/marcosnils/bin/pkg/providers"
 )
 
+// applyChmod applies the DefaultChmod setting from config, if set.
+// This is a no-op on non-Linux platforms where DefaultChmod is not set by default.
+func applyChmod(file *os.File) error {
+	defaultChmod := config.Get().DefaultChmod
+	if len(defaultChmod) == 0 {
+		return nil
+	}
+
+	var chmodVal int64
+	if _, err := fmt.Sscanf(defaultChmod, "%o", &chmodVal); err != nil {
+		log.Warnf("Could not parse default_chmod value '%s', skipping chmod", defaultChmod)
+		return nil
+	}
+
+	return file.Chmod(os.FileMode(chmodVal))
+}
+
 // InstallOpts captures all parameters needed to fetch, save, and
 // record a binary in the config.
 type InstallOpts struct {
@@ -170,6 +187,10 @@ func saveToDisk(f *providers.File, path string, overwrite bool) ([]byte, error) 
 	log.Infof("Copying for %s@%s into %s", f.Name, f.Version, epath)
 	_, err = io.Copy(file, tr)
 	if err != nil {
+		return nil, err
+	}
+
+	if err := applyChmod(file); err != nil {
 		return nil, err
 	}
 
