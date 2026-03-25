@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"github.com/marcosnils/bin/pkg/spinner"
 )
 
 var stdin io.Reader = os.Stdin
@@ -14,6 +16,9 @@ var stdin io.Reader = os.Stdin
 // for the given message and waits for the
 // users input.
 func Confirm(message string) error {
+	resume := spinner.Pause()
+	defer resume()
+
 	fmt.Printf("\n%s [Y/n] ", message)
 	reader := bufio.NewReader(stdin)
 	var response string

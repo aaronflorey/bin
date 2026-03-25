@@ -73,5 +73,6 @@ func newEnsureCmd() *ensureCmd {
 	}
 
 	root.cmd = cmd
+	enableSpinner(root.cmd)
 	return root
 }

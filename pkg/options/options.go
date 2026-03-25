@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+
+	"github.com/marcosnils/bin/pkg/spinner"
 )
 
 type LiteralStringer string
@@ -19,6 +21,9 @@ func Select(msg string, opts []fmt.Stringer) (interface{}, error) {
 	if len(opts) == 1 {
 		return opts[0], nil
 	}
+	resume := spinner.Pause()
+	defer resume()
+
 	fmt.Printf("\n%s\n", msg)
 	for i, o := range opts {
 		fmt.Printf("\n [%d] %s", i+1, o)
@@ -52,6 +57,9 @@ func SelectCustom(msg string, opts []fmt.Stringer) (interface{}, error) {
 	if len(opts) == 1 {
 		return opts[0], nil
 	}
+	resume := spinner.Pause()
+	defer resume()
+
 	fmt.Printf("\n%s\n", msg)
 	for i, o := range opts {
 		fmt.Printf("\n [%d] %s", i+1, o)

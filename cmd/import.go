@@ -108,6 +108,7 @@ func newImportCmd() *importCmd {
 	}
 
 	root.cmd = cmd
+	enableSpinner(root.cmd)
 	return root
 }
 

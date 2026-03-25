@@ -46,6 +46,7 @@ func newExportCmd() *exportCmd {
 	}
 
 	root.cmd = cmd
+	enableSpinner(root.cmd)
 	return root
 }
 

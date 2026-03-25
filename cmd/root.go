@@ -8,8 +8,10 @@ import (
 	"strings"
 
 	"github.com/caarlos0/log"
+	"github.com/charmbracelet/colorprofile"
 	"github.com/fatih/color"
 	"github.com/marcosnils/bin/pkg/config"
+	"github.com/marcosnils/bin/pkg/spinner"
 	"github.com/spf13/cobra"
 )
 
@@ -27,6 +29,11 @@ func Execute(version string, exit func(int), args []string) {
 func (cmd *rootCmd) Execute(args []string) {
 	cmd.cmd.SetArgs(args)
 
+	previousLogger := log.Log
+	defer func() {
+		log.Log = previousLogger
+	}()
+
 	if defaultCommand(cmd.cmd, args) {
 		if len(args) == 0 {
 			cmd.cmd.SetArgs(append([]string{"list"}, args...))
@@ -35,6 +42,8 @@ func (cmd *rootCmd) Execute(args []string) {
 			os.Exit(1)
 		}
 	}
+
+	defer spinner.Stop()
 
 	if err := cmd.cmd.Execute(); err != nil {
 		code := 1
@@ -81,6 +90,13 @@ func newRootCmd(version string, exit func(int)) *rootCmd {
 			if err != nil {
 				log.Fatalf("Error loading config file %v", err)
 			}
+
+			if shouldShowSpinner(cmd) {
+				cmd.SetOut(spinner.Writer(cmd.OutOrStdout()))
+				cmd.SetErr(spinner.Writer(cmd.ErrOrStderr()))
+				log.Log = newSpinnerLogger()
+				spinner.Start("")
+			}
 		},
 	}
 
@@ -102,6 +118,18 @@ func newRootCmd(version string, exit func(int)) *rootCmd {
 
 	root.cmd = cmd
 	return root
+}
+
+func newSpinnerLogger() log.Interface {
+	logger := log.New(spinner.Writer(os.Stderr))
+
+	if previous, ok := log.Log.(*log.Logger); ok {
+		logger.Level = previous.Level
+		logger.Padding = previous.Padding
+	}
+
+	logger.Writer = colorprofile.NewWriter(spinner.Writer(os.Stderr), os.Environ())
+	return logger
 }
 
 func defaultCommand(cmd *cobra.Command, args []string) bool {
