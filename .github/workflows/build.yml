@@ -7,6 +7,8 @@ on:
       - '**'
 
 name: Go
+permissions:
+  contents: read
 jobs:
   golangci:
     name: lint
@@ -43,10 +45,12 @@ jobs:
       run: go build -o ./bin .
     - name: Download 5 projects and verify pinned version is not upgraded
       env:
-        BIN_CONFIG: ${{ runner.temp }}/config.json
         GITHUB_AUTH_TOKEN: ${{ github.token }}
+        PINNED_GH_VERSION: v2.40.1
       run: |
         set -euo pipefail
+        BIN_CONFIG="${RUNNER_TEMP}/config.json"
+        export BIN_CONFIG
         mkdir -p "${RUNNER_TEMP}/managed-bin"
         cat > "${BIN_CONFIG}" <<EOF
         {"default_path":"${RUNNER_TEMP}/managed-bin","bins":{}}
@@ -56,7 +60,7 @@ jobs:
         ./bin install github.com/jqlang/jq jq
         ./bin install github.com/mikefarah/yq yq
         ./bin install --provider hashicorp https://releases.hashicorp.com/terraform terraform
-        ./bin install goinstall://github.com/cli/cli/v2/cmd/gh@v2.40.1 gh-old
+        ./bin install "goinstall://github.com/cli/cli/v2/cmd/gh@${PINNED_GH_VERSION}" gh-old
         ./bin pin gh-old
 
         python - <<'PY'
@@ -75,31 +79,30 @@ jobs:
             raise SystemExit("gh-old binary not found in config")
         if not gh_old.get("pinned"):
             raise SystemExit("gh-old was not pinned")
-        print(gh_old["version"])
         PY
 
-        pinned_version_before="$(python - <<'PY'
+        gh_old_version() {
+          python - <<'PY'
         import json, os
         with open(os.environ["BIN_CONFIG"], encoding="utf-8") as f:
             cfg = json.load(f)
+        gh_old_version = None
         for item in cfg["bins"].values():
             if item["path"].endswith("/gh-old"):
-                print(item["version"])
+                gh_old_version = item["version"]
                 break
+        if not gh_old_version:
+            raise SystemExit("gh-old version missing")
+        print(gh_old_version)
         PY
-        )"
+        }
+
+        pinned_version_before="$(gh_old_version)"
+        test -n "${pinned_version_before}" || { echo "Error: failed to read pinned version before update"; exit 1; }
 
         ./bin update -y
 
-        pinned_version_after="$(python - <<'PY'
-        import json, os
-        with open(os.environ["BIN_CONFIG"], encoding="utf-8") as f:
-            cfg = json.load(f)
-        for item in cfg["bins"].values():
-            if item["path"].endswith("/gh-old"):
-                print(item["version"])
-                break
-        PY
-        )"
+        pinned_version_after="$(gh_old_version)"
+        test -n "${pinned_version_after}" || { echo "Error: failed to read pinned version after update"; exit 1; }
 
-        test "${pinned_version_before}" = "${pinned_version_after}"
+        test "${pinned_version_before}" = "${pinned_version_after}" || { echo "Error: pinned version changed from ${pinned_version_before} to ${pinned_version_after}"; exit 1; }
