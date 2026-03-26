@@ -12,17 +12,17 @@ jobs:
     name: lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v8
   build:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     - name: Set up Go
       id: go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v5
       with:
         go-version-file: 'go.mod'
         check-latest: true
@@ -56,20 +56,21 @@ jobs:
           - name: trivy
             repo: github.com/aquasecurity/trivy
     env:
-      HOME: ${{ runner.temp }}/bin-home
-      BIN_EXE_DIR: ${{ runner.temp }}/bin-tools
       GITHUB_TOKEN: ${{ github.token }}
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     - name: Set up Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v5
       with:
         go-version-file: 'go.mod'
         check-latest: true
     - name: Build bin
       run: go build -o ./bin-test .
     - name: Install tool
+      env:
+        HOME: ${{ runner.temp }}/bin-home
+        BIN_EXE_DIR: ${{ runner.temp }}/bin-tools
       run: |
         mkdir -p "$HOME" "$BIN_EXE_DIR"
         ./bin-test install --force "${{ matrix.tool.repo }}"
@@ -77,21 +78,22 @@ jobs:
     name: pinned install smoke
     runs-on: ubuntu-latest
     env:
-      HOME: ${{ runner.temp }}/bin-home-pinned
-      BIN_EXE_DIR: ${{ runner.temp }}/bin-tools-pinned
       GITHUB_TOKEN: ${{ github.token }}
       PINNED_RIPGREP_VERSION: 13.0.0
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     - name: Set up Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v5
       with:
         go-version-file: 'go.mod'
         check-latest: true
     - name: Build bin
       run: go build -o ./bin-test .
     - name: Install, pin, update, and verify version
+      env:
+        HOME: ${{ runner.temp }}/bin-home-pinned
+        BIN_EXE_DIR: ${{ runner.temp }}/bin-tools-pinned
       run: |
         mkdir -p "$HOME" "$BIN_EXE_DIR"
         ./bin-test install --force "github.com/BurntSushi/ripgrep/releases/tag/${PINNED_RIPGREP_VERSION}"
