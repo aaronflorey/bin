@@ -28,3 +28,78 @@ jobs:
         check-latest: true
     - name: Test
       run: go test ./...
+  download-common-projects:
+    name: download common projects
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version-file: 'go.mod'
+        check-latest: true
+    - name: Build bin
+      run: go build -o ./bin .
+    - name: Download 5 projects and verify pinned version is not upgraded
+      env:
+        BIN_CONFIG: ${{ runner.temp }}/config.json
+        GITHUB_AUTH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        mkdir -p "${RUNNER_TEMP}/managed-bin"
+        cat > "${BIN_CONFIG}" <<EOF
+        {"default_path":"${RUNNER_TEMP}/managed-bin","bins":{}}
+        EOF
+
+        ./bin install github.com/kubernetes-sigs/kind kind
+        ./bin install github.com/jqlang/jq jq
+        ./bin install github.com/mikefarah/yq yq
+        ./bin install --provider hashicorp https://releases.hashicorp.com/terraform terraform
+        ./bin install goinstall://github.com/cli/cli/v2/cmd/gh@v2.40.1 gh-old
+        ./bin pin gh-old
+
+        python - <<'PY'
+        import json, os
+        cfg_path = os.environ["BIN_CONFIG"]
+        with open(cfg_path, encoding="utf-8") as f:
+            cfg = json.load(f)
+        if len(cfg["bins"]) != 5:
+            raise SystemExit(f"expected 5 installed projects, got {len(cfg['bins'])}")
+        gh_old = None
+        for item in cfg["bins"].values():
+            if item["path"].endswith("/gh-old"):
+                gh_old = item
+                break
+        if not gh_old:
+            raise SystemExit("gh-old binary not found in config")
+        if not gh_old.get("pinned"):
+            raise SystemExit("gh-old was not pinned")
+        print(gh_old["version"])
+        PY
+
+        pinned_version_before="$(python - <<'PY'
+        import json, os
+        with open(os.environ["BIN_CONFIG"], encoding="utf-8") as f:
+            cfg = json.load(f)
+        for item in cfg["bins"].values():
+            if item["path"].endswith("/gh-old"):
+                print(item["version"])
+                break
+        PY
+        )"
+
+        ./bin update -y
+
+        pinned_version_after="$(python - <<'PY'
+        import json, os
+        with open(os.environ["BIN_CONFIG"], encoding="utf-8") as f:
+            cfg = json.load(f)
+        for item in cfg["bins"].values():
+            if item["path"].endswith("/gh-old"):
+                print(item["version"])
+                break
+        PY
+        )"
+
+        test "${pinned_version_before}" = "${pinned_version_after}"
