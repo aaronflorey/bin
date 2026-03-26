@@ -92,7 +92,30 @@ download_file() {
 
 find_download_url() {
 	json="$1"
-	asset_regex="_${OS}_${ARCH}(\\.[A-Za-z0-9._-]+)?$"
+	asset_regex="_${OS}_${ARCH}$"
+
+	if command -v jq >/dev/null 2>&1; then
+		artifacts_url="$(printf '%s\n' "$json" | jq -r \
+			'.assets[]? | select(.name == "artifacts.json") | .browser_download_url' \
+			| head -n 1)"
+		if [ -n "$artifacts_url" ]; then
+			artifacts_json="$(http_get "$artifacts_url" 2>/dev/null || true)"
+			if [ -n "$artifacts_json" ]; then
+				binary_name="$(printf '%s\n' "$artifacts_json" | jq -r --arg os "$OS" --arg arch "$ARCH" \
+					'[.[] | select(.type == "Binary" and .goos == $os and .goarch == $arch)] | first | .name // empty' \
+					| head -n 1)"
+				if [ -n "$binary_name" ]; then
+					download_url="$(printf '%s\n' "$json" | jq -r --arg binary_name "$binary_name" \
+						'.assets[]? | select(.name == $binary_name) | .browser_download_url' \
+						| head -n 1)"
+					if [ -n "$download_url" ]; then
+						printf '%s\n' "$download_url"
+						return
+					fi
+				fi
+			fi
+		fi
+	fi
 
 	if command -v jq >/dev/null 2>&1; then
 		printf '%s\n' "$json" | jq -r --arg asset_regex "$asset_regex" \
@@ -106,7 +129,7 @@ find_download_url() {
 		| grep '"browser_download_url"' \
 		| sed -n 's/.*"browser_download_url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
 		| grep "^https://" \
-		| grep -E "_${OS}_${ARCH}(\\.[A-Za-z0-9._-]+)?$" \
+		| grep -E "_${OS}_${ARCH}$" \
 		| head -n 1
 }
 
