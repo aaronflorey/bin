@@ -28,6 +28,35 @@ jobs:
         check-latest: true
     - name: Test
       run: go test ./...
+  installer-script-smoke:
+    name: installer script smoke (jq: ${{ matrix.jq_mode }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        jq_mode:
+          - present
+          - absent
+    env:
+      GITHUB_AUTH_TOKEN: ${{ github.token }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    - name: Disable jq
+      if: matrix.jq_mode == 'absent'
+      run: |
+        JQ_PATH="$(command -v jq || true)"
+        if [ -n "$JQ_PATH" ]; then
+          sudo mv "$JQ_PATH" "${JQ_PATH}.disabled"
+        fi
+    - name: Run installer script and verify binary
+      env:
+        HOME: ${{ runner.temp }}/install-script-home
+      run: |
+        mkdir -p "$HOME"
+        sh ./install.sh
+        test -x "$HOME/.local/bin/bin"
+        "$HOME/.local/bin/bin" version
   install-smoke:
     name: install smoke (${{ matrix.tool.name }})
     runs-on: ubuntu-latest
