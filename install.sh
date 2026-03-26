@@ -4,6 +4,7 @@ set -eu
 
 REPO="${BIN_INSTALL_REPO:-aaronflorey/bin}"
 API_URL="https://api.github.com/repos/${REPO}/releases/latest"
+AUTH_TOKEN="${GITHUB_AUTH_TOKEN:-${GITHUB_TOKEN:-${GH_TOKEN:-}}}"
 
 log() {
 	printf '%s\n' "$*"
@@ -18,18 +19,34 @@ http_get() {
 	url="$1"
 
 	if command -v curl >/dev/null 2>&1; then
-		curl -fsSL \
-			-H "Accept: application/vnd.github+json" \
-			-H "User-Agent: bin-install-script" \
-			"$url"
+		if [ -n "$AUTH_TOKEN" ]; then
+			curl -fsSL \
+				-H "Accept: application/vnd.github+json" \
+				-H "User-Agent: bin-install-script" \
+				-H "Authorization: Bearer ${AUTH_TOKEN}" \
+				"$url"
+		else
+			curl -fsSL \
+				-H "Accept: application/vnd.github+json" \
+				-H "User-Agent: bin-install-script" \
+				"$url"
+		fi
 		return
 	fi
 
 	if command -v wget >/dev/null 2>&1; then
-		wget -qO- \
-			--header="Accept: application/vnd.github+json" \
-			--header="User-Agent: bin-install-script" \
-			"$url"
+		if [ -n "$AUTH_TOKEN" ]; then
+			wget -qO- \
+				--header="Accept: application/vnd.github+json" \
+				--header="User-Agent: bin-install-script" \
+				--header="Authorization: Bearer ${AUTH_TOKEN}" \
+				"$url"
+		else
+			wget -qO- \
+				--header="Accept: application/vnd.github+json" \
+				--header="User-Agent: bin-install-script" \
+				"$url"
+		fi
 		return
 	fi
 
@@ -41,17 +58,32 @@ download_file() {
 	dest="$2"
 
 	if command -v curl >/dev/null 2>&1; then
-		curl -fsSL \
-			-H "User-Agent: bin-install-script" \
-			-o "$dest" \
-			"$url"
+		if [ -n "$AUTH_TOKEN" ]; then
+			curl -fsSL \
+				-H "User-Agent: bin-install-script" \
+				-H "Authorization: Bearer ${AUTH_TOKEN}" \
+				-o "$dest" \
+				"$url"
+		else
+			curl -fsSL \
+				-H "User-Agent: bin-install-script" \
+				-o "$dest" \
+				"$url"
+		fi
 		return
 	fi
 
 	if command -v wget >/dev/null 2>&1; then
-		wget -qO "$dest" \
-			--header="User-Agent: bin-install-script" \
-			"$url"
+		if [ -n "$AUTH_TOKEN" ]; then
+			wget -qO "$dest" \
+				--header="User-Agent: bin-install-script" \
+				--header="Authorization: Bearer ${AUTH_TOKEN}" \
+				"$url"
+		else
+			wget -qO "$dest" \
+				--header="User-Agent: bin-install-script" \
+				"$url"
+		fi
 		return
 	fi
 
@@ -60,19 +92,21 @@ download_file() {
 
 find_download_url() {
 	json="$1"
+	asset_regex="_${OS}_${ARCH}(\\.[A-Za-z0-9._-]+)?$"
 
 	if command -v jq >/dev/null 2>&1; then
-		printf '%s\n' "$json" | jq -r \
-			'.assets[]?.browser_download_url | select(test("_'"$OS"'_'"$ARCH"'$"))' \
+		printf '%s\n' "$json" | jq -r --arg asset_regex "$asset_regex" \
+			'.assets[]?.browser_download_url | select(test($asset_regex))' \
 			| head -n 1
 		return
 	fi
 
 	printf '%s\n' "$json" \
+		| tr ',' '\n' \
 		| grep '"browser_download_url"' \
 		| sed -n 's/.*"browser_download_url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
 		| grep "^https://" \
-		| grep "_${OS}_${ARCH}$" \
+		| grep -E "_${OS}_${ARCH}(\\.[A-Za-z0-9._-]+)?$" \
 		| head -n 1
 }
 
