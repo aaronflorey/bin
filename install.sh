@@ -187,14 +187,14 @@ chmod 0755 "$BOOTSTRAP_BIN"
 mkdir -p "$INSTALL_DIR"
 TARGET_PATH="${INSTALL_DIR}/bin"
 log "Bootstrapping install via ${BOOTSTRAP_BIN}"
-HOME="$DETECTED_HOME" "$BOOTSTRAP_BIN" install --force "github.com/${REPO}" "$TARGET_PATH"
+HOME="$DETECTED_HOME" BIN_EXE_DIR="$INSTALL_DIR" "$BOOTSTRAP_BIN" install --force "github.com/${REPO}" "$TARGET_PATH"
 
 CONFIG_PATH="${DETECTED_HOME}/.config/bin/config.json"
 if [ -f "$CONFIG_PATH" ]; then
 	log "Existing config found at ${CONFIG_PATH}; skipping default_path update"
 else
 	log "Setting default_path to ${INSTALL_DIR}"
-	HOME="$DETECTED_HOME" "$TARGET_PATH" set-config default_path "$INSTALL_DIR"
+	HOME="$DETECTED_HOME" BIN_EXE_DIR="$INSTALL_DIR" "$TARGET_PATH" set-config default_path "$INSTALL_DIR"
 fi
 
 log "Installed bin to ${TARGET_PATH}"
