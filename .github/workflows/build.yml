@@ -28,3 +28,74 @@ jobs:
         check-latest: true
     - name: Test
       run: go test ./...
+  install-smoke:
+    name: install smoke (${{ matrix.tool.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        tool:
+          - name: jq
+            repo: github.com/jqlang/jq
+          - name: yq
+            repo: github.com/mikefarah/yq
+          - name: ripgrep
+            repo: github.com/BurntSushi/ripgrep
+          - name: fd
+            repo: github.com/sharkdp/fd
+          - name: bat
+            repo: github.com/sharkdp/bat
+          - name: delta
+            repo: github.com/dandavison/delta
+          - name: shellcheck
+            repo: github.com/koalaman/shellcheck
+          - name: hadolint
+            repo: github.com/hadolint/hadolint
+          - name: shfmt
+            repo: github.com/mvdan/sh
+          - name: trivy
+            repo: github.com/aquasecurity/trivy
+    env:
+      HOME: ${{ runner.temp }}/bin-home
+      BIN_EXE_DIR: ${{ runner.temp }}/bin-tools
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version-file: 'go.mod'
+        check-latest: true
+    - name: Build bin
+      run: go build -o ./bin-test .
+    - name: Install tool
+      run: |
+        mkdir -p "$HOME" "$BIN_EXE_DIR"
+        ./bin-test install --force "${{ matrix.tool.repo }}"
+  pinned-install-smoke:
+    name: pinned install smoke
+    runs-on: ubuntu-latest
+    env:
+      HOME: ${{ runner.temp }}/bin-home-pinned
+      BIN_EXE_DIR: ${{ runner.temp }}/bin-tools-pinned
+      GITHUB_TOKEN: ${{ github.token }}
+      PINNED_RIPGREP_VERSION: 13.0.0
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version-file: 'go.mod'
+        check-latest: true
+    - name: Build bin
+      run: go build -o ./bin-test .
+    - name: Install, pin, update, and verify version
+      run: |
+        mkdir -p "$HOME" "$BIN_EXE_DIR"
+        ./bin-test install --force "github.com/BurntSushi/ripgrep/releases/tag/${PINNED_RIPGREP_VERSION}"
+        ./bin-test pin "$BIN_EXE_DIR/rg"
+        "$BIN_EXE_DIR/rg" --version | grep -F "ripgrep ${PINNED_RIPGREP_VERSION}"
+        ./bin-test update --yes
+        "$BIN_EXE_DIR/rg" --version | grep -F "ripgrep ${PINNED_RIPGREP_VERSION}"
