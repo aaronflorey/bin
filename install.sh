@@ -166,6 +166,23 @@ lookup_home_dir() {
 	printf '%s\n' "$HOME"
 }
 
+detect_config_path() {
+	xdg_path="${DETECTED_HOME}/.config/bin/config.json"
+	legacy_path="${DETECTED_HOME}/.bin/config.json"
+
+	if [ -f "$xdg_path" ]; then
+		printf '%s\n' "$xdg_path"
+		return
+	fi
+
+	if [ -f "$legacy_path" ]; then
+		printf '%s\n' "$legacy_path"
+		return
+	fi
+
+	printf '%s\n' "$xdg_path"
+}
+
 OS="$(detect_os)"
 ARCH="$(detect_arch)"
 
@@ -189,6 +206,20 @@ log "Detected user: ${DETECTED_USER}"
 log "Detected home: ${DETECTED_HOME}"
 log "Install directory: ${INSTALL_DIR}"
 
+CONFIG_PATH="$(detect_config_path)"
+CONFIG_DIR="$(dirname "$CONFIG_PATH")"
+if [ -f "$CONFIG_PATH" ]; then
+	CONFIG_EXISTS="true"
+else
+	CONFIG_EXISTS="false"
+fi
+
+mkdir -p "$CONFIG_DIR"
+if [ "$CONFIG_EXISTS" = "false" ]; then
+	log "Preparing config at ${CONFIG_PATH}"
+	printf '{\n  "default_path": "%s",\n  "bins": {}\n}\n' "$INSTALL_DIR" > "$CONFIG_PATH"
+fi
+
 RELEASE_JSON="$(http_get "$API_URL")"
 TAG_NAME="$(printf '%s\n' "$RELEASE_JSON" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
 [ -n "$TAG_NAME" ] || fail "failed to determine latest release tag"
@@ -210,14 +241,12 @@ chmod 0755 "$BOOTSTRAP_BIN"
 mkdir -p "$INSTALL_DIR"
 TARGET_PATH="${INSTALL_DIR}/bin"
 log "Bootstrapping install via ${BOOTSTRAP_BIN}"
-HOME="$DETECTED_HOME" BIN_EXE_DIR="$INSTALL_DIR" "$BOOTSTRAP_BIN" install --force "github.com/${REPO}" "$TARGET_PATH"
+HOME="$DETECTED_HOME" BIN_CONFIG="$CONFIG_PATH" BIN_EXE_DIR="$INSTALL_DIR" "$BOOTSTRAP_BIN" install --force "github.com/${REPO}" "$TARGET_PATH"
 
-CONFIG_PATH="${DETECTED_HOME}/.config/bin/config.json"
-if [ -f "$CONFIG_PATH" ]; then
-	log "Existing config found at ${CONFIG_PATH}; skipping default_path update"
+if [ "$CONFIG_EXISTS" = "true" ]; then
+	log "Existing config found at ${CONFIG_PATH}; preserving settings"
 else
-	log "Setting default_path to ${INSTALL_DIR}"
-	HOME="$DETECTED_HOME" BIN_EXE_DIR="$INSTALL_DIR" "$TARGET_PATH" set-config default_path "$INSTALL_DIR"
+	log "Initialized config with default_path=${INSTALL_DIR} at ${CONFIG_PATH}"
 fi
 
 log "Installed bin to ${TARGET_PATH}"
