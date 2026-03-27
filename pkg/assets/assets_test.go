@@ -202,12 +202,15 @@ func TestFilterAssets(t *testing.T) {
 func TestFilterAssetsSelect(t *testing.T) {
 	originalResolver := resolver
 	originalSelect := selectOption
+	originalIsInteractive := isInteractive
 	defer func() {
 		resolver = originalResolver
 		selectOption = originalSelect
+		isInteractive = originalIsInteractive
 	}()
 
 	resolver = testLinuxAMDResolver
+	isInteractive = func() bool { return true }
 	// selectOption should NOT be called when autoSelect matches a candidate
 	selectOption = func(msg string, opts []fmt.Stringer) (interface{}, error) {
 		t.Fatal("selectOption should not be called when autoSelect matches a candidate")
@@ -230,12 +233,15 @@ func TestFilterAssetsSelect(t *testing.T) {
 func TestFilterAssetsPromptsWhenLibCRankingStillTies(t *testing.T) {
 	originalResolver := resolver
 	originalSelect := selectOption
+	originalIsInteractive := isInteractive
 	defer func() {
 		resolver = originalResolver
 		selectOption = originalSelect
+		isInteractive = originalIsInteractive
 	}()
 
 	resolver = testLinuxAMDResolver
+	isInteractive = func() bool { return true }
 	prompted := false
 	selectOption = func(msg string, opts []fmt.Stringer) (interface{}, error) {
 		prompted = true
@@ -259,6 +265,66 @@ func TestFilterAssetsPromptsWhenLibCRankingStillTies(t *testing.T) {
 	}
 }
 
+func TestFilterAssetsPrefersExplicitArchOverGenericSuffix(t *testing.T) {
+	originalResolver := resolver
+	originalSelect := selectOption
+	originalIsInteractive := isInteractive
+	defer func() {
+		resolver = originalResolver
+		selectOption = originalSelect
+		isInteractive = originalIsInteractive
+	}()
+
+	resolver = testLinuxAMDResolver
+	isInteractive = func() bool { return false }
+	selectOption = func(msg string, opts []fmt.Stringer) (interface{}, error) {
+		t.Fatal("selectOption should not be called when architecture ranking can resolve")
+		return nil, nil
+	}
+
+	f := NewFilter(&FilterOpts{})
+	result, err := f.FilterAssets("jq", []*Asset{
+		{Name: "jq-linux-amd64", URL: "https://example.test/jq-linux-amd64"},
+		{Name: "jq-linux64", URL: "https://example.test/jq-linux64"},
+	}, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Name != "jq-linux-amd64" {
+		t.Fatalf("expected jq-linux-amd64, got %s", result.Name)
+	}
+}
+
+func TestFilterAssetsFailsNonInteractiveWhenStillAmbiguous(t *testing.T) {
+	originalResolver := resolver
+	originalSelect := selectOption
+	originalIsInteractive := isInteractive
+	defer func() {
+		resolver = originalResolver
+		selectOption = originalSelect
+		isInteractive = originalIsInteractive
+	}()
+
+	resolver = testLinuxAMDResolver
+	isInteractive = func() bool { return false }
+	selectOption = func(msg string, opts []fmt.Stringer) (interface{}, error) {
+		t.Fatal("selectOption should not be called in non-interactive mode")
+		return nil, nil
+	}
+
+	f := NewFilter(&FilterOpts{})
+	_, err := f.FilterAssets("cli", []*Asset{
+		{Name: "cli-linux-amd64.tar.gz", URL: "https://example.test/cli-linux-amd64.tar.gz"},
+		{Name: "cli-linux-amd64.zip", URL: "https://example.test/cli-linux-amd64.zip"},
+	}, "")
+	if err == nil {
+		t.Fatal("expected ambiguity error in non-interactive mode")
+	}
+	if !strings.Contains(err.Error(), "use --select") {
+		t.Fatalf("expected guidance to use --select, got: %v", err)
+	}
+}
+
 func TestLooksLikeMetadataAsset(t *testing.T) {
 	cases := []struct {
 		name string
@@ -273,6 +339,11 @@ func TestLooksLikeMetadataAsset(t *testing.T) {
 		{
 			name: "checksums token",
 			in:   "checksums.txt",
+			out:  true,
+		},
+		{
+			name: "sigstore sidecar",
+			in:   "trivy_0.69.3_Linux-64bit.tar.gz.sigstore.json",
 			out:  true,
 		},
 		{
@@ -304,6 +375,11 @@ func TestLooksLikeArchiveJunk(t *testing.T) {
 		{
 			name: "license with no extension",
 			in:   "mytool-1.0.0-darwin-arm64/LICENSE",
+			out:  true,
+		},
+		{
+			name: "unlicense with no extension",
+			in:   "mytool-1.0.0-darwin-arm64/UNLICENSE",
 			out:  true,
 		},
 		{
@@ -344,6 +420,21 @@ func TestLooksLikeArchiveJunk(t *testing.T) {
 		{
 			name: "completions directory",
 			in:   "tool-1.0/completions/tool.bash",
+			out:  true,
+		},
+		{
+			name: "complete directory",
+			in:   "tool-1.0/complete/tool.bash",
+			out:  true,
+		},
+		{
+			name: "contrib directory",
+			in:   "tool-1.0/contrib/report.tpl",
+			out:  true,
+		},
+		{
+			name: "template suffix",
+			in:   "tool-1.0/report.tpl",
 			out:  true,
 		},
 	}

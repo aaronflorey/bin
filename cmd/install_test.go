@@ -17,3 +17,11 @@ func TestInstallRejectsNonPositiveMinAgeDays(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestInstallHasPinFlag(t *testing.T) {
+	cmd := newInstallCmd()
+
+	if cmd.cmd.Flags().Lookup("pin") == nil {
+		t.Fatal("expected --pin flag to be registered")
+	}
+}

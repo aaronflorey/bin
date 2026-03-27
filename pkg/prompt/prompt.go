@@ -8,9 +8,18 @@ import (
 	"strings"
 
 	"github.com/aaronflorey/bin/pkg/spinner"
+	"golang.org/x/term"
 )
 
 var stdin io.Reader = os.Stdin
+
+func IsInteractive() bool {
+	f, ok := stdin.(*os.File)
+	if !ok {
+		return true
+	}
+	return term.IsTerminal(int(f.Fd()))
+}
 
 // Confirm prints a confirmation prompt
 // for the given message and waits for the
@@ -25,6 +34,9 @@ func Confirm(message string) error {
 
 	response, err := reader.ReadString('\n')
 	if err != nil {
+		if err == io.EOF {
+			return fmt.Errorf("command aborted")
+		}
 		return fmt.Errorf("invalid input")
 	}
 

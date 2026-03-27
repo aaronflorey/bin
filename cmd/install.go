@@ -23,6 +23,7 @@ type installOpts struct {
 	all        bool
 	autoSelect string
 	minAgeDays int
+	pin        bool
 }
 
 func newInstallCmd() *installCmd {
@@ -46,13 +47,17 @@ func newInstallCmd() *installCmd {
 				return err
 			}
 
-			pinVersion := false
-			if hasExplicitVersion {
-				err := prompt.Confirm(fmt.Sprintf("Detected release URL for version %s. Do you want to pin this version?", requestedVersion))
-				if err == nil {
-					pinVersion = true
-				} else if err.Error() != "command aborted" {
-					return err
+			pinVersion := root.opts.pin
+			if hasExplicitVersion && !pinVersion {
+				if prompt.IsInteractive() {
+					err := prompt.Confirm(fmt.Sprintf("Detected release URL for version %s. Do you want to pin this version?", requestedVersion))
+					if err == nil {
+						pinVersion = true
+					} else if err.Error() != "command aborted" {
+						return err
+					}
+				} else {
+					log.Debugf("Skipping pin prompt for %s in non-interactive mode", requestedVersion)
 				}
 			}
 
@@ -116,5 +121,6 @@ func newInstallCmd() *installCmd {
 	root.cmd.Flags().StringVarP(&root.opts.provider, "provider", "p", "", "Forces to use a specific provider")
 	root.cmd.Flags().StringVarP(&root.opts.autoSelect, "select", "s", "", "Auto select installation file (skips interactive prompt)")
 	root.cmd.Flags().IntVar(&root.opts.minAgeDays, "min-age-days", 0, "Require the selected release to be at least this many days old")
+	root.cmd.Flags().BoolVar(&root.opts.pin, "pin", false, "Pin installed version without prompting")
 	return root
 }
