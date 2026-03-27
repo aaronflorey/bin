@@ -3,9 +3,11 @@ package options
 import (
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 
 	"github.com/aaronflorey/bin/pkg/spinner"
+	"golang.org/x/term"
 )
 
 type LiteralStringer string
@@ -14,12 +16,19 @@ func (l LiteralStringer) String() string {
 	return string(l)
 }
 
+func IsInteractive() bool {
+	return term.IsTerminal(int(os.Stdin.Fd()))
+}
+
 // Select prompts the user which
 // of the available options is the desired
 // through STDIN and returns the selected one
 func Select(msg string, opts []fmt.Stringer) (interface{}, error) {
 	if len(opts) == 1 {
 		return opts[0], nil
+	}
+	if !IsInteractive() {
+		return nil, fmt.Errorf("interactive selection required")
 	}
 	resume := spinner.Pause()
 	defer resume()
@@ -56,6 +65,9 @@ func Select(msg string, opts []fmt.Stringer) (interface{}, error) {
 func SelectCustom(msg string, opts []fmt.Stringer) (interface{}, error) {
 	if len(opts) == 1 {
 		return opts[0], nil
+	}
+	if !IsInteractive() {
+		return nil, fmt.Errorf("interactive selection required")
 	}
 	resume := spinner.Pause()
 	defer resume()

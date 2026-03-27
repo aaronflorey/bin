@@ -56,7 +56,7 @@ jobs:
         mkdir -p "$HOME"
         sh ./install.sh
         test -x "$HOME/.local/bin/bin"
-        "$HOME/.local/bin/bin" version
+        "$HOME/.local/bin/bin" --version
   install-smoke:
     name: install smoke (${{ matrix.tool.name }})
     runs-on: ubuntu-latest

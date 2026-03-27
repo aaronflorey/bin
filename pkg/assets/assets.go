@@ -32,30 +32,32 @@ var (
 	metadataSuffixes = []string{
 		".sha256", ".sha512", ".sha1", ".md5",
 		".sha256sum", ".sha512sum",
+		".sigstore.json", ".intoto.jsonl",
 		".sig", ".minisig", ".pem", ".crt", ".cer", ".asc",
 	}
 
 	metadataTokens = []string{
 		"checksum", "sha256sum", "sha512sum",
+		"sigstore", "intoto",
 	}
 
 	archiveJunkSuffixes = []string{
 		".md", ".markdown", ".rst", ".adoc", ".txt", ".rtf",
 		".html", ".htm", ".pdf",
 		".png", ".jpg", ".jpeg", ".gif", ".svg",
-		".yml", ".yaml", ".json", ".toml", ".ini",
+		".yml", ".yaml", ".json", ".toml", ".ini", ".tpl",
 		".example", ".sample",
 	}
 
 	archiveJunkBaseNames = []string{
-		"license", "copying", "notice",
+		"license", "unlicense", "copying", "notice",
 		"readme", "changelog", "changes", "news",
 		"authors", "contributors", "contributing",
 		"installation",
 	}
 
 	archiveJunkDirs = []string{
-		"/autocomplete/", "/completions/",
+		"/autocomplete/", "/completions/", "/complete/", "/contrib/",
 	}
 )
 
@@ -139,6 +141,7 @@ func (runtimeResolver) GetOSSpecificExtensions() []string {
 
 var resolver platformResolver = runtimeResolver{}
 var selectOption = options.Select
+var isInteractive = options.IsInteractive
 
 func (g FilteredAsset) String() string {
 	if g.DisplayName != "" {
@@ -234,6 +237,7 @@ func (f *Filter) FilterAssets(repoName string, as []*Asset, autoSelect string) (
 				}
 			}
 			matches = rankLinuxLibCMatches(matches)
+			matches = rankArchitectureMatches(matches)
 
 		} else {
 			log.Debugf("--all flag was supplied, skipping scoring")
@@ -264,6 +268,17 @@ func (f *Filter) FilterAssets(repoName string, as []*Asset, autoSelect string) (
 		sort.SliceStable(generic, func(i, j int) bool {
 			return generic[i].String() < generic[j].String()
 		})
+
+		if !isInteractive() {
+			opts := make([]string, 0, len(generic))
+			for _, candidate := range generic {
+				opts = append(opts, candidate.String())
+			}
+			return nil, fmt.Errorf(
+				"multiple matches found in non-interactive mode: %s (use --select to choose one)",
+				strings.Join(opts, ", "),
+			)
+		}
 
 		choice, err := selectOption("Multiple matches found, please select one:", generic)
 		if err != nil {
@@ -318,6 +333,46 @@ func rankLinuxLibCMatches(matches []*FilteredAsset) []*FilteredAsset {
 	return filtered
 }
 
+func rankArchitectureMatches(matches []*FilteredAsset) []*FilteredAsset {
+	if len(matches) <= 1 {
+		return matches
+	}
+
+	preferred := preferredArchTokens()
+	if len(preferred) == 0 {
+		return matches
+	}
+
+	preferredSet := make(map[string]struct{}, len(preferred))
+	for _, token := range preferred {
+		preferredSet[token] = struct{}{}
+	}
+
+	bestRank := archRankUnknown
+	filtered := make([]*FilteredAsset, 0, len(matches))
+	for _, match := range matches {
+		rank := classifyArch(match.Name, preferredSet)
+		if rank < bestRank {
+			bestRank = rank
+			filtered = filtered[:0]
+			filtered = append(filtered, match)
+			continue
+		}
+		if rank == bestRank {
+			filtered = append(filtered, match)
+		}
+	}
+
+	if len(filtered) == len(matches) {
+		return matches
+	}
+
+	for _, match := range filtered {
+		log.Debugf("Keeping %v after architecture ranking", match.Name)
+	}
+	return filtered
+}
+
 type libCRank int
 
 const (
@@ -327,7 +382,23 @@ const (
 	libCRankUnknown
 )
 
+type archRank int
+
+const (
+	archRankPreferred archRank = iota
+	archRankGeneric
+	archRankOpposite
+	archRankUnknown
+)
+
 var knownLibCTokens = []string{"gnu", "glibc", "musl"}
+var knownArchTokens = []string{
+	"amd64", "x86_64", "x64", "64bit",
+	"arm64", "aarch64",
+	"386", "i386", "x86", "32bit",
+	"armv7", "armv6", "arm",
+	"ppc64le", "s390x", "riscv64", "mips64", "mips64le",
+}
 
 func classifyLibC(candidate string, preferredSet map[string]struct{}) libCRank {
 	lower := strings.ToLower(candidate)
@@ -351,6 +422,71 @@ func classifyLibC(candidate string, preferredSet map[string]struct{}) libCRank {
 	default:
 		return libCRankOpposite
 	}
+}
+
+func preferredArchTokens() []string {
+	preferred := append([]string{}, resolver.GetArch()...)
+	lowerPreferred := make(map[string]struct{}, len(preferred))
+	for i := range preferred {
+		preferred[i] = strings.ToLower(preferred[i])
+		lowerPreferred[preferred[i]] = struct{}{}
+	}
+
+	if _, ok := lowerPreferred["amd64"]; ok {
+		preferred = append(preferred, "64bit")
+	}
+	if _, ok := lowerPreferred["x86_64"]; ok {
+		preferred = append(preferred, "64bit")
+	}
+
+	return appendUnique(nil, preferred...)
+}
+
+func classifyArch(candidate string, preferredSet map[string]struct{}) archRank {
+	lower := strings.ToLower(candidate)
+
+	hasPreferred := false
+	hasKnownArch := false
+	for _, token := range knownArchTokens {
+		if containsDelimitedToken(lower, token) {
+			hasKnownArch = true
+			if _, ok := preferredSet[token]; ok {
+				hasPreferred = true
+			}
+		}
+	}
+
+	switch {
+	case hasPreferred:
+		return archRankPreferred
+	case !hasKnownArch:
+		return archRankGeneric
+	default:
+		return archRankOpposite
+	}
+}
+
+func containsDelimitedToken(candidate, token string) bool {
+	start := 0
+	for {
+		index := strings.Index(candidate[start:], token)
+		if index < 0 {
+			return false
+		}
+		index += start
+
+		beforeOK := index == 0 || !isAlphaNumeric(candidate[index-1])
+		afterIndex := index + len(token)
+		afterOK := afterIndex == len(candidate) || !isAlphaNumeric(candidate[afterIndex])
+		if beforeOK && afterOK {
+			return true
+		}
+		start = index + 1
+	}
+}
+
+func isAlphaNumeric(ch byte) bool {
+	return (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9')
 }
 
 // SanitizeName removes irrelevant information from the

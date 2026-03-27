@@ -243,6 +243,14 @@ TARGET_PATH="${INSTALL_DIR}/bin"
 log "Bootstrapping install via ${BOOTSTRAP_BIN}"
 HOME="$DETECTED_HOME" BIN_CONFIG="$CONFIG_PATH" BIN_EXE_DIR="$INSTALL_DIR" "$BOOTSTRAP_BIN" install --force "github.com/${REPO}" "$TARGET_PATH"
 
+if "$TARGET_PATH" --version >/dev/null 2>&1; then
+	:
+elif "$TARGET_PATH" version >/dev/null 2>&1; then
+	:
+else
+	fail "installed binary failed version check"
+fi
+
 if [ "$CONFIG_EXISTS" = "true" ]; then
 	log "Existing config found at ${CONFIG_PATH}; preserving settings"
 else
