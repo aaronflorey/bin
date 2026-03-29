@@ -1,0 +1,194 @@
+name: 'Setup bin'
+description: 'Install the bin binary manager and optionally install binaries from GitHub releases'
+
+branding:
+  icon: 'package'
+  color: 'blue'
+
+inputs:
+  version:
+    description: 'Version of bin to install (e.g., v1.1.0). Defaults to latest.'
+    required: false
+    default: 'latest'
+  install:
+    description: |
+      Newline-separated list of GitHub repositories to install binaries from.
+      Supported formats:
+        - org/repo            (installs the latest release)
+        - org/repo@version    (installs a specific version)
+    required: false
+    default: ''
+  github-token:
+    description: 'GitHub token used for API requests and downloading release assets.'
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  version:
+    description: 'The installed version of bin (e.g., v1.1.0)'
+    value: ${{ steps.install-bin.outputs.version }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install bin
+      id: install-bin
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        BIN_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+
+        # ── Detect platform ────────────────────────────────────────────────────
+        case "$(uname -s)" in
+          Linux)               os="linux"   ; ext="tar.gz" ;;
+          Darwin)              os="darwin"  ; ext="tar.gz" ;;
+          MINGW*|MSYS*|CYGWIN*) os="windows" ; ext="zip"    ;;
+          *) echo "::error::Unsupported OS: $(uname -s)"; exit 1 ;;
+        esac
+
+        case "$(uname -m)" in
+          x86_64)          arch="amd64" ;;
+          aarch64 | arm64) arch="arm64" ;;
+          *) echo "::error::Unsupported architecture: $(uname -m)"; exit 1 ;;
+        esac
+
+        # ── Resolve version ────────────────────────────────────────────────────
+        if [ "$BIN_VERSION" = "latest" ]; then
+          echo "Fetching latest bin release..."
+          version=$(curl -fsSL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/aaronflorey/bin/releases/latest" \
+            | grep -m1 '"tag_name"' \
+            | sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+          if [ -z "$version" ]; then
+            echo "::error::Failed to fetch the latest bin version from the GitHub API. Check that the token has sufficient permissions."
+            exit 1
+          fi
+        else
+          version="$BIN_VERSION"
+          # Normalise: ensure the version has a 'v' prefix
+          [[ "$version" != v* ]] && version="v${version}"
+        fi
+
+        # ── Build download URL ─────────────────────────────────────────────────
+        # goreleaser strips the leading 'v' from the version in archive names
+        version_num="${version#v}"
+        asset="bin_${version_num}_${os}_${arch}.${ext}"
+        download_url="https://github.com/aaronflorey/bin/releases/download/${version}/${asset}"
+
+        echo "Installing bin ${version} (${os}/${arch})..."
+
+        # ── Download and extract ───────────────────────────────────────────────
+        install_dir="${HOME}/.local/bin"
+        mkdir -p "${install_dir}"
+
+        tmp_dir=$(mktemp -d)
+        trap 'rm -rf "${tmp_dir}"' EXIT
+
+        http_code=$(curl -fsSL \
+          -H "Authorization: Bearer ${GH_TOKEN}" \
+          -w "%{http_code}" \
+          -o "${tmp_dir}/${asset}" \
+          "${download_url}" || echo "000")
+
+        if [ "${http_code}" != "200" ]; then
+          echo "::error::Failed to download ${download_url} (HTTP ${http_code}). Verify the version '${version}' exists and the token has sufficient permissions."
+          exit 1
+        fi
+
+        if [ "${ext}" = "tar.gz" ]; then
+          tar -xzf "${tmp_dir}/${asset}" -C "${tmp_dir}"
+        else
+          unzip -q "${tmp_dir}/${asset}" -d "${tmp_dir}"
+        fi
+
+        bin_name="bin"
+        [ "${os}" = "windows" ] && bin_name="bin.exe"
+
+        if [ ! -f "${tmp_dir}/${bin_name}" ]; then
+          echo "::error::Binary '${bin_name}' was not found in the downloaded archive."
+          exit 1
+        fi
+
+        chmod +x "${tmp_dir}/${bin_name}"
+        mv "${tmp_dir}/${bin_name}" "${install_dir}/${bin_name}"
+
+        # ── Expose to subsequent steps ─────────────────────────────────────────
+        echo "${install_dir}" >> "${GITHUB_PATH}"
+        echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+        echo "bin ${version} installed to ${install_dir}"
+
+    - name: Install binaries with bin
+      if: ${{ inputs.install != '' }}
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        BIN_INSTALL_LIST: ${{ inputs.install }}
+      run: |
+        set -euo pipefail
+
+        # Direct installed binaries to the same directory that is already on PATH
+        export BIN_EXE_DIR="${HOME}/.local/bin"
+
+        failed=0
+
+        while IFS= read -r entry; do
+          # Strip leading/trailing whitespace
+          entry="${entry#"${entry%%[![:space:]]*}"}"
+          entry="${entry%"${entry##*[![:space:]]}"}"
+
+          # Skip blank lines and comment lines
+          [ -z "$entry" ] && continue
+          [[ "$entry" == "#"* ]] && continue
+
+          # Validate the entry looks like org/repo or org/repo@version
+          if [[ "$entry" != *"/"* ]]; then
+            echo "::error::Invalid entry '${entry}': expected format is 'org/repo' or 'org/repo@version'."
+            failed=1
+            continue
+          fi
+
+          if [[ "$entry" == *"@"* ]]; then
+            # ── Versioned install: org/repo@version ────────────────────────────
+            repo="${entry%@*}"
+            ver="${entry#*@}"
+
+            # Validate the repo portion still contains a slash
+            if [[ "$repo" != *"/"* ]]; then
+              echo "::error::Invalid entry '${entry}': expected format is 'org/repo@version'."
+              failed=1
+              continue
+            fi
+
+            # Normalise version prefix
+            [[ "$ver" != v* ]] && ver="v${ver}"
+
+            install_url="github.com/${repo}/releases/tag/${ver}"
+            echo "Installing ${repo}@${ver}..."
+
+            # Pipe 'n' so the non-interactive pin-version prompt is declined
+            # gracefully rather than blocking or erroring.
+            if ! echo "n" | bin install --force "${install_url}"; then
+              echo "::error::Failed to install '${entry}'."
+              failed=1
+            fi
+          else
+            # ── Latest install: org/repo ───────────────────────────────────────
+            install_url="github.com/${entry}"
+            echo "Installing ${entry}..."
+
+            if ! bin install --force "${install_url}"; then
+              echo "::error::Failed to install '${entry}'."
+              failed=1
+            fi
+          fi
+        done <<< "$BIN_INSTALL_LIST"
+
+        if [ "$failed" -ne 0 ]; then
+          echo "::error::One or more binaries failed to install. See the errors above for details."
+          exit 1
+        fi
