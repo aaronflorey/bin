@@ -130,3 +130,36 @@ jobs:
         "$BIN_EXE_DIR/rg" --version | grep -F "ripgrep ${PINNED_RIPGREP_VERSION}"
         ./bin-test update --yes
         "$BIN_EXE_DIR/rg" --version | grep -F "ripgrep ${PINNED_RIPGREP_VERSION}"
+  action-smoke:
+    name: action smoke test
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    - name: Run action (latest bin, install jq)
+      id: setup
+      uses: ./
+      with:
+        github-token: ${{ github.token }}
+        install: jqlang/jq
+    - name: Verify bin is on PATH and reports a version
+      run: bin version
+    - name: Verify action version output is set
+      run: |
+        if [ -z "${{ steps.setup.outputs.version }}" ]; then
+          echo "::error::Action did not set the version output"
+          exit 1
+        fi
+        echo "Installed bin ${{ steps.setup.outputs.version }}"
+    - name: Verify installed binary works
+      run: jq --version
+    - name: Run action with pinned bin version and versioned install
+      uses: ./
+      with:
+        version: v1.1.0
+        github-token: ${{ github.token }}
+        install: BurntSushi/ripgrep@14.1.1
+    - name: Verify pinned installs work
+      run: rg --version | grep -F "ripgrep 14.1.1"
