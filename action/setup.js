@@ -44,7 +44,7 @@ function authHeaders() {
 
 /**
  * Makes an HTTPS GET request, following up to `maxRedirects` redirects.
- * Returns a Promise<{ statusCode, headers, body: Buffer }>.
+ * Returns a Promise<{ statusCode, body: Buffer }>.
  */
 function httpsGet(url, headers = {}, maxRedirects = 5) {
   return new Promise((resolve, reject) => {
@@ -53,25 +53,28 @@ function httpsGet(url, headers = {}, maxRedirects = 5) {
         if (maxRedirects === 0) return reject(new Error(`Too many redirects for ${url}`));
         return resolve(httpsGet(res.headers.location, headers, maxRedirects - 1));
       }
-
       const chunks = [];
       res.on('data', (chunk) => chunks.push(chunk));
-      res.on('end', () => resolve({ statusCode: res.statusCode, headers: res.headers, body: Buffer.concat(chunks) }));
+      res.on('end', () => resolve({ statusCode: res.statusCode, body: Buffer.concat(chunks) }));
       res.on('error', reject);
     }).on('error', reject);
   });
 }
 
 /**
- * Downloads `url` to `destPath`, following redirects.
+ * Streams `url` to `destPath`, following redirects.
+ * Asset downloads don't include auth headers after a redirect to S3/CDN.
  */
-function downloadFile(url, destPath, headers = {}) {
+function downloadFile(url, destPath, headers = {}, maxRedirects = 5) {
   return new Promise((resolve, reject) => {
-    function get(u, redirectsLeft) {
-      https.get(u, { headers }, (res) => {
+    function get(u, hdrs, redirectsLeft) {
+      https.get(u, { headers: hdrs }, (res) => {
         if ((res.statusCode === 301 || res.statusCode === 302) && res.headers.location) {
           if (redirectsLeft === 0) return reject(new Error(`Too many redirects for ${u}`));
-          return get(res.headers.location, redirectsLeft - 1);
+          // Drop auth header on cross-origin redirects (e.g. GitHub → S3)
+          const next = res.headers.location;
+          const sameOrigin = new URL(next).hostname === new URL(u).hostname;
+          return get(next, sameOrigin ? hdrs : {}, redirectsLeft - 1);
         }
         if (res.statusCode !== 200) {
           res.resume();
@@ -83,7 +86,7 @@ function downloadFile(url, destPath, headers = {}) {
         file.on('error', reject);
       }).on('error', reject);
     }
-    get(url, 5);
+    get(url, headers, maxRedirects);
   });
 }
 
@@ -93,90 +96,135 @@ function detectPlatform() {
   const platform = os.platform();
   const arch = os.arch();
 
-  const osMap = { linux: ['linux', 'tar.gz'], darwin: ['darwin', 'tar.gz'], win32: ['windows', 'zip'] };
+  const osMap = { linux: 'linux', darwin: 'darwin', win32: 'windows' };
   const archMap = { x64: 'amd64', arm64: 'arm64' };
 
   if (!osMap[platform]) fail(`Unsupported OS: ${platform}`);
   if (!archMap[arch]) fail(`Unsupported architecture: ${arch}`);
 
-  const [osName, ext] = osMap[platform];
-  return { osName, arch: archMap[arch], ext };
+  return { osName: osMap[platform], arch: archMap[arch] };
 }
 
-// ── Version resolution ─────────────────────────────────────────────────────────
+// ── Release fetching ───────────────────────────────────────────────────────────
 
-async function resolveVersion(requested) {
-  if (requested !== 'latest') {
-    return requested.startsWith('v') ? requested : `v${requested}`;
+async function fetchRelease(requestedVersion) {
+  let apiUrl;
+
+  if (requestedVersion === 'latest') {
+    console.log('Fetching latest bin release...');
+    apiUrl = 'https://api.github.com/repos/aaronflorey/bin/releases/latest';
+  } else {
+    const tag = requestedVersion.startsWith('v') ? requestedVersion : `v${requestedVersion}`;
+    console.log(`Fetching bin release ${tag}...`);
+    apiUrl = `https://api.github.com/repos/aaronflorey/bin/releases/tags/${tag}`;
   }
 
-  console.log('Fetching latest bin release...');
-  const { statusCode, body } = await httpsGet(
-    'https://api.github.com/repos/aaronflorey/bin/releases/latest',
-    authHeaders(),
-  );
+  const { statusCode, body } = await httpsGet(apiUrl, authHeaders());
 
   if (statusCode !== 200) {
-    fail(`Failed to fetch latest version from GitHub API (HTTP ${statusCode}). Ensure the token has sufficient permissions.`);
+    fail(`Failed to fetch release from GitHub API (HTTP ${statusCode}). Verify the version exists and the token has sufficient permissions.`);
   }
 
   let release;
   try {
     release = JSON.parse(body.toString());
   } catch {
-    fail('Failed to parse the GitHub API response while resolving the latest version.');
+    fail('Failed to parse the GitHub API response.');
   }
 
   if (!release.tag_name) fail('GitHub API response did not include a tag_name field.');
-  return release.tag_name;
+  return release;
+}
+
+// ── Asset selection ────────────────────────────────────────────────────────────
+
+/**
+ * Picks the best matching asset for the current platform.
+ *
+ * Strategy: find assets whose name contains both the OS and arch strings.
+ * Excludes checksums and source archives. Prefers shorter names (fewer
+ * extra qualifiers) when multiple candidates match.
+ */
+function selectAsset(assets, osName, arch) {
+  const candidates = assets.filter((a) => {
+    const n = a.name.toLowerCase();
+    return (
+      n.includes(osName) &&
+      n.includes(arch) &&
+      !n.endsWith('.txt') &&
+      !n.endsWith('.json') &&
+      !n.endsWith('.sbom')
+    );
+  });
+
+  if (candidates.length === 0) {
+    const names = assets.map((a) => a.name).join(', ');
+    fail(`No release asset found for ${osName}/${arch}. Available assets: ${names}`);
+  }
+
+  // Prefer the shortest name — fewest extra qualifiers (e.g. musl, gnu).
+  candidates.sort((a, b) => a.name.length - b.name.length);
+  return candidates[0];
+}
+
+// ── Installation ───────────────────────────────────────────────────────────────
+
+/**
+ * Installs the asset at `assetPath` to `installDir`.
+ * Handles plain binaries, .exe, .tar.gz, and .zip archives.
+ */
+function installAsset(assetPath, assetName, osName, installDir) {
+  const binName = osName === 'windows' ? 'bin.exe' : 'bin';
+  const destPath = path.join(installDir, binName);
+
+  if (assetName.endsWith('.tar.gz') || assetName.endsWith('.tgz')) {
+    const tmpDir = path.dirname(assetPath);
+    execFileSync('tar', ['-xzf', assetPath, '-C', tmpDir], { stdio: 'inherit' });
+    const extracted = path.join(tmpDir, binName);
+    if (!fs.existsSync(extracted)) fail(`'${binName}' not found in archive.`);
+    fs.copyFileSync(extracted, destPath);
+  } else if (assetName.endsWith('.zip')) {
+    const tmpDir = path.dirname(assetPath);
+    if (osName === 'windows') {
+      execFileSync('tar', ['-xf', assetPath, '-C', tmpDir], { stdio: 'inherit' });
+    } else {
+      execFileSync('unzip', ['-q', assetPath, '-d', tmpDir], { stdio: 'inherit' });
+    }
+    const extracted = path.join(tmpDir, binName);
+    if (!fs.existsSync(extracted)) fail(`'${binName}' not found in archive.`);
+    fs.copyFileSync(extracted, destPath);
+  } else {
+    // Plain binary or .exe — use directly.
+    fs.copyFileSync(assetPath, destPath);
+  }
+
+  fs.chmodSync(destPath, 0o755);
 }
 
 // ── Main ───────────────────────────────────────────────────────────────────────
 
 async function main() {
-  const { osName, arch, ext } = detectPlatform();
-  const resolvedVersion = await resolveVersion(version);
-  const versionNum = resolvedVersion.replace(/^v/, '');
+  const { osName, arch } = detectPlatform();
+  const release = await fetchRelease(version);
+  const resolvedVersion = release.tag_name;
 
-  const asset = `bin_${versionNum}_${osName}_${arch}.${ext}`;
-  const downloadUrl = `https://github.com/aaronflorey/bin/releases/download/${resolvedVersion}/${asset}`;
-
-  console.log(`Installing bin ${resolvedVersion} (${osName}/${arch})...`);
+  const asset = selectAsset(release.assets, osName, arch);
+  console.log(`Installing bin ${resolvedVersion} (${osName}/${arch}) via ${asset.name}...`);
 
   const installDir = path.join(os.homedir(), '.local', 'bin');
   fs.mkdirSync(installDir, { recursive: true });
 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bin-setup-'));
   try {
-    const assetPath = path.join(tmpDir, asset);
+    const assetPath = path.join(tmpDir, asset.name);
 
-    console.log(`Downloading ${downloadUrl}...`);
     try {
-      await downloadFile(downloadUrl, assetPath, authHeaders());
+      await downloadFile(asset.browser_download_url, assetPath, authHeaders());
     } catch (err) {
-      fail(`Failed to download ${downloadUrl}: ${err.message}. Verify the version '${resolvedVersion}' exists and the token has sufficient permissions.`);
+      fail(`Failed to download ${asset.browser_download_url}: ${err.message}`);
     }
 
-    // Extract archive
-    if (ext === 'tar.gz') {
-      execFileSync('tar', ['-xzf', assetPath, '-C', tmpDir], { stdio: 'inherit' });
-    } else {
-      // .zip – use tar on Windows (bsdtar), unzip elsewhere
-      if (osName === 'windows') {
-        execFileSync('tar', ['-xf', assetPath, '-C', tmpDir], { stdio: 'inherit' });
-      } else {
-        execFileSync('unzip', ['-q', assetPath, '-d', tmpDir], { stdio: 'inherit' });
-      }
-    }
-
-    const binName = osName === 'windows' ? 'bin.exe' : 'bin';
-    const extractedBin = path.join(tmpDir, binName);
-    if (!fs.existsSync(extractedBin)) {
-      fail(`Binary '${binName}' was not found in the downloaded archive.`);
-    }
-
-    fs.copyFileSync(extractedBin, path.join(installDir, binName));
-    fs.chmodSync(path.join(installDir, binName), 0o755);
+    installAsset(assetPath, asset.name, osName, installDir);
 
     addToPath(installDir);
     setOutput('version', resolvedVersion);
