@@ -66,6 +66,56 @@ scoop bucket add extras
 scoop install extras/bin
 ```
 
+### GitHub Action
+
+Use this repo as a GitHub Action to install `bin` and manage binaries in your workflows.
+
+```yaml
+- uses: aaronflorey/bin@main
+  with:
+    version: latest          # optional, defaults to latest
+    github-token: ${{ secrets.GITHUB_TOKEN }}
+    install: |
+      jqlang/jq
+      sharkdp/bat
+      BurntSushi/ripgrep@v14.1.1
+```
+
+After the action runs, `bin` and all installed binaries are available on `PATH` for all subsequent steps.
+
+#### Inputs
+
+| Input | Required | Default | Description |
+| --- | --- | --- | --- |
+| `version` | no | `latest` | Version of `bin` to install (e.g., `v1.1.0` or `1.1.0`) |
+| `install` | no | _(none)_ | Newline-separated list of binaries to install (`org/repo` or `org/repo@version`) |
+| `github-token` | no | `${{ github.token }}` | Token for GitHub API requests and downloading release assets |
+
+#### Outputs
+
+| Output | Description |
+| --- | --- |
+| `version` | The resolved version of `bin` that was installed (e.g., `v1.1.0`) |
+
+#### Full example
+
+```yaml
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aaronflorey/bin@main
+        with:
+          install: |
+            jqlang/jq
+            mikefarah/yq
+            cli/cli@v2.67.0
+
+      - run: jq --version
+```
+
 ## 📚 Commands Reference
 
 | Command                     | Description                                | Example                          |
