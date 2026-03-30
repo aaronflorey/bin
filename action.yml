@@ -1,0 +1,48 @@
+name: 'Setup bin'
+description: 'Install the bin binary manager and optionally install binaries from GitHub releases'
+
+branding:
+  icon: 'package'
+  color: 'blue'
+
+inputs:
+  version:
+    description: 'Version of bin to install (e.g., v1.1.0). Defaults to latest.'
+    required: false
+    default: 'latest'
+  install:
+    description: |
+      Newline-separated list of GitHub repositories to install binaries from.
+      Supported formats:
+        - org/repo            (installs the latest release)
+        - org/repo@version    (installs a specific version)
+    required: false
+    default: ''
+  github-token:
+    description: 'GitHub token used for API requests and downloading release assets.'
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  version:
+    description: 'The installed version of bin (e.g., v1.1.0)'
+    value: ${{ steps.install-bin.outputs.version }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install bin
+      id: install-bin
+      shell: bash
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: node "${{ github.action_path }}/action/setup.js"
+
+    - name: Install binaries with bin
+      if: ${{ inputs.install != '' }}
+      shell: bash
+      env:
+        INPUT_INSTALL: ${{ inputs.install }}
+        INPUT_GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: node "${{ github.action_path }}/action/install.js"
