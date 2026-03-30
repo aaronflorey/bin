@@ -2,6 +2,7 @@ package prompt
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -25,6 +26,9 @@ func Confirm(message string) error {
 
 	response, err := reader.ReadString('\n')
 	if err != nil {
+		if errors.Is(err, io.EOF) {
+			return fmt.Errorf("command aborted")
+		}
 		return fmt.Errorf("invalid input")
 	}
 
