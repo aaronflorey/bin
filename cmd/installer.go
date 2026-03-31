@@ -117,6 +117,7 @@ func installBinary(opts InstallOpts) (*InstallResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error installing binary: %w", err)
 	}
+	hashString := fmt.Sprintf("%x", hash)
 
 	var configPath string
 	if len(opts.ConfigPath) > 0 {
@@ -137,7 +138,7 @@ func installBinary(opts InstallOpts) (*InstallResult, error) {
 		RemoteName:  pResult.Name,
 		Path:        configPath,
 		Version:     pResult.Version,
-		Hash:        fmt.Sprintf("%x", hash),
+		Hash:        hashString,
 		URL:         opts.URL,
 		Provider:    p.GetID(),
 		PackagePath: pResult.PackagePath,
@@ -147,6 +148,8 @@ func installBinary(opts InstallOpts) (*InstallResult, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	warnDuplicateManagedHash(configPath, hashString)
 
 	return &InstallResult{
 		Name:    pResult.Name,
@@ -233,7 +236,6 @@ func checkFinalPath(path, fileName string, overwrite bool) (string, error) {
 // and makes it executable. It also checks if any other binary
 // has the same hash and exists if so.
 
-// TODO check if other binary has the same hash and warn about it.
 // TODO if the file is zipped, tared, whatever then extract it
 func saveToDisk(f *providers.File, path string, overwrite bool) ([]byte, error) {
 	epath := os.ExpandEnv(path)
@@ -276,6 +278,26 @@ func saveToDisk(f *providers.File, path string, overwrite bool) ([]byte, error) 
 	}
 
 	return h.Sum(nil), nil
+}
+
+func warnDuplicateManagedHash(installedPath, hash string) {
+	if duplicatePath, ok := findManagedDuplicateByHash(config.Get().Bins, installedPath, hash); ok {
+		log.Warnf("binary %s has the same hash as managed binary %s", installedPath, duplicatePath)
+	}
+}
+
+func findManagedDuplicateByHash(bins map[string]*config.Binary, installedPath, hash string) (string, bool) {
+	for path, b := range bins {
+		if path == installedPath {
+			continue
+		}
+		if b.Hash != hash {
+			continue
+		}
+		return path, true
+	}
+
+	return "", false
 }
 
 // resolveBinsToProcess returns the set of binaries to operate on,

@@ -128,3 +128,19 @@ func TestCheckFinalPathAllowsOverwriteWhenForced(t *testing.T) {
 		t.Fatalf("unexpected final path: %s", finalPath)
 	}
 }
+
+func TestFindManagedDuplicateByHash(t *testing.T) {
+	bins := map[string]*config.Binary{
+		"/tmp/tool-a": {Path: "/tmp/tool-a", Hash: "abc"},
+		"/tmp/tool-b": {Path: "/tmp/tool-b", Hash: "def"},
+		"/tmp/tool-c": {Path: "/tmp/tool-c", Hash: "abc"},
+	}
+
+	duplicatePath, ok := findManagedDuplicateByHash(bins, "/tmp/tool-a", "abc")
+	if !ok {
+		t.Fatal("expected duplicate hash to be found")
+	}
+	if duplicatePath != "/tmp/tool-c" {
+		t.Fatalf("unexpected duplicate path: %s", duplicatePath)
+	}
+}
