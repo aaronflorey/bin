@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -92,5 +93,21 @@ func TestLatestDockerTagFallsBackToLatest(t *testing.T) {
 	version, _ := latestDockerTag("dev", tags)
 	if version != "latest" {
 		t.Fatalf("expected latest, got %q", version)
+	}
+}
+
+func TestDockerWrapperScriptTemplateOverride(t *testing.T) {
+	t.Setenv("BIN_DOCKER_RUN_TEMPLATE", "docker run --network host %s:%s")
+	script := dockerWrapperScript("acme/tool", "1.2.3")
+	if script != "docker run --network host acme/tool:1.2.3" {
+		t.Fatalf("unexpected script: %s", script)
+	}
+}
+
+func TestDockerWrapperScriptDefaultTemplate(t *testing.T) {
+	t.Setenv("BIN_DOCKER_RUN_TEMPLATE", "")
+	script := dockerWrapperScript("acme/tool", "1.2.3")
+	if !strings.Contains(script, "acme/tool:1.2.3") {
+		t.Fatalf("expected default template to include image tag, got %q", script)
 	}
 }
