@@ -1,6 +1,8 @@
 package providers
 
 import (
+	"fmt"
+	"os"
 	"regexp"
 	"strings"
 )
@@ -15,14 +17,18 @@ func validateDockerImage(image string) bool {
 }
 
 const (
-	// TODO: this probably won't work on windows so we might need how we mount
-	// TODO: there might be a way were users can configure a template for the
-	// actual execution since some CLIs require some other folders to be mounted
-	// or networks to be shared
-	sh = `@echo off
+	defaultDockerRunTemplate = `@echo off
 docker run --rm -i -t -v %%cd%%:/tmp/cmd -w /tmp/cmd "%s:%s" %%*
 `
 )
+
+func dockerWrapperScript(repo, tag string) string {
+	tpl := os.Getenv("BIN_DOCKER_RUN_TEMPLATE")
+	if strings.TrimSpace(tpl) == "" {
+		tpl = defaultDockerRunTemplate
+	}
+	return fmt.Sprintf(tpl, repo, tag)
+}
 
 // getImageName gets the name of the image from the image repo.
 func getImageName(repo string) string {
