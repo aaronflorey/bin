@@ -17,6 +17,7 @@ type File struct {
 	Data        io.Reader
 	Name        string
 	Version     string
+	ExpectedSHA string
 	Length      int64
 	PackagePath string
 	PublishedAt *time.Time

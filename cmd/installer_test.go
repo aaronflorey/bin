@@ -3,9 +3,11 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/aaronflorey/bin/pkg/config"
+	"github.com/aaronflorey/bin/pkg/providers"
 )
 
 func TestAbsExpandedPath(t *testing.T) {
@@ -72,5 +74,28 @@ func TestExistingConfigBinaryMatchesExpandedPath(t *testing.T) {
 	}
 	if got.Path != expandedPath {
 		t.Fatalf("unexpected binary path: got %q, want %q", got.Path, expandedPath)
+	}
+}
+
+func TestSaveToDiskValidatesExpectedSHA(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "tool")
+
+	_, err := saveToDisk(&providers.File{
+		Data:        strings.NewReader("hello"),
+		Name:        "tool",
+		ExpectedSHA: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+	}, target, false)
+	if err != nil {
+		t.Fatalf("saveToDisk returned error: %v", err)
+	}
+
+	_, err = saveToDisk(&providers.File{
+		Data:        strings.NewReader("world"),
+		Name:        "tool2",
+		ExpectedSHA: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+	}, filepath.Join(dir, "tool2"), false)
+	if err == nil {
+		t.Fatal("expected saveToDisk to fail on sha mismatch")
 	}
 }

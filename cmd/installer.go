@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/aaronflorey/bin/pkg/assets"
@@ -252,6 +253,11 @@ func saveToDisk(f *providers.File, path string, overwrite bool) ([]byte, error) 
 
 	if err := applyChmod(file); err != nil {
 		return nil, err
+	}
+
+	actualHash := fmt.Sprintf("%x", h.Sum(nil))
+	if f.ExpectedSHA != "" && !strings.EqualFold(actualHash, f.ExpectedSHA) {
+		return nil, fmt.Errorf("sha256 mismatch for %s: expected %s, got %s", f.Name, f.ExpectedSHA, actualHash)
 	}
 
 	return h.Sum(nil), nil

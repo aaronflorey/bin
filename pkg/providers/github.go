@@ -50,8 +50,12 @@ func (g *gitHub) Fetch(opts *FetchOpts) (*File, error) {
 	}
 
 	candidates := []*assets.Asset{}
+	checksumAssets := []checksumAsset{}
 	for _, a := range release.Assets {
-		candidates = append(candidates, &assets.Asset{Name: a.GetName(), URL: a.GetURL()})
+		name := a.GetName()
+		url := a.GetURL()
+		candidates = append(candidates, &assets.Asset{Name: name, URL: url})
+		checksumAssets = append(checksumAssets, checksumAsset{Name: name, URL: url})
 	}
 	f := assets.NewFilter(&assets.FilterOpts{SkipScoring: opts.All, PackagePath: opts.PackagePath, SkipPathCheck: opts.SkipPatchCheck, PackageName: opts.PackageName, NonInteractive: opts.NonInteractive})
 
@@ -71,15 +75,21 @@ func (g *gitHub) Fetch(opts *FetchOpts) (*File, error) {
 		return nil, err
 	}
 
+	expectedSHA := ""
+	if outFile.Name == gf.Name {
+		expectedSHA, err = expectedSHA256ForAsset(outFile.Name, checksumAssets, gf.ExtraHeaders)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	version := release.GetTagName()
 
-	// TODO calculate file hash. Not sure if we can / should do it here
-	// since we don't want to read the file unnecesarily. Additionally, sometimes
-	// releases have .sha256 files, so it'd be nice to check for those also
 	file := &File{
 		Data:        outFile.Source,
 		Name:        outFile.Name,
 		Version:     version,
+		ExpectedSHA: expectedSHA,
 		PackagePath: outFile.PackagePath,
 		PublishedAt: githubPublishedAt(release),
 	}
