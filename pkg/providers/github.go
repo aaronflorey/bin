@@ -117,6 +117,10 @@ func (g *gitHub) GetID() string {
 	return "github"
 }
 
+func (g *gitHub) Cleanup(_ *CleanupOpts) error {
+	return nil
+}
+
 func githubPublishedAt(release *github.RepositoryRelease) *time.Time {
 	if release == nil || release.PublishedAt == nil {
 		return nil

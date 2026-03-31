@@ -205,6 +205,10 @@ func (g *gitLab) GetID() string {
 	return "gitlab"
 }
 
+func (g *gitLab) Cleanup(_ *CleanupOpts) error {
+	return nil
+}
+
 // GetLatestVersion checks the latest repo release and
 // returns the corresponding name and url to fetch the version
 func (g *gitLab) GetLatestVersion() (*ReleaseInfo, error) {

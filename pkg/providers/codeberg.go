@@ -113,6 +113,10 @@ func (c *codeberg) GetID() string {
 	return "codeberg"
 }
 
+func (c *codeberg) Cleanup(_ *CleanupOpts) error {
+	return nil
+}
+
 func codebergPublishedAt(release *gitea.Release) *time.Time {
 	if release == nil || release.PublishedAt.IsZero() {
 		return nil

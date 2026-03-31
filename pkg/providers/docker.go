@@ -85,6 +85,16 @@ func (d *docker) GetLatestVersion() (*ReleaseInfo, error) {
 	}, nil
 }
 
+func (d *docker) Cleanup(opts *CleanupOpts) error {
+	if opts != nil && opts.Version != "" {
+		d.tag = opts.Version
+	}
+
+	ref := fmt.Sprintf("%s:%s", d.repo, d.tag)
+	_, err := d.client.ImageRemove(context.Background(), ref, image.RemoveOptions{PruneChildren: true})
+	return err
+}
+
 func (d *docker) GetID() string {
 	return "docker"
 }

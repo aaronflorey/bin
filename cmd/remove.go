@@ -7,6 +7,7 @@ import (
 	"os/exec"
 
 	"github.com/aaronflorey/bin/pkg/config"
+	"github.com/aaronflorey/bin/pkg/providers"
 	"github.com/spf13/cobra"
 )
 
@@ -27,7 +28,13 @@ func newRemoveCmd() *removeCmd {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := config.Get()
 
-			existingToRemove := []string{}
+			type removeTarget struct {
+				configPath string
+				deletePath string
+				binary     *config.Binary
+			}
+
+			targets := []removeTarget{}
 			pathsToDelete := []string{}
 
 			bins := cfg.Bins
@@ -45,13 +52,18 @@ func newRemoveCmd() *removeCmd {
 				}
 				ebp := os.ExpandEnv(bp)
 				if _, ok := bins[ebp]; ok {
-					existingToRemove = append(existingToRemove, ebp)
+					targets = append(targets, removeTarget{configPath: ebp, deletePath: os.ExpandEnv(bp), binary: bins[ebp]})
 					pathsToDelete = append(pathsToDelete, os.ExpandEnv(bp))
 				}
 			}
 
-			if len(existingToRemove) == 0 {
+			if len(targets) == 0 {
 				return nil
+			}
+
+			existingToRemove := make([]string, 0, len(targets))
+			for _, target := range targets {
+				existingToRemove = append(existingToRemove, target.configPath)
 			}
 
 			// Execute pre-remove hooks before any changes
@@ -64,10 +76,20 @@ func newRemoveCmd() *removeCmd {
 				return err
 			}
 
+			for _, target := range targets {
+				p, err := providers.New(target.binary.URL, target.binary.Provider)
+				if err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not initialize provider cleanup for %s: %v\n", target.binary.Path, err)
+					continue
+				}
+
+				err = p.Cleanup(&providers.CleanupOpts{Version: target.binary.Version, Path: target.deletePath})
+				if err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "warning: cleanup failed for %s: %v\n", target.binary.Path, err)
+				}
+			}
+
 			// Now delete the files
-			// TODO some providers (like docker) might download
-			// additional things somewhere else, maybe we should
-			// call the provider to do a cleanup here.
 			for _, path := range pathsToDelete {
 				if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 					return fmt.Errorf("error removing path %s: %v", path, err)
