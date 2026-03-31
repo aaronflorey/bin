@@ -36,10 +36,10 @@ func (g *gitHub) Fetch(opts *FetchOpts) (*File, error) {
 			g.tag = opts.Version
 		}
 		log.Infof("Getting %s release for %s/%s", g.tag, g.owner, g.repo)
-		release, _, err = g.client.Repositories.GetReleaseByTag(context.TODO(), g.owner, g.repo, g.tag)
+		release, _, err = g.client.Repositories.GetReleaseByTag(context.Background(), g.owner, g.repo, g.tag)
 	} else {
 		log.Infof("Getting latest release for %s/%s", g.owner, g.repo)
-		release, resp, err = g.client.Repositories.GetLatestRelease(context.TODO(), g.owner, g.repo)
+		release, resp, err = g.client.Repositories.GetLatestRelease(context.Background(), g.owner, g.repo)
 		if resp != nil && resp.StatusCode == http.StatusNotFound {
 			err = fmt.Errorf("repository %s/%s does not have releases", g.owner, g.repo)
 		}
@@ -101,7 +101,7 @@ func (g *gitHub) Fetch(opts *FetchOpts) (*File, error) {
 // returns the corresponding name and url to fetch the version
 func (g *gitHub) GetLatestVersion() (*ReleaseInfo, error) {
 	log.Debugf("Getting latest release for %s/%s", g.owner, g.repo)
-	release, _, err := g.client.Repositories.GetLatestRelease(context.TODO(), g.owner, g.repo)
+	release, _, err := g.client.Repositories.GetLatestRelease(context.Background(), g.owner, g.repo)
 	if err != nil {
 		return nil, err
 	}
