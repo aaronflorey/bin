@@ -76,6 +76,7 @@ func newInstallCmd() *installCmd {
 			}
 
 			defaultPath := config.Get().DefaultPath
+			cfg := config.Get()
 
 			var resolvedPath string
 			if len(args) > 1 {
@@ -88,9 +89,6 @@ func newInstallCmd() *installCmd {
 				resolvedPath = defaultPath
 			}
 
-			// TODO check if binary already exists in config
-			// and triger the update process if that's the case
-
 			if err := config.ExecuteHooks(config.GetHooks(config.PreInstall)); err != nil {
 				return err
 			}
@@ -98,6 +96,39 @@ func newInstallCmd() *installCmd {
 			var minAgeDays *int
 			if cmd.Flags().Changed("min-age-days") {
 				minAgeDays = &root.opts.minAgeDays
+			}
+
+			existing := existingBinaryForInstall(cfg.Bins, normalizedURL, root.opts.provider, resolvedPath)
+			if existing != nil {
+				log.Infof("Binary already exists in config (%s). Updating it instead", existing.Path)
+				if fetchOpts.PackagePath == "" {
+					fetchOpts.PackagePath = existing.PackagePath
+				}
+				if fetchOpts.PackageName == "" {
+					fetchOpts.PackageName = existing.RemoteName
+				}
+
+				res, err := installBinary(InstallOpts{
+					URL:         normalizedURL,
+					Provider:    root.opts.provider,
+					Path:        existing.Path,
+					ConfigPath:  existing.Path,
+					Force:       true,
+					Pinned:      pinVersion,
+					MinAgeDays:  minAgeDays,
+					FetchOpts:   fetchOpts,
+					ResolvePath: false,
+				})
+				if err != nil {
+					return err
+				}
+
+				if err := config.ExecuteHooks(config.GetHooks(config.PostInstall)); err != nil {
+					return err
+				}
+
+				log.Infof("Done updating %s %s", res.Name, res.Version)
+				return nil
 			}
 
 			res, err := installBinary(InstallOpts{
@@ -133,4 +164,24 @@ func newInstallCmd() *installCmd {
 	root.cmd.Flags().BoolVar(&root.opts.pin, "pin", false, "Pin installed version without prompting")
 	root.cmd.Flags().BoolVar(&root.opts.nonInteractive, "non-interactive", false, "Disable all interactive prompts (auto-select best option)")
 	return root
+}
+
+func existingBinaryForInstall(bins map[string]*config.Binary, normalizedURL, forcedProvider, requestedPath string) *config.Binary {
+	if requestedPath != "" {
+		if b, ok := existingConfigBinary(InstallOpts{Path: requestedPath}); ok {
+			return b
+		}
+	}
+
+	for _, b := range bins {
+		if b.URL != normalizedURL {
+			continue
+		}
+		if forcedProvider != "" && b.Provider != forcedProvider {
+			continue
+		}
+		return b
+	}
+
+	return nil
 }
