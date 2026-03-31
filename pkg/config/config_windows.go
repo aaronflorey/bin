@@ -1,8 +1,6 @@
 package config
 
 import (
-	"errors"
-	"fmt"
 	"os"
 
 	"github.com/caarlos0/log"
@@ -21,11 +19,5 @@ func checkDirExistsAndWritable(dir string) error {
 	if err != nil || !info.IsDir() {
 		return err
 	}
-
-	// Check if the user bit is enabled in file permission
-	if info.Mode().Perm()&(1<<(uint(7))) == 0 {
-		return errors.New(fmt.Sprintf("Dir %s is not writable", dir))
-	}
-	return nil
-
+	return checkDirWritable(dir)
 }
