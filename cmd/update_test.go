@@ -120,3 +120,36 @@ func TestGetLatestVersion(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveUpdateTargetsWithURL(t *testing.T) {
+	bins := map[string]*config.Binary{
+		"/tmp/tool": {
+			Path:    "/tmp/tool",
+			URL:     "github.com/acme/tool",
+			Version: "1.0.0",
+		},
+	}
+
+	resolved, explicitVersion, hasExplicitVersion, err := resolveUpdateTargets(bins, []string{"github.com/acme/tool/releases/tag/v1.2.0"})
+	if err != nil {
+		t.Fatalf("resolveUpdateTargets returned error: %v", err)
+	}
+	if len(resolved) != 1 {
+		t.Fatalf("expected 1 resolved binary, got %d", len(resolved))
+	}
+	if explicitVersion != "v1.2.0" {
+		t.Fatalf("unexpected explicit version: %s", explicitVersion)
+	}
+	if !hasExplicitVersion {
+		t.Fatal("expected explicit version to be detected")
+	}
+}
+
+func TestShouldUpdateToExplicitVersion(t *testing.T) {
+	if shouldUpdateToExplicitVersion("1.2.0", "1.1.0") {
+		t.Fatal("should not update when explicit version is older")
+	}
+	if !shouldUpdateToExplicitVersion("1.1.0", "1.2.0") {
+		t.Fatal("should update when explicit version is newer")
+	}
+}

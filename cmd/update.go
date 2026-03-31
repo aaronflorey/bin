@@ -3,6 +3,8 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"sort"
+	"strings"
 
 	"github.com/aaronflorey/bin/pkg/config"
 	"github.com/aaronflorey/bin/pkg/prompt"
@@ -40,19 +42,22 @@ func newUpdateCmd() *updateCmd {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// TODO add support to update from a specific URL.
-			// This allows to update binares from a repo that contains
-			// multiple tags for different binaries
-
 			cfg := config.Get()
-			binsToProcess, err := resolveBinsToProcess(cfg.Bins, args)
+			binsToProcess, explicitVersion, hasExplicitVersion, err := resolveUpdateTargets(cfg.Bins, args)
 			if err != nil {
 				return err
 			}
 
-			updates, updateFailures, err := collectAvailableUpdates(binsToProcess, root.newProvider, root.opts.continueOnError, root.opts.parallelism)
-			if err != nil {
-				return err
+			updates := []availableUpdate{}
+			updateFailures := map[*config.Binary]error{}
+
+			if hasExplicitVersion {
+				updates = collectExplicitVersionUpdates(binsToProcess, explicitVersion)
+			} else {
+				updates, updateFailures, err = collectAvailableUpdates(binsToProcess, root.newProvider, root.opts.continueOnError, root.opts.parallelism)
+				if err != nil {
+					return err
+				}
 			}
 
 			if len(updates) == 0 && len(updateFailures) == 0 {
@@ -93,6 +98,7 @@ func newUpdateCmd() *updateCmd {
 						PackagePath:    b.PackagePath,
 						SkipPatchCheck: root.opts.skipPathCheck,
 						PackageName:    b.RemoteName,
+						Version:        ui.version,
 					},
 					ResolvePath: false,
 					ConfigPath:  b.Path,
@@ -165,4 +171,79 @@ func getLatestVersion(b *config.Binary, p providers.Provider) (*updateInfo, erro
 	log.Debugf("Found new version %s for %s at %s", releaseInfo.Version, b.Path, releaseInfo.URL)
 	log.Infof("%s %s -> %s (%s)", b.Path, color.YellowString(b.Version), color.GreenString(releaseInfo.Version), releaseInfo.URL)
 	return &updateInfo{releaseInfo.Version, releaseInfo.URL}, nil
+}
+
+func resolveUpdateTargets(allBins map[string]*config.Binary, args []string) (map[string]*config.Binary, string, bool, error) {
+	if len(args) != 1 || !looksLikeUpdateURL(args[0]) {
+		bins, err := resolveBinsToProcess(allBins, args)
+		return bins, "", false, err
+	}
+
+	normalizedURL, requestedVersion, hasExplicitVersion, err := providers.NormalizeGitHubURL(args[0], "")
+	if err != nil {
+		return nil, "", false, err
+	}
+
+	bins := map[string]*config.Binary{}
+	for path, b := range allBins {
+		if b.URL == normalizedURL || b.URL == args[0] {
+			bins[path] = b
+		}
+	}
+	if len(bins) == 0 {
+		return nil, "", false, fmt.Errorf("binary with url %q not found in configuration", args[0])
+	}
+
+	return bins, requestedVersion, hasExplicitVersion, nil
+}
+
+func looksLikeUpdateURL(input string) bool {
+	if strings.Contains(input, "://") {
+		return true
+	}
+	lower := strings.ToLower(input)
+	return strings.HasPrefix(lower, "github.com/") ||
+		strings.HasPrefix(lower, "gitlab.com/") ||
+		strings.HasPrefix(lower, "codeberg.org/") ||
+		strings.HasPrefix(lower, "releases.hashicorp.com/")
+}
+
+func collectExplicitVersionUpdates(bins map[string]*config.Binary, explicitVersion string) []availableUpdate {
+	paths := make([]string, 0, len(bins))
+	for p := range bins {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+
+	updates := []availableUpdate{}
+	for _, p := range paths {
+		b := bins[p]
+		if !shouldUpdateToExplicitVersion(b.Version, explicitVersion) {
+			continue
+		}
+
+		updates = append(updates, availableUpdate{
+			binary: b,
+			info: &updateInfo{
+				version: explicitVersion,
+				url:     b.URL,
+			},
+		})
+	}
+
+	return updates
+}
+
+func shouldUpdateToExplicitVersion(currentVersion, explicitVersion string) bool {
+	if currentVersion == explicitVersion {
+		return false
+	}
+
+	currentSemVer, currentErr := version.NewVersion(currentVersion)
+	explicitSemVer, explicitErr := version.NewVersion(explicitVersion)
+	if currentErr == nil && explicitErr == nil {
+		return explicitSemVer.GreaterThan(currentSemVer)
+	}
+
+	return true
 }
