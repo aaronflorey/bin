@@ -100,8 +100,10 @@ func (g *hashiCorp) Fetch(opts *FetchOpts) (*File, error) {
 	}
 
 	candidates := []*assets.Asset{}
+	checksumAssets := []checksumAsset{}
 	for _, link := range release.Builds {
 		candidates = append(candidates, &assets.Asset{Name: link.Filename, URL: link.URL})
+		checksumAssets = append(checksumAssets, checksumAsset{Name: link.Filename, URL: link.URL})
 	}
 
 	f := assets.NewFilter(&assets.FilterOpts{SkipScoring: opts.All, PackagePath: opts.PackagePath, SkipPathCheck: opts.SkipPatchCheck, NonInteractive: opts.NonInteractive})
@@ -116,12 +118,17 @@ func (g *hashiCorp) Fetch(opts *FetchOpts) (*File, error) {
 		return nil, err
 	}
 
+	expectedSHA := ""
+	if outFile.Name == gf.Name {
+		expectedSHA, err = expectedSHA256ForAsset(outFile.Name, checksumAssets, gf.ExtraHeaders)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	version := release.Version
 
-	// TODO calculate file hash. Not sure if we can / should do it here
-	// since we don't want to read the file unnecesarily. Additionally, sometimes
-	// releases have .sha256 files, so it'd be nice to check for those also
-	file := &File{Data: outFile.Source, Name: outFile.Name, Version: version}
+	file := &File{Data: outFile.Source, Name: outFile.Name, Version: version, ExpectedSHA: expectedSHA}
 
 	return file, nil
 }

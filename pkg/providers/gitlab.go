@@ -58,6 +58,7 @@ func (g *gitLab) Fetch(opts *FetchOpts) (*File, error) {
 	}
 
 	candidates := []*assets.Asset{}
+	checksumAssets := []checksumAsset{}
 	candidateURLs := map[string]struct{}{}
 
 	project, _, err := g.client.Projects.GetProject(projectPath, &gitlab.GetProjectOptions{})
@@ -103,6 +104,7 @@ func (g *gitLab) Fetch(opts *FetchOpts) (*File, error) {
 								URL:         assetURL,
 							}
 							candidates = append(candidates, asset)
+							checksumAssets = append(checksumAssets, checksumAsset{Name: f.FileName, URL: assetURL})
 							log.Debugf("Adding %s with URL %s", asset, asset.URL)
 						}
 						candidateURLs[assetURL] = struct{}{}
@@ -122,6 +124,7 @@ func (g *gitLab) Fetch(opts *FetchOpts) (*File, error) {
 					URL:         link.URL,
 				}
 				candidates = append(candidates, asset)
+				checksumAssets = append(checksumAssets, checksumAsset{Name: link.Name, URL: link.URL})
 				log.Debugf("Adding %s with URL %s", asset, asset.URL)
 			}
 			candidateURLs[link.URL] = struct{}{}
@@ -145,6 +148,7 @@ func (g *gitLab) Fetch(opts *FetchOpts) (*File, error) {
 						URL:         assetURL,
 					}
 					candidates = append(candidates, asset)
+					checksumAssets = append(checksumAssets, checksumAsset{Name: name, URL: assetURL})
 					log.Debugf("Adding %s with URL %s", asset, asset.URL)
 				}
 				candidateURLs[assetURL] = struct{}{}
@@ -176,15 +180,21 @@ func (g *gitLab) Fetch(opts *FetchOpts) (*File, error) {
 		return nil, err
 	}
 
+	expectedSHA := ""
+	if outFile.Name == gf.Name {
+		expectedSHA, err = expectedSHA256ForAsset(outFile.Name, checksumAssets, gf.ExtraHeaders)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	version := release.TagName
 
-	// TODO calculate file hash. Not sure if we can / should do it here
-	// since we don't want to read the file unnecesarily. Additionally, sometimes
-	// releases have .sha256 files, so it'd be nice to check for those also
 	file := &File{
 		Data:        outFile.Source,
 		Name:        outFile.Name,
 		Version:     version,
+		ExpectedSHA: expectedSHA,
 		PublishedAt: gitLabPublishedAt(release),
 	}
 
