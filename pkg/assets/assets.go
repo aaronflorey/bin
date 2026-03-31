@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path"
 	"path/filepath"
 	"sort"
@@ -91,6 +92,21 @@ type finalFile struct {
 	Source      io.Reader
 	Name        string
 	PackagePath string
+}
+
+type cleanupReadCloser struct {
+	io.ReadCloser
+	cleanup func() error
+}
+
+func (c *cleanupReadCloser) Close() error {
+	err := c.ReadCloser.Close()
+	if c.cleanup != nil {
+		if cleanupErr := c.cleanup(); cleanupErr != nil && err == nil {
+			err = cleanupErr
+		}
+	}
+	return err
 }
 
 type platformResolver interface {
@@ -888,7 +904,18 @@ func (f *Filter) matchesPackagePath(entryName string) bool {
 
 func (f *Filter) processTar(name string, r io.Reader, autoSelect string) (*finalFile, error) {
 	tr := tar.NewReader(r)
-	tarFiles := map[string][]byte{}
+	tarFiles := map[string]string{}
+	tempDir, err := os.MkdirTemp("", "bin-tar-*")
+	if err != nil {
+		return nil, err
+	}
+	cleanupTempDir := true
+	defer func() {
+		if cleanupTempDir {
+			_ = os.RemoveAll(tempDir)
+		}
+	}()
+
 	if len(f.opts.PackagePath) > 0 {
 		log.Debugf("Processing tag with PackagePath %s\n", f.opts.PackagePath)
 	}
@@ -907,15 +934,21 @@ func (f *Filter) processTar(name string, r io.Reader, autoSelect string) (*final
 		}
 
 		if header.Typeflag == tar.TypeReg {
-			// TODO we're basically reading all the files
-			// isn't there a way just to store the reference
-			// where this data is so we don't have to do this or
-			// re-scan the archive twice afterwards?
-			bs, err := io.ReadAll(tr)
+			entryFile, err := os.CreateTemp(tempDir, "entry-*")
 			if err != nil {
 				return nil, err
 			}
-			tarFiles[header.Name] = bs
+
+			if _, err := io.Copy(entryFile, tr); err != nil {
+				entryFile.Close()
+				return nil, err
+			}
+
+			if err := entryFile.Close(); err != nil {
+				return nil, err
+			}
+
+			tarFiles[header.Name] = entryFile.Name()
 		}
 	}
 	if len(tarFiles) == 0 {
@@ -933,9 +966,26 @@ func (f *Filter) processTar(name string, r io.Reader, autoSelect string) (*final
 	}
 	selectedFile := choice.String()
 
-	tf := tarFiles[selectedFile]
+	selectedPath, ok := tarFiles[selectedFile]
+	if !ok {
+		return nil, fmt.Errorf("selected file %s not found in tar archive", selectedFile)
+	}
 
-	return &finalFile{Source: bytes.NewReader(tf), Name: filepath.Base(selectedFile), PackagePath: selectedFile}, nil
+	tf, err := os.Open(selectedPath)
+	if err != nil {
+		return nil, err
+	}
+
+	cleanupTempDir = false
+
+	reader := &cleanupReadCloser{
+		ReadCloser: tf,
+		cleanup: func() error {
+			return os.RemoveAll(tempDir)
+		},
+	}
+
+	return &finalFile{Source: reader, Name: filepath.Base(selectedFile), PackagePath: selectedFile}, nil
 }
 
 func (f *Filter) processBz2(name string, r io.Reader, _ string) (*finalFile, error) {
@@ -956,7 +1006,18 @@ func (f *Filter) processXz(name string, r io.Reader, _ string) (*finalFile, erro
 func (f *Filter) processZip(name string, r io.Reader, autoSelect string) (*finalFile, error) {
 	zr := zipstream.NewReader(r)
 
-	zipFiles := map[string][]byte{}
+	zipFiles := map[string]string{}
+	tempDir, err := os.MkdirTemp("", "bin-zip-*")
+	if err != nil {
+		return nil, err
+	}
+	cleanupTempDir := true
+	defer func() {
+		if cleanupTempDir {
+			_ = os.RemoveAll(tempDir)
+		}
+	}()
+
 	if len(f.opts.PackagePath) > 0 {
 		log.Debugf("Processing tag with PackagePath %s\n", f.opts.PackagePath)
 	}
@@ -974,16 +1035,21 @@ func (f *Filter) processZip(name string, r io.Reader, autoSelect string) (*final
 			continue
 		}
 
-		// TODO we're basically reading all the files
-		// isn't there a way just to store the reference
-		// where this data is so we don't have to do this or
-		// re-scan the archive twice afterwards?
-		bs, err := io.ReadAll(zr)
+		entryFile, err := os.CreateTemp(tempDir, "entry-*")
 		if err != nil {
 			return nil, err
 		}
 
-		zipFiles[header.Name] = bs
+		if _, err := io.Copy(entryFile, zr); err != nil {
+			entryFile.Close()
+			return nil, err
+		}
+
+		if err := entryFile.Close(); err != nil {
+			return nil, err
+		}
+
+		zipFiles[header.Name] = entryFile.Name()
 	}
 	if len(zipFiles) == 0 {
 		return nil, fmt.Errorf("No files found in zip archive. PackagePath [%s]", f.opts.PackagePath)
@@ -1000,11 +1066,28 @@ func (f *Filter) processZip(name string, r io.Reader, autoSelect string) (*final
 	}
 	selectedFile := choice.String()
 
-	fr := bytes.NewReader(zipFiles[selectedFile])
+	selectedPath, ok := zipFiles[selectedFile]
+	if !ok {
+		return nil, fmt.Errorf("selected file %s not found in zip archive", selectedFile)
+	}
+
+	fr, err := os.Open(selectedPath)
+	if err != nil {
+		return nil, err
+	}
+
+	cleanupTempDir = false
+
+	reader := &cleanupReadCloser{
+		ReadCloser: fr,
+		cleanup: func() error {
+			return os.RemoveAll(tempDir)
+		},
+	}
 
 	// return base of selected file since tar
 	// files usually have folders inside
-	return &finalFile{Name: filepath.Base(selectedFile), Source: fr, PackagePath: selectedFile}, nil
+	return &finalFile{Name: filepath.Base(selectedFile), Source: reader, PackagePath: selectedFile}, nil
 }
 
 // isSupportedExt checks if this provider supports
