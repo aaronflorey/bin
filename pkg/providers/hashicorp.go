@@ -74,6 +74,10 @@ func (g *hashiCorp) GetID() string {
 	return "hashicorp"
 }
 
+func (g *hashiCorp) Cleanup(_ *CleanupOpts) error {
+	return nil
+}
+
 func (g *hashiCorp) Fetch(opts *FetchOpts) (*File, error) {
 	var release *hashiCorpRelease
 

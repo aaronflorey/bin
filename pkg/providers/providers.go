@@ -47,6 +47,11 @@ type FetchOpts struct {
 	NonInteractive bool
 }
 
+type CleanupOpts struct {
+	Version string
+	Path    string
+}
+
 type Provider interface {
 	// Fetch returns the file metadata to retrieve a specific binary given
 	// for a provider
@@ -54,6 +59,8 @@ type Provider interface {
 	// GetLatestVersion returns the version and the URL of the
 	// latest version for this binary
 	GetLatestVersion() (*ReleaseInfo, error)
+	// Cleanup removes provider-specific resources for a managed binary.
+	Cleanup(*CleanupOpts) error
 
 	// GetID returns the unique identiifer of this provider
 	GetID() string

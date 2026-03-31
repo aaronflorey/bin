@@ -226,3 +226,7 @@ func (g *goinstall) getVersionInfo(versionURL string) (*goInstallVersionInfo, er
 func (g *goinstall) GetID() string {
 	return "goinstall"
 }
+
+func (g *goinstall) Cleanup(_ *CleanupOpts) error {
+	return nil
+}
