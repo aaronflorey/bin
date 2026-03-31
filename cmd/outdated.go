@@ -44,7 +44,7 @@ func newOutdatedCmd() *outdatedCmd {
 				return err
 			}
 
-			updates, _, err := collectAvailableUpdates(binsToProcess, root.newProvider, false)
+			updates, _, err := collectAvailableUpdates(binsToProcess, root.newProvider, false, defaultUpdateParallelism)
 			if err != nil {
 				return err
 			}
