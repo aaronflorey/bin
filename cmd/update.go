@@ -115,7 +115,10 @@ func newUpdateCmd() *updateCmd {
 				return err
 			}
 
-			// TODO: Return wrapping error with specific exit code if len(updateFailures) > 0?
+			if len(updateFailures) > 0 {
+				return wrapErrorWithCode(fmt.Errorf("some updates failed"), 4, "")
+			}
+
 			return nil
 		},
 	}
