@@ -688,7 +688,13 @@ func calculateNameSimilarity(repoName, assetName string) int {
 // file name in case it exists
 func SanitizeName(name, version string) string {
 	name = strings.ToLower(name)
-	replacements := []string{}
+	replacementSet := map[string]struct{}{}
+	addReplacement := func(value string) {
+		if value == "" {
+			return
+		}
+		replacementSet[value] = struct{}{}
+	}
 	separators := []string{"_", "-", "."}
 	innerSeparators := []string{"_", "-", "."}
 
@@ -707,35 +713,48 @@ func SanitizeName(name, version string) string {
 		"386", "i386", "x86",
 	)
 
-	// TODO maybe instead of doing this put everything in a map (set) and then
-	// generate the replacements? IDK.
 	for _, osName := range osNames {
 		for _, archName := range archNames {
 			for _, sep := range separators {
-				replacements = append(replacements, sep+osName+archName, "")
-				replacements = append(replacements, sep+archName+osName, "")
+				addReplacement(sep + osName + archName)
+				addReplacement(sep + archName + osName)
 				for _, innerSep := range innerSeparators {
-					replacements = append(replacements, sep+osName+innerSep+archName, "")
-					replacements = append(replacements, sep+archName+innerSep+osName, "")
+					addReplacement(sep + osName + innerSep + archName)
+					addReplacement(sep + archName + innerSep + osName)
 				}
 			}
 		}
 
 		for _, sep := range separators {
-			replacements = append(replacements, sep+osName, "")
+			addReplacement(sep + osName)
 		}
 	}
 
 	for _, archName := range archNames {
 		for _, sep := range separators {
-			replacements = append(replacements, sep+archName, "")
+			addReplacement(sep + archName)
 		}
 	}
 
 	trimmedVersion := strings.TrimPrefix(strings.ToLower(version), "v")
 	for _, sep := range separators {
-		replacements = append(replacements, sep+trimmedVersion, "")
-		replacements = append(replacements, sep+"v"+trimmedVersion, "")
+		addReplacement(sep + trimmedVersion)
+		addReplacement(sep + "v" + trimmedVersion)
+	}
+
+	replacements := make([]string, 0, len(replacementSet)*2)
+	keys := make([]string, 0, len(replacementSet))
+	for key := range replacementSet {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if len(keys[i]) == len(keys[j]) {
+			return keys[i] < keys[j]
+		}
+		return len(keys[i]) > len(keys[j])
+	})
+	for _, key := range keys {
+		replacements = append(replacements, key, "")
 	}
 
 	r := strings.NewReplacer(replacements...)
