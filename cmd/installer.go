@@ -235,8 +235,6 @@ func checkFinalPath(path, fileName string, overwrite bool) (string, error) {
 // saveToDisk saves the specified binary to the desired path
 // and makes it executable. It also checks if any other binary
 // has the same hash and exists if so.
-
-// TODO if the file is zipped, tared, whatever then extract it
 func saveToDisk(f *providers.File, path string, overwrite bool) ([]byte, error) {
 	epath := os.ExpandEnv(path)
 	if closer, ok := f.Data.(io.Closer); ok {

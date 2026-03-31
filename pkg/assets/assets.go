@@ -319,7 +319,6 @@ func (f *Filter) FilterAssets(repoName string, as []*Asset, autoSelect string) (
 				return nil, err
 			}
 			gf = choice.(*FilteredAsset)
-			// TODO make user select the proper file
 		}
 	} else {
 		gf = matches[0]
