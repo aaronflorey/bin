@@ -49,7 +49,7 @@ func (g *gitLab) Fetch(opts *FetchOpts) (*File, error) {
 			return nil, releaseErr
 		}
 		name = releaseInfo.Version
-		release, _, err = g.client.Releases.GetRelease(projectPath, name, gitlab.WithContext(context.TODO()))
+		release, _, err = g.client.Releases.GetRelease(projectPath, name, gitlab.WithContext(context.Background()))
 	}
 
 	if err != nil {
