@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/aaronflorey/bin/pkg/options"
 	"github.com/caarlos0/log"
 )
 
@@ -211,6 +212,38 @@ func ForceInstallationDir() string {
 		return ""
 	}
 	return exeDir
+}
+
+func selectWritablePathFromEnv(pathEnv, separator string) (string, error) {
+	log.Debugf("User PATH is [%s]", pathEnv)
+	opts := map[fmt.Stringer]struct{}{}
+
+	for _, path := range strings.Split(pathEnv, separator) {
+		log.Debugf("Checking path %s", path)
+		if err := checkDirExistsAndWritable(path); err != nil {
+			log.Debugf("Error [%s] checking path", err)
+			continue
+		}
+
+		log.Debugf("%s seems to be a dir and writable, adding option.", path)
+		opts[options.LiteralStringer(path)] = struct{}{}
+	}
+
+	if len(opts) == 0 {
+		return "", errors.New("Automatic path detection didn't return any results")
+	}
+
+	sopts := make([]fmt.Stringer, 0, len(opts))
+	for option := range opts {
+		sopts = append(sopts, option)
+	}
+
+	choice, err := options.SelectCustom("Pick a default download dir: ", sopts)
+	if err != nil {
+		return "", err
+	}
+
+	return choice.(fmt.Stringer).String(), nil
 }
 
 // UpsertBinary adds or updates an existing
