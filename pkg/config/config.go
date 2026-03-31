@@ -246,6 +246,19 @@ func selectWritablePathFromEnv(pathEnv, separator string) (string, error) {
 	return choice.(fmt.Stringer).String(), nil
 }
 
+func checkDirWritable(dir string) error {
+	probe, err := os.CreateTemp(dir, ".bin-write-check-*")
+	if err != nil {
+		return err
+	}
+	probePath := probe.Name()
+	if err := probe.Close(); err != nil {
+		_ = os.Remove(probePath)
+		return err
+	}
+	return os.Remove(probePath)
+}
+
 // UpsertBinary adds or updates an existing
 // binary resource in the config
 func UpsertBinary(c *Binary) error {

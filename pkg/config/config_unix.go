@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 
 	"github.com/caarlos0/log"
-	"golang.org/x/sys/unix"
 )
 
 // getDefaultPath reads the user's PATH variable
@@ -49,6 +48,5 @@ func checkDirExistsAndWritable(dir string) error {
 	} else if !fi.IsDir() {
 		return errors.New("Download path is not a directory")
 	}
-	err := unix.Access(dir, unix.W_OK)
-	return err
+	return checkDirWritable(dir)
 }
