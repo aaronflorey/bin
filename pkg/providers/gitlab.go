@@ -42,7 +42,6 @@ func (g *gitLab) Fetch(opts *FetchOpts) (*File, error) {
 		log.Infof("Getting %s release for %s/%s", g.tag, g.owner, g.repo)
 		release, _, err = g.client.Releases.GetRelease(projectPath, g.tag)
 	} else {
-		// TODO: handle case when repo doesn't have releases?
 		log.Infof("Getting latest release for %s/%s", g.owner, g.repo)
 		var name string
 		releaseInfo, releaseErr := g.GetLatestVersion()
@@ -215,14 +214,17 @@ func (g *gitLab) GetLatestVersion() (*ReleaseInfo, error) {
 	log.Debugf("Getting latest release for %s/%s", g.owner, g.repo)
 	projectPath := fmt.Sprintf("%s/%s", g.owner, g.repo)
 
-	releases, _, err := g.client.Releases.ListReleases(projectPath, &gitlab.ListReleasesOptions{
+	releases, resp, err := g.client.Releases.ListReleases(projectPath, &gitlab.ListReleasesOptions{
 		ListOptions: gitlab.ListOptions{PerPage: 100},
 	})
+	if resp != nil && resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("repository %s/%s does not have releases", g.owner, g.repo)
+	}
 	if err != nil {
 		return nil, err
 	}
 	if len(releases) == 0 {
-		return nil, fmt.Errorf("no releases found for %s/%s", g.owner, g.repo)
+		return nil, fmt.Errorf("repository %s/%s does not have releases", g.owner, g.repo)
 	}
 	highestTagName := releases[0].TagName
 	highestRelease := releases[0]
