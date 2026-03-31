@@ -233,7 +233,7 @@ func saveToDisk(f *providers.File, path string, overwrite bool) ([]byte, error) 
 		}
 	}
 
-	file, err := os.OpenFile(epath, os.O_RDWR|os.O_CREATE|extraFlags, 0o766)
+	file, err := os.OpenFile(epath, os.O_RDWR|os.O_CREATE|extraFlags, 0o755)
 	if err != nil {
 		return nil, err
 	}

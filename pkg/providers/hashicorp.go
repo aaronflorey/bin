@@ -44,10 +44,12 @@ func (g *hashiCorp) getRelease(repoName, version string) (*hashiCorpRelease, err
 	if err != nil {
 		return nil, err
 	}
+	defer resp.Body.Close()
+
 	decoder := json.NewDecoder(resp.Body)
 	var release hashiCorpRelease
 	if err := decoder.Decode(&release); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decoding release from %s: %w", releaseURL, err)
 	}
 	return &release, nil
 }
@@ -58,10 +60,12 @@ func (g *hashiCorp) listReleases(repoName string) (*hashiCorpRepo, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer resp.Body.Close()
+
 	decoder := json.NewDecoder(resp.Body)
 	var repo hashiCorpRepo
 	if err := decoder.Decode(&repo); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decoding releases from %s: %w", repoURL, err)
 	}
 	return &repo, nil
 }

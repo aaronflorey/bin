@@ -26,17 +26,13 @@ func newPinCmd() *pinCmd {
 
 			binsToPin := map[string]*config.Binary{}
 
-			// To pin
-			if len(args) > 0 {
-				for _, a := range args {
-					bin, err := getBinPath(a)
-					if err != nil {
-						return err
-					}
-					binsToPin[a] = cfg.Bins[bin]
+			// To pin (args is guaranteed non-empty by cobra.MinimumNArgs(1))
+			for _, a := range args {
+				bin, err := getBinPath(a)
+				if err != nil {
+					return err
 				}
-			} else {
-				return nil
+				binsToPin[a] = cfg.Bins[bin]
 			}
 
 			pinned := []string{}

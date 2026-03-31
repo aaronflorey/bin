@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -159,8 +160,13 @@ func (g *goinstall) Fetch(opts *FetchOpts) (*File, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to open path '%s': %w", goBinPath, err)
 	}
-	// don't close and keep it for Data, bin is short lived CLI tool
-	// defer file.Close()
+	defer file.Close()
+
+	// Read file content into memory to avoid leaking file handle
+	content, err := io.ReadAll(file)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read binary '%s': %w", goBinPath, err)
+	}
 
 	versionInfo := g.cachedVersionInfo
 	if versionInfo == nil {
@@ -171,7 +177,7 @@ func (g *goinstall) Fetch(opts *FetchOpts) (*File, error) {
 	}
 
 	return &File{
-		Data:        file,
+		Data:        bytes.NewReader(content),
 		Name:        g.name,
 		Version:     g.tag,
 		PublishedAt: PtrTime(versionInfo.Time),
@@ -191,6 +197,9 @@ func (g *goinstall) GetLatestVersion() (*ReleaseInfo, error) {
 	}, nil
 }
 
+// maxVersionInfoSize limits the response size for version info to prevent DoS.
+const maxVersionInfoSize = 1 << 20 // 1 MB
+
 func (g *goinstall) getVersionInfo(versionURL string) (*goInstallVersionInfo, error) {
 	resp, err := http.Get(versionURL)
 	if err != nil {
@@ -198,17 +207,18 @@ func (g *goinstall) getVersionInfo(versionURL string) (*goInstallVersionInfo, er
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	// Limit response size to prevent resource exhaustion
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxVersionInfoSize))
 	if err != nil {
 		return nil, err
 	}
 
 	var result goInstallVersionInfo
 	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decoding version info from %s: %w", versionURL, err)
 	}
 	if result.Version == "" {
-		return nil, fmt.Errorf("version not found in response")
+		return nil, fmt.Errorf("version not found in response from %s", versionURL)
 	}
 	return &result, nil
 }

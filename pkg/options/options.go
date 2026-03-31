@@ -90,20 +90,15 @@ func SelectCustom(msg string, opts []fmt.Stringer) (interface{}, error) {
 
 		v, err = strconv.Atoi(opt)
 		if err != nil {
+			// Not a number, treat as custom value
 			return LiteralStringer(opt), nil
 		}
 
-		if err != nil || v < 1 || v > len(opts) {
-			if err != nil {
-				if err == io.EOF {
-					return nil, err
-				}
-			}
+		if v < 1 || v > len(opts) {
 			fmt.Printf("Invalid option")
 			continue
 		}
 		break
-
 	}
 
 	return opts[v-1], nil
