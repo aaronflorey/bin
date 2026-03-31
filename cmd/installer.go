@@ -11,6 +11,7 @@ import (
 
 	"github.com/aaronflorey/bin/pkg/assets"
 	"github.com/aaronflorey/bin/pkg/config"
+	"github.com/aaronflorey/bin/pkg/prompt"
 	"github.com/aaronflorey/bin/pkg/providers"
 	"github.com/caarlos0/log"
 )
@@ -106,7 +107,7 @@ func installBinary(opts InstallOpts) (*InstallResult, error) {
 
 	resolvedPath := opts.Path
 	if opts.ResolvePath {
-		resolvedPath, err = checkFinalPath(resolvedPath, assets.SanitizeName(pResult.Name, pResult.Version))
+		resolvedPath, err = checkFinalPath(resolvedPath, assets.SanitizeName(pResult.Name, pResult.Version), opts.Force)
 		if err != nil {
 			return nil, err
 		}
@@ -199,19 +200,33 @@ func ensureReleaseAge(providerID, version string, publishedAt *time.Time, minAge
 // and returns the correct final file path. It also
 // checks if the path already exists and prompts
 // the user to override
-func checkFinalPath(path, fileName string) (string, error) {
+func checkFinalPath(path, fileName string, overwrite bool) (string, error) {
 	fi, err := os.Stat(os.ExpandEnv(path))
-
-	// TODO implement file existence and override logic
 	if err != nil && !os.IsNotExist(err) {
 		return "", err
 	}
 
+	finalPath := path
+
 	if fi != nil && fi.IsDir() {
-		return filepath.Join(path, fileName), nil
+		finalPath = filepath.Join(path, fileName)
 	}
 
-	return path, nil
+	if _, err := os.Stat(os.ExpandEnv(finalPath)); err == nil {
+		if overwrite {
+			return finalPath, nil
+		}
+
+		if !prompt.IsInteractive() {
+			return "", fmt.Errorf("path %s already exists, use --force to overwrite", finalPath)
+		}
+
+		if err := prompt.Confirm(fmt.Sprintf("Path %s already exists. Overwrite?", finalPath)); err != nil {
+			return "", err
+		}
+	}
+
+	return finalPath, nil
 }
 
 // saveToDisk saves the specified binary to the desired path
