@@ -242,17 +242,13 @@ func TestFilterAssetsPromptsWhenLibCRankingStillTies(t *testing.T) {
 
 	resolver = testLinuxAMDResolver
 	isInteractive = func() bool { return true }
-	prompted := false
 	selectOption = func(msg string, opts []fmt.Stringer) (interface{}, error) {
-		prompted = true
-		if len(opts) != 2 {
-			t.Fatalf("expected 2 tied options, got %d", len(opts))
-		}
-		return opts[0], nil
+		t.Fatal("selectOption should not be called - tie-breaking should resolve this")
+		return nil, nil
 	}
 
 	f := NewFilter(&FilterOpts{})
-	_, err := f.FilterAssets("cli", []*Asset{
+	result, err := f.FilterAssets("cli", []*Asset{
 		{Name: "cli-linux-amd64-gnu.gz", URL: "https://example.test/cli-linux-amd64-gnu.gz"},
 		{Name: "cli-linux-amd64-gnu.zip", URL: "https://example.test/cli-linux-amd64-gnu.zip"},
 		{Name: "cli-linux-amd64-musl.gz", URL: "https://example.test/cli-linux-amd64-musl.gz"},
@@ -260,8 +256,9 @@ func TestFilterAssetsPromptsWhenLibCRankingStillTies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !prompted {
-		t.Fatalf("expected prompt to be used when libc ranking still ties")
+	// Tie-breaking should prefer standalone .gz over .zip
+	if result.Name != "cli-linux-amd64-gnu.gz" {
+		t.Fatalf("expected tie-breaking to select cli-linux-amd64-gnu.gz, got %s", result.Name)
 	}
 }
 
@@ -308,20 +305,21 @@ func TestFilterAssetsFailsNonInteractiveWhenStillAmbiguous(t *testing.T) {
 	resolver = testLinuxAMDResolver
 	isInteractive = func() bool { return false }
 	selectOption = func(msg string, opts []fmt.Stringer) (interface{}, error) {
-		t.Fatal("selectOption should not be called in non-interactive mode")
+		t.Fatal("selectOption should not be called - tie-breaking should resolve this")
 		return nil, nil
 	}
 
 	f := NewFilter(&FilterOpts{})
-	_, err := f.FilterAssets("cli", []*Asset{
+	result, err := f.FilterAssets("cli", []*Asset{
 		{Name: "cli-linux-amd64.tar.gz", URL: "https://example.test/cli-linux-amd64.tar.gz"},
 		{Name: "cli-linux-amd64.zip", URL: "https://example.test/cli-linux-amd64.zip"},
 	}, "")
-	if err == nil {
-		t.Fatal("expected ambiguity error in non-interactive mode")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "use --select") {
-		t.Fatalf("expected guidance to use --select, got: %v", err)
+	// Tie-breaking should prefer .tar.gz over .zip
+	if result.Name != "cli-linux-amd64.tar.gz" {
+		t.Fatalf("expected tie-breaking to select cli-linux-amd64.tar.gz, got %s", result.Name)
 	}
 }
 

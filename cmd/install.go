@@ -18,12 +18,13 @@ type installCmd struct {
 }
 
 type installOpts struct {
-	force      bool
-	provider   string
-	all        bool
-	autoSelect string
-	minAgeDays int
-	pin        bool
+	force          bool
+	provider       string
+	all            bool
+	autoSelect     string
+	minAgeDays     int
+	pin            bool
+	nonInteractive bool
 }
 
 func newInstallCmd() *installCmd {
@@ -49,7 +50,11 @@ func newInstallCmd() *installCmd {
 
 			pinVersion := root.opts.pin
 			if hasExplicitVersion && !pinVersion {
-				if prompt.IsInteractive() {
+				if root.opts.nonInteractive {
+					// Auto-pin in non-interactive mode when explicit version is detected
+					log.Debugf("Auto-pinning version %s in non-interactive mode", requestedVersion)
+					pinVersion = true
+				} else if prompt.IsInteractive() {
 					err := prompt.Confirm(fmt.Sprintf("Detected release URL for version %s. Do you want to pin this version?", requestedVersion))
 					if err == nil {
 						pinVersion = true
@@ -61,7 +66,11 @@ func newInstallCmd() *installCmd {
 				}
 			}
 
-			fetchOpts := providers.FetchOpts{All: root.opts.all, AutoSelect: root.opts.autoSelect}
+			fetchOpts := providers.FetchOpts{
+				All:            root.opts.all,
+				AutoSelect:     root.opts.autoSelect,
+				NonInteractive: root.opts.nonInteractive,
+			}
 			if requestedVersion != "" {
 				fetchOpts.Version = requestedVersion
 			}
@@ -122,5 +131,6 @@ func newInstallCmd() *installCmd {
 	root.cmd.Flags().StringVarP(&root.opts.autoSelect, "select", "s", "", "Auto select installation file (skips interactive prompt)")
 	root.cmd.Flags().IntVar(&root.opts.minAgeDays, "min-age-days", 0, "Require the selected release to be at least this many days old")
 	root.cmd.Flags().BoolVar(&root.opts.pin, "pin", false, "Pin installed version without prompting")
+	root.cmd.Flags().BoolVar(&root.opts.nonInteractive, "non-interactive", false, "Disable all interactive prompts (auto-select best option)")
 	return root
 }
