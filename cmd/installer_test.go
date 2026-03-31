@@ -99,3 +99,32 @@ func TestSaveToDiskValidatesExpectedSHA(t *testing.T) {
 		t.Fatal("expected saveToDisk to fail on sha mismatch")
 	}
 }
+
+func TestCheckFinalPathErrorsWhenExistingWithoutForce(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "tool")
+	if err := os.WriteFile(target, []byte("hello"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	_, err := checkFinalPath(target, "ignored", false)
+	if err == nil {
+		t.Fatal("expected checkFinalPath to fail when file already exists")
+	}
+}
+
+func TestCheckFinalPathAllowsOverwriteWhenForced(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "tool")
+	if err := os.WriteFile(target, []byte("hello"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	finalPath, err := checkFinalPath(target, "ignored", true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if finalPath != target {
+		t.Fatalf("unexpected final path: %s", finalPath)
+	}
+}
