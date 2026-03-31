@@ -60,6 +60,14 @@ func newDocker(imageURL string) (Provider, error) {
 
 	repo, tag := parseImage(imageURL)
 
+	// Validate repo and tag to prevent shell/batch injection
+	if !validateDockerImage(repo) {
+		return nil, fmt.Errorf("invalid docker repository name: %q", repo)
+	}
+	if !validateDockerImage(tag) {
+		return nil, fmt.Errorf("invalid docker tag: %q", tag)
+	}
+
 	c, err := client.NewClientWithOpts(client.FromEnv)
 	if err != nil {
 		return nil, err

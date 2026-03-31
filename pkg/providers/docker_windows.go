@@ -1,6 +1,18 @@
 package providers
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
+
+// dockerImagePattern validates Docker image names to prevent command injection.
+// Allows: lowercase letters, digits, hyphens, underscores, periods, slashes, and colons.
+var dockerImagePattern = regexp.MustCompile(`^[a-z0-9._/-]+$`)
+
+// validateDockerImage checks if the image name is safe for batch file embedding.
+func validateDockerImage(image string) bool {
+	return dockerImagePattern.MatchString(image)
+}
 
 const (
 	// TODO: this probably won't work on windows so we might need how we mount
@@ -8,7 +20,7 @@ const (
 	// actual execution since some CLIs require some other folders to be mounted
 	// or networks to be shared
 	sh = `@echo off
-docker run --rm -i -t -v %%cd%%:/tmp/cmd -w /tmp/cmd %s:%s %%*
+docker run --rm -i -t -v %%cd%%:/tmp/cmd -w /tmp/cmd "%s:%s" %%*
 `
 )
 

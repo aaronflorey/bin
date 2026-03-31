@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/aaronflorey/bin/pkg/config"
 	"github.com/aaronflorey/bin/pkg/options"
@@ -146,6 +147,15 @@ func (runtimeResolver) GetOSSpecificExtensions() []string {
 var resolver platformResolver = runtimeResolver{}
 var selectOption = options.Select
 var isInteractive = options.IsInteractive
+
+// httpClient is a shared HTTP client with reasonable timeouts for downloading assets.
+var httpClient = &http.Client{
+	Timeout: 10 * time.Minute, // Allow long downloads
+	Transport: &http.Transport{
+		ResponseHeaderTimeout: 30 * time.Second,
+		IdleConnTimeout:       90 * time.Second,
+	},
+}
 
 func (g FilteredAsset) String() string {
 	if g.DisplayName != "" {
@@ -514,12 +524,7 @@ func applyTieBreakers(repoName string, matches []*FilteredAsset) []*FilteredAsse
 		return matches
 	}
 
-	// Step 2: Prefer simpler archive formats (.tar.gz > .tar.xz > others)
-	matches = rankByArchiveFormat(matches)
-	if len(matches) == 1 {
-		log.Debugf("Tie-breaker: selected by archive format preference")
-		return matches
-	}
+	// Note: Archive format preference is already handled by rankByArchiveType
 
 	// Step 3: Filename similarity to repo name
 	matches = rankByNameSimilarity(repoName, matches)
@@ -609,17 +614,6 @@ func rankByArchiveType(matches []*FilteredAsset) []*FilteredAsset {
 		}
 	}
 
-	return matches
-}
-
-// rankByArchiveFormat prefers .tar.gz over .tar.xz when both are archives
-func rankByArchiveFormat(matches []*FilteredAsset) []*FilteredAsset {
-	if len(matches) <= 1 {
-		return matches
-	}
-
-	// This is redundant with rankByArchiveType, but kept for clarity
-	// and in case we want to add more specific format preferences
 	return matches
 }
 
@@ -782,7 +776,7 @@ func (f *Filter) ProcessURL(gf *FilteredAsset) (*finalFile, error) {
 		req.Header.Add(name, value)
 	}
 	log.Debugf("Checking binary from %s", gf.URL)
-	res, err := http.DefaultClient.Do(req)
+	res, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

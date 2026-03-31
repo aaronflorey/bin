@@ -26,17 +26,13 @@ func newUnpinCmd() *unpinCmd {
 
 			binsToUnpin := map[string]*config.Binary{}
 
-			// To unpin
-			if len(args) > 0 {
-				for _, a := range args {
-					bin, err := getBinPath(a)
-					if err != nil {
-						return err
-					}
-					binsToUnpin[a] = cfg.Bins[bin]
+			// To unpin (args is guaranteed non-empty by cobra.MinimumNArgs(1))
+			for _, a := range args {
+				bin, err := getBinPath(a)
+				if err != nil {
+					return err
 				}
-			} else {
-				return nil
+				binsToUnpin[a] = cfg.Bins[bin]
 			}
 
 			unpinned := []string{}

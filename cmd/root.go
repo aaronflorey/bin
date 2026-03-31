@@ -34,16 +34,17 @@ func (cmd *rootCmd) Execute(args []string) {
 		log.Log = previousLogger
 	}()
 
+	defer spinner.Stop()
+
 	if defaultCommand(cmd.cmd, args) {
 		if len(args) == 0 {
 			cmd.cmd.SetArgs(append([]string{"list"}, args...))
 		} else {
 			fmt.Fprintf(os.Stderr, "unknown command: bin %s\n", args[0])
-			os.Exit(1)
+			cmd.exit(1)
+			return
 		}
 	}
-
-	defer spinner.Stop()
 
 	if err := cmd.cmd.Execute(); err != nil {
 		code := 1
