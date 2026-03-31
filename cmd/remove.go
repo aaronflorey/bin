@@ -36,20 +36,26 @@ func newRemoveCmd() *removeCmd {
 
 			targets := []removeTarget{}
 			pathsToDelete := []string{}
+			resolvedPaths := map[string]string{}
 
 			bins := cfg.Bins
 
 			for _, p := range args {
-				// TODO: avoid calling getBinPath each time and make it
-				// once at the beginning for each arg
-				bp, err := getBinPath(p)
+				bp, ok := resolvedPaths[p]
+				if !ok {
+					var err error
+					bp, err = getBinPath(p)
 
-				if errors.Is(err, exec.ErrNotFound) || errors.Is(err, os.ErrNotExist) {
-					fmt.Fprintf(cmd.ErrOrStderr(), "binary %s not found in PATH, skipping\n", p)
-					continue
-				} else if err != nil {
-					return err
+					if errors.Is(err, exec.ErrNotFound) || errors.Is(err, os.ErrNotExist) {
+						fmt.Fprintf(cmd.ErrOrStderr(), "binary %s not found in PATH, skipping\n", p)
+						continue
+					} else if err != nil {
+						return err
+					}
+
+					resolvedPaths[p] = bp
 				}
+
 				ebp := os.ExpandEnv(bp)
 				if _, ok := bins[ebp]; ok {
 					targets = append(targets, removeTarget{configPath: ebp, deletePath: os.ExpandEnv(bp), binary: bins[ebp]})
