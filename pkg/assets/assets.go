@@ -119,6 +119,10 @@ type FilterOpts struct {
 	// variable to filter the resulting outputs. This is very useful
 	// so we don't prompt the user to pick the file again on updates
 	PackagePath string
+
+	// NonInteractive disables all interactive prompts and auto-selects
+	// the best option using tie-breaking heuristics
+	NonInteractive bool
 }
 
 type runtimeResolver struct{}
@@ -238,6 +242,7 @@ func (f *Filter) FilterAssets(repoName string, as []*Asset, autoSelect string) (
 			}
 			matches = rankLinuxLibCMatches(matches)
 			matches = rankArchitectureMatches(matches)
+			matches = applyTieBreakers(repoName, matches)
 
 		} else {
 			log.Debugf("--all flag was supplied, skipping scoring")
@@ -269,23 +274,27 @@ func (f *Filter) FilterAssets(repoName string, as []*Asset, autoSelect string) (
 			return generic[i].String() < generic[j].String()
 		})
 
-		if !isInteractive() {
+		// If non-interactive mode is enabled, auto-select the first match
+		if f.opts.NonInteractive {
+			log.Infof("Auto-selecting first match in non-interactive mode: %s", generic[0])
+			gf = generic[0].(*FilteredAsset)
+		} else if !isInteractive() {
 			opts := make([]string, 0, len(generic))
 			for _, candidate := range generic {
 				opts = append(opts, candidate.String())
 			}
 			return nil, fmt.Errorf(
-				"multiple matches found in non-interactive mode: %s (use --select to choose one)",
+				"multiple matches found in non-interactive mode: %s (use --select to choose one or use --non-interactive flag)",
 				strings.Join(opts, ", "),
 			)
+		} else {
+			choice, err := selectOption("Multiple matches found, please select one:", generic)
+			if err != nil {
+				return nil, err
+			}
+			gf = choice.(*FilteredAsset)
+			// TODO make user select the proper file
 		}
-
-		choice, err := selectOption("Multiple matches found, please select one:", generic)
-		if err != nil {
-			return nil, err
-		}
-		gf = choice.(*FilteredAsset)
-		// TODO make user select the proper file
 	} else {
 		gf = matches[0]
 	}
@@ -487,6 +496,198 @@ func containsDelimitedToken(candidate, token string) bool {
 
 func isAlphaNumeric(ch byte) bool {
 	return (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9')
+}
+
+// applyTieBreakers applies additional ranking when assets have equal scores.
+// This is critical for non-interactive mode to automatically select the best option.
+func applyTieBreakers(repoName string, matches []*FilteredAsset) []*FilteredAsset {
+	if len(matches) <= 1 {
+		return matches
+	}
+
+	log.Debugf("Applying tie-breakers to %d matches with equal scores", len(matches))
+
+	// Step 1: Prefer standalone files over archives
+	matches = rankByArchiveType(matches)
+	if len(matches) == 1 {
+		log.Debugf("Tie-breaker: selected standalone file")
+		return matches
+	}
+
+	// Step 2: Prefer simpler archive formats (.tar.gz > .tar.xz > others)
+	matches = rankByArchiveFormat(matches)
+	if len(matches) == 1 {
+		log.Debugf("Tie-breaker: selected by archive format preference")
+		return matches
+	}
+
+	// Step 3: Filename similarity to repo name
+	matches = rankByNameSimilarity(repoName, matches)
+	if len(matches) == 1 {
+		log.Debugf("Tie-breaker: selected by name similarity to %s", repoName)
+		return matches
+	}
+
+	// Step 4: Alphabetical (deterministic fallback)
+	sort.Slice(matches, func(i, j int) bool {
+		return matches[i].Name < matches[j].Name
+	})
+	log.Debugf("Tie-breaker: selected first alphabetically: %s", matches[0].Name)
+
+	return matches[:1] // Return first after all tie-breaking
+}
+
+// archiveType represents the type of file/archive
+type archiveType int
+
+const (
+	archiveTypeStandalone archiveType = iota // No archive extension
+	archiveTypeTarGz                         // .tar.gz
+	archiveTypeTarXz                         // .tar.xz
+	archiveTypeGz                            // .gz (standalone compressed)
+	archiveTypeZip                           // .zip
+	archiveTypeOther                         // Other archives
+)
+
+// getArchiveType determines what type of archive a file is
+func getArchiveType(name string) archiveType {
+	lower := strings.ToLower(name)
+
+	// Check for specific archive types (order matters - check .tar.gz before .gz)
+	if strings.HasSuffix(lower, ".tar.gz") || strings.HasSuffix(lower, ".tgz") {
+		return archiveTypeTarGz
+	}
+	if strings.HasSuffix(lower, ".tar.xz") {
+		return archiveTypeTarXz
+	}
+	if strings.HasSuffix(lower, ".gz") {
+		return archiveTypeGz
+	}
+	if strings.HasSuffix(lower, ".zip") {
+		return archiveTypeZip
+	}
+
+	// Check if it has any other archive extension
+	ext := filepath.Ext(lower)
+	if ext == ".xz" || ext == ".bz2" || ext == ".tar" {
+		return archiveTypeOther
+	}
+
+	// Standalone binary
+	return archiveTypeStandalone
+}
+
+// rankByArchiveType prefers standalone files over archives
+func rankByArchiveType(matches []*FilteredAsset) []*FilteredAsset {
+	if len(matches) <= 1 {
+		return matches
+	}
+
+	// Group by archive type
+	byType := make(map[archiveType][]*FilteredAsset)
+	for _, match := range matches {
+		aType := getArchiveType(match.Name)
+		byType[aType] = append(byType[aType], match)
+	}
+
+	// Prefer in this order: standalone, .tar.gz, .tar.xz, .gz, .zip, other
+	preferenceOrder := []archiveType{
+		archiveTypeStandalone,
+		archiveTypeTarGz,
+		archiveTypeTarXz,
+		archiveTypeGz,
+		archiveTypeZip,
+		archiveTypeOther,
+	}
+
+	for _, preferred := range preferenceOrder {
+		if candidates := byType[preferred]; len(candidates) > 0 {
+			for _, c := range candidates {
+				log.Debugf("Keeping %s (archive type preference)", c.Name)
+			}
+			return candidates
+		}
+	}
+
+	return matches
+}
+
+// rankByArchiveFormat prefers .tar.gz over .tar.xz when both are archives
+func rankByArchiveFormat(matches []*FilteredAsset) []*FilteredAsset {
+	if len(matches) <= 1 {
+		return matches
+	}
+
+	// This is redundant with rankByArchiveType, but kept for clarity
+	// and in case we want to add more specific format preferences
+	return matches
+}
+
+// rankByNameSimilarity filters matches to keep only those with highest
+// similarity to the repository name
+func rankByNameSimilarity(repoName string, matches []*FilteredAsset) []*FilteredAsset {
+	if len(matches) <= 1 {
+		return matches
+	}
+
+	// Extract the actual repo name from potential path formats
+	// e.g., "owner/repo" -> "repo", "repo" -> "repo"
+	parts := strings.Split(repoName, "/")
+	shortName := strings.ToLower(parts[len(parts)-1])
+
+	type scoredMatch struct {
+		match *FilteredAsset
+		score int
+	}
+
+	scored := make([]scoredMatch, 0, len(matches))
+	for _, match := range matches {
+		score := calculateNameSimilarity(shortName, strings.ToLower(match.Name))
+		scored = append(scored, scoredMatch{match: match, score: score})
+	}
+
+	// Find highest score
+	maxScore := 0
+	for _, s := range scored {
+		if s.score > maxScore {
+			maxScore = s.score
+		}
+	}
+
+	// Keep only matches with highest score
+	filtered := make([]*FilteredAsset, 0, len(matches))
+	for _, s := range scored {
+		if s.score == maxScore {
+			filtered = append(filtered, s.match)
+			log.Debugf("Keeping %s (similarity score: %d)", s.match.Name, s.score)
+		}
+	}
+
+	return filtered
+}
+
+// calculateNameSimilarity returns a similarity score between repo name and asset name
+// Higher score means more similar
+func calculateNameSimilarity(repoName, assetName string) int {
+	score := 0
+
+	// Bonus points if repo name appears in asset name
+	if strings.Contains(assetName, repoName) {
+		score += 100
+	}
+
+	// Additional points for exact prefix match
+	if strings.HasPrefix(assetName, repoName) {
+		score += 50
+	}
+
+	// Penalty for longer names (prefer simpler names)
+	// Subtract 1 point per character over the repo name length
+	if len(assetName) > len(repoName) {
+		score -= (len(assetName) - len(repoName))
+	}
+
+	return score
 }
 
 // SanitizeName removes irrelevant information from the
