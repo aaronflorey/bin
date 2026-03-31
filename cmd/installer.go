@@ -239,6 +239,9 @@ func checkFinalPath(path, fileName string, overwrite bool) (string, error) {
 // TODO if the file is zipped, tared, whatever then extract it
 func saveToDisk(f *providers.File, path string, overwrite bool) ([]byte, error) {
 	epath := os.ExpandEnv(path)
+	if closer, ok := f.Data.(io.Closer); ok {
+		defer closer.Close()
+	}
 
 	extraFlags := os.O_EXCL
 
