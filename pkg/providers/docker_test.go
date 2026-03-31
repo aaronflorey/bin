@@ -2,6 +2,7 @@ package providers
 
 import (
 	"testing"
+	"time"
 )
 
 func TestParseImage(t *testing.T) {
@@ -28,5 +29,68 @@ func TestParseImage(t *testing.T) {
 				t.Errorf("expected tag was %s, got %s", test.expectedTag, tag)
 			}
 		})
+	}
+}
+
+func TestDockerHubRepoPath(t *testing.T) {
+	tests := []struct {
+		name     string
+		repo     string
+		expected string
+		wantErr  bool
+	}{
+		{name: "docker hub shorthand", repo: "library/postgres", expected: "library/postgres"},
+		{name: "docker hub explicit host", repo: "docker.io/library/postgres", expected: "library/postgres"},
+		{name: "unsupported host", repo: "quay.io/calico/node", wantErr: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			repo, err := dockerHubRepoPath(tc.repo)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected an error for %q", tc.repo)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if repo != tc.expected {
+				t.Fatalf("expected %q, got %q", tc.expected, repo)
+			}
+		})
+	}
+}
+
+func TestLatestDockerTag(t *testing.T) {
+	now := time.Now()
+	tags := []dockerHubTag{
+		{Name: "1.0.0", LastUpdated: now.Add(-48 * time.Hour)},
+		{Name: "1.2.0", LastUpdated: now.Add(-24 * time.Hour)},
+		{Name: "latest", LastUpdated: now.Add(-12 * time.Hour)},
+	}
+
+	version, publishedAt := latestDockerTag("1.1.0", tags)
+	if version != "1.2.0" {
+		t.Fatalf("expected 1.2.0, got %q", version)
+	}
+	if publishedAt == nil {
+		t.Fatal("expected publishedAt to be set")
+	}
+}
+
+func TestLatestDockerTagFallsBackToLatest(t *testing.T) {
+	now := time.Now()
+	tags := []dockerHubTag{
+		{Name: "latest", LastUpdated: now.Add(-2 * time.Hour)},
+		{Name: "edge", LastUpdated: now.Add(-1 * time.Hour)},
+	}
+
+	version, _ := latestDockerTag("dev", tags)
+	if version != "latest" {
+		t.Fatalf("expected latest, got %q", version)
 	}
 }
