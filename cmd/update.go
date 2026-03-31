@@ -23,6 +23,7 @@ type updateOpts struct {
 	yesToUpdate     bool
 	dryRun          bool
 	all             bool
+	parallelism     int
 	skipPathCheck   bool
 	continueOnError bool
 }
@@ -43,19 +44,13 @@ func newUpdateCmd() *updateCmd {
 			// This allows to update binares from a repo that contains
 			// multiple tags for different binaries
 
-			// TODO update should check all binaries with a
-			// certain configured parallelism (default 10, can be changed with -p) and report
-			// which binarines could be potentially upgraded.
-			// It's very likely that we have to extend the provider
-			// interface to support this use-case
-
 			cfg := config.Get()
 			binsToProcess, err := resolveBinsToProcess(cfg.Bins, args)
 			if err != nil {
 				return err
 			}
 
-			updates, updateFailures, err := collectAvailableUpdates(binsToProcess, root.newProvider, root.opts.continueOnError)
+			updates, updateFailures, err := collectAvailableUpdates(binsToProcess, root.newProvider, root.opts.continueOnError, root.opts.parallelism)
 			if err != nil {
 				return err
 			}
@@ -130,7 +125,8 @@ func newUpdateCmd() *updateCmd {
 	root.cmd.Flags().BoolVarP(&root.opts.dryRun, "dry-run", "", false, "Only show status, don't prompt for update")
 	root.cmd.Flags().BoolVarP(&root.opts.yesToUpdate, "yes", "y", false, "Assume yes to update prompt")
 	root.cmd.Flags().BoolVarP(&root.opts.all, "all", "a", false, "Show all possible download options (skip scoring & filtering)")
-	root.cmd.Flags().BoolVarP(&root.opts.skipPathCheck, "skip-path-check", "p", false, "Skips path checking when looking into packages")
+	root.cmd.Flags().IntVarP(&root.opts.parallelism, "parallelism", "p", defaultUpdateParallelism, "Maximum number of binaries to check for updates concurrently")
+	root.cmd.Flags().BoolVarP(&root.opts.skipPathCheck, "skip-path-check", "", false, "Skips path checking when looking into packages")
 	root.cmd.Flags().BoolVarP(&root.opts.continueOnError, "continue-on-error", "c", false, "Continues to update next package if an error is encountered")
 	return root
 }
