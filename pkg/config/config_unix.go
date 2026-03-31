@@ -7,9 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
-	"github.com/aaronflorey/bin/pkg/options"
 	"github.com/caarlos0/log"
 	"golang.org/x/sys/unix"
 )
@@ -17,8 +15,6 @@ import (
 // getDefaultPath reads the user's PATH variable
 // and returns the first directory that's writable by the current
 // user in the system
-// TODO add feature to prompt the user which to select
-// if many paths are found
 func getDefaultPath() (string, error) {
 	localBin, err := ensureUserLocalBinDir()
 	if err == nil {
@@ -26,39 +22,7 @@ func getDefaultPath() (string, error) {
 	}
 	log.Debugf("Could not prepare ~/.local/bin: %v", err)
 
-	penv := os.Getenv("PATH")
-	log.Debugf("User PATH is [%s]", penv)
-	opts := map[fmt.Stringer]struct{}{}
-	for _, p := range strings.Split(penv, ":") {
-		log.Debugf("Checking path %s", p)
-
-		err := checkDirExistsAndWritable(p)
-		if err != nil {
-			log.Debugf("Error [%s] checking path", err)
-			continue
-		}
-
-		log.Debugf("%s seems to be a dir and writable, adding option.", p)
-		opts[options.LiteralStringer(p)] = struct{}{}
-
-	}
-
-	// TODO this logic is also duplicated in the windows config. We should
-	// move it to config.go
-	if len(opts) == 0 {
-		return "", errors.New("Automatic path detection didn't return any results")
-	}
-
-	sopts := []fmt.Stringer{}
-	for k := range opts {
-		sopts = append(sopts, k)
-	}
-
-	choice, err := options.SelectCustom("Pick a default download dir: ", sopts)
-	if err != nil {
-		return "", err
-	}
-	return choice.(fmt.Stringer).String(), nil
+	return selectWritablePathFromEnv(os.Getenv("PATH"), ":")
 }
 
 func ensureUserLocalBinDir() (string, error) {
@@ -85,7 +49,6 @@ func checkDirExistsAndWritable(dir string) error {
 	} else if !fi.IsDir() {
 		return errors.New("Download path is not a directory")
 	}
-	// TODO make this work in non unix platforms
 	err := unix.Access(dir, unix.W_OK)
 	return err
 }
