@@ -48,7 +48,7 @@ func newUpdateCmd() *updateCmd {
 				return err
 			}
 
-			updates := []availableUpdate{}
+			var updates []availableUpdate
 			updateFailures := map[*config.Binary]error{}
 
 			if hasExplicitVersion {
