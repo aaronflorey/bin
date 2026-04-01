@@ -65,6 +65,16 @@ func newUpdateCmd() *updateCmd {
 				return nil
 			}
 
+			for _, update := range updates {
+				log.Infof(
+					"%s %s -> %s (%s)",
+					update.binary.Path,
+					color.YellowString(update.binary.Version),
+					color.GreenString(update.info.version),
+					update.info.url,
+				)
+			}
+
 			if root.opts.dryRun {
 				return wrapErrorWithCode(fmt.Errorf("Updates found, exit (dry-run mode)."), 3, "")
 			}
@@ -169,7 +179,6 @@ func getLatestVersion(b *config.Binary, p providers.Provider) (*updateInfo, erro
 	}
 
 	log.Debugf("Found new version %s for %s at %s", releaseInfo.Version, b.Path, releaseInfo.URL)
-	log.Infof("%s %s -> %s (%s)", b.Path, color.YellowString(b.Version), color.GreenString(releaseInfo.Version), releaseInfo.URL)
 	return &updateInfo{releaseInfo.Version, releaseInfo.URL}, nil
 }
 

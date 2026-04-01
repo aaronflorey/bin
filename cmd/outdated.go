@@ -6,6 +6,7 @@ import (
 
 	"github.com/aaronflorey/bin/pkg/config"
 	"github.com/aaronflorey/bin/pkg/providers"
+	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
 
@@ -95,7 +96,14 @@ func writeOutdatedOutput(cmd *cobra.Command, format string, outdated []outdatedB
 	}
 
 	for _, b := range outdated {
-		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s %s -> %s (%s)\n", b.Path, b.CurrentVersion, b.LatestVersion, b.URL); err != nil {
+		if _, err := fmt.Fprintf(
+			cmd.OutOrStdout(),
+			"• %s %s -> %s (%s)\n",
+			b.Path,
+			color.YellowString(b.CurrentVersion),
+			color.GreenString(b.LatestVersion),
+			b.URL,
+		); err != nil {
 			return err
 		}
 	}
