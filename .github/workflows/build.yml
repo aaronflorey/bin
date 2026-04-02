@@ -84,6 +84,8 @@ jobs:
             repo: github.com/mvdan/sh
           - name: trivy
             repo: github.com/aquasecurity/trivy
+          - name: arrow
+            repo: github.com/domoritz/arrow-tools
     env:
       GITHUB_TOKEN: ${{ github.token }}
     steps:

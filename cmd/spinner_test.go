@@ -21,3 +21,15 @@ func TestShouldShowSpinnerNilCommand(t *testing.T) {
 		t.Fatalf("expected nil command to not show spinner")
 	}
 }
+
+func TestResolveSpinnerCommandFromRootArgs(t *testing.T) {
+	root := &cobra.Command{Use: "bin"}
+	install := &cobra.Command{Use: "install"}
+	enableSpinner(install)
+	root.AddCommand(install)
+
+	resolved := resolveSpinnerCommand(root, []string{"install"})
+	if resolved != install {
+		t.Fatalf("expected install command to be resolved, got %q", resolved.Name())
+	}
+}

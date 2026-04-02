@@ -180,3 +180,11 @@ func (w stopWriter) Write(p []byte) (int, error) {
 	Stop()
 	return w.writer.Write(p)
 }
+
+func (w stopWriter) Fd() uintptr {
+	if writer, ok := w.writer.(interface{ Fd() uintptr }); ok {
+		return writer.Fd()
+	}
+
+	return 0
+}
