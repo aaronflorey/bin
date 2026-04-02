@@ -654,9 +654,12 @@ func rankByNameSimilarity(repoName string, matches []*FilteredAsset) []*Filtered
 		score := calculateNameSimilarity(shortName, strings.ToLower(match.Name))
 		scored = append(scored, scoredMatch{match: match, score: score})
 	}
+	if len(scored) == 0 {
+		return matches
+	}
 
 	// Find highest score
-	maxScore := 0
+	maxScore := scored[0].score
 	for _, s := range scored {
 		if s.score > maxScore {
 			maxScore = s.score
@@ -670,6 +673,9 @@ func rankByNameSimilarity(repoName string, matches []*FilteredAsset) []*Filtered
 			filtered = append(filtered, s.match)
 			log.Debugf("Keeping %s (similarity score: %d)", s.match.Name, s.score)
 		}
+	}
+	if len(filtered) == 0 {
+		return matches
 	}
 
 	return filtered
