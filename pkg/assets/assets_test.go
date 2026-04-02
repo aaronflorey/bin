@@ -569,3 +569,19 @@ func TestProcessTarMatchesByBasename(t *testing.T) {
 		t.Fatalf("expected file name 'tool', got %q", result.Name)
 	}
 }
+
+func TestRankByNameSimilarityHandlesNegativeScores(t *testing.T) {
+	matches := []*FilteredAsset{
+		{Name: "csv2arrow-linux-x86_64.tar.gz"},
+		{Name: "csv2parquet-linux-x86_64.tar.gz"},
+	}
+
+	ranked := rankByNameSimilarity("arrow-tools", matches)
+	if len(ranked) == 0 {
+		t.Fatal("expected at least one ranked match")
+	}
+
+	if ranked[0].Name != "csv2arrow-linux-x86_64.tar.gz" {
+		t.Fatalf("expected shortest negative-score match to win, got %s", ranked[0].Name)
+	}
+}
