@@ -27,6 +27,7 @@ func Execute(version string, exit func(int), args []string) {
 }
 
 func (cmd *rootCmd) Execute(args []string) {
+	cmd.args = append([]string(nil), args...)
 	cmd.cmd.SetArgs(args)
 
 	previousLogger := log.Log
@@ -64,6 +65,7 @@ type rootCmd struct {
 	cmd   *cobra.Command
 	debug bool
 	exit  func(int)
+	args  []string
 }
 
 func newRootCmd(version string, exit func(int)) *rootCmd {
@@ -92,7 +94,8 @@ func newRootCmd(version string, exit func(int)) *rootCmd {
 				log.Fatalf("Error loading config file %v", err)
 			}
 
-			if shouldShowSpinner(cmd) {
+			spinnerCmd := resolveSpinnerCommand(cmd, root.args)
+			if shouldShowSpinner(spinnerCmd) {
 				cmd.SetOut(spinner.Writer(cmd.OutOrStdout()))
 				cmd.SetErr(spinner.Writer(cmd.ErrOrStderr()))
 				log.Log = newSpinnerLogger()
@@ -132,6 +135,23 @@ func newSpinnerLogger() log.Interface {
 
 	logger.Writer = colorprofile.NewWriter(spinner.Writer(os.Stderr), os.Environ())
 	return logger
+}
+
+func resolveSpinnerCommand(cmd *cobra.Command, args []string) *cobra.Command {
+	if cmd == nil {
+		return nil
+	}
+
+	if shouldShowSpinner(cmd) || len(args) == 0 {
+		return cmd
+	}
+
+	resolved, _, err := cmd.Root().Find(args)
+	if err != nil {
+		return cmd
+	}
+
+	return resolved
 }
 
 func defaultCommand(cmd *cobra.Command, args []string) bool {
