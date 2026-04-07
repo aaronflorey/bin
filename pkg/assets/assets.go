@@ -533,7 +533,12 @@ func applyTieBreakers(repoName string, matches []*FilteredAsset) []*FilteredAsse
 	log.Debugf("Applying tie-breakers to %d matches with equal scores", len(matches))
 
 	// Step 1: Prefer standalone files over archives
+	previous := matches
 	matches = rankByArchiveType(matches)
+	if len(matches) == 0 {
+		log.Debugf("Tie-breaker returned no matches after archive ranking; falling back to previous candidates")
+		matches = previous
+	}
 	if len(matches) == 1 {
 		log.Debugf("Tie-breaker: selected standalone file")
 		return matches
@@ -542,9 +547,17 @@ func applyTieBreakers(repoName string, matches []*FilteredAsset) []*FilteredAsse
 	// Note: Archive format preference is already handled by rankByArchiveType
 
 	// Step 3: Filename similarity to repo name
+	previous = matches
 	matches = rankByNameSimilarity(repoName, matches)
+	if len(matches) == 0 {
+		log.Debugf("Tie-breaker returned no matches after name similarity ranking; falling back to previous candidates")
+		matches = previous
+	}
 	if len(matches) == 1 {
 		log.Debugf("Tie-breaker: selected by name similarity to %s", repoName)
+		return matches
+	}
+	if len(matches) == 0 {
 		return matches
 	}
 
