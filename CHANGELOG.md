@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.1.0](https://github.com/aaronflorey/bin/compare/v2.0.0...v2.1.0) (2026-04-07)
+
+
+### Features
+
+* add generic url install ([49afd03](https://github.com/aaronflorey/bin/commit/49afd03c3efed20df456bcb33040d413edbee742))
+* add support for multiple inputs when installing ([2ac472b](https://github.com/aaronflorey/bin/commit/2ac472beebef74db544e1488529b47a95fd6c8c3))
+
+
+### Bug Fixes
+
+* checksum issues ([94f2baf](https://github.com/aaronflorey/bin/commit/94f2baffd6b9640f0d46f11c4f5d0cbc51bb6cca))
+* improve spinner code ([b679337](https://github.com/aaronflorey/bin/commit/b679337c28e44feb54475b323b38f425b05192de))
+* **install:** honor interactive overwrite confirmation ([f099d42](https://github.com/aaronflorey/bin/commit/f099d422934241e4fc7b94bd3ee185acdda969b0))
+* outdated output was broken ([1dfe42c](https://github.com/aaronflorey/bin/commit/1dfe42ce58853d39c6a810ddbf026dd6d885ab71))
+* tie breaker breaking on negative scores ([c8c7638](https://github.com/aaronflorey/bin/commit/c8c7638b1f9a51e5b003bf465984da479fd894c5))
+
 ## [2.0.0](https://github.com/aaronflorey/bin/compare/v1.1.0...v2.0.0) (2026-04-01)
 
 
