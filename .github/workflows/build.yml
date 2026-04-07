@@ -145,7 +145,7 @@ jobs:
         github-token: ${{ github.token }}
     - name: Verify bin is on PATH and version output is set
       run: |
-        bin version
+        bin --version
         if [ -z "${{ steps.setup-latest.outputs.version }}" ]; then
           echo "::error::Action did not set the version output"
           exit 1
@@ -158,4 +158,4 @@ jobs:
         version: v1.1.0
         github-token: ${{ github.token }}
     - name: Verify pinned version was installed
-      run: bin version | grep -F "1.1.0"
+      run: bin --version | grep -F "1.1.0"

@@ -24,6 +24,7 @@ type checksumAsset struct {
 var checksumHTTPClient = &http.Client{Timeout: 30 * time.Second}
 
 func expectedSHA256ForAsset(name string, assets []checksumAsset, headers map[string]string) (string, error) {
+	hashOrder := fetchChecksumHashOrder(assets, headers)
 	checksumCandidates := rankedChecksumAssets(name, assets)
 	for _, candidate := range checksumCandidates {
 		content, err := fetchChecksumFile(candidate.URL, headers)
@@ -32,7 +33,7 @@ func expectedSHA256ForAsset(name string, assets []checksumAsset, headers map[str
 			continue
 		}
 
-		hash := parseSHA256Checksum(content, name)
+		hash := parseSHA256Checksum(content, name, hashOrder)
 		if hash != "" {
 			return hash, nil
 		}
@@ -53,6 +54,9 @@ func rankedChecksumAssets(name string, assets []checksumAsset) []checksumAsset {
 	scored := []scoredAsset{}
 	for _, asset := range assets {
 		lower := strings.ToLower(asset.Name)
+		if strings.Contains(lower, "hashes_order") {
+			continue
+		}
 		score := 0
 
 		switch {
@@ -83,6 +87,35 @@ func rankedChecksumAssets(name string, assets []checksumAsset) []checksumAsset {
 	return result
 }
 
+func fetchChecksumHashOrder(assets []checksumAsset, headers map[string]string) []string {
+	for _, candidate := range rankedChecksumHashOrderAssets(assets) {
+		content, err := fetchChecksumFile(candidate.URL, headers)
+		if err != nil {
+			log.Debugf("Skipping checksum order file %s due to fetch error: %v", candidate.URL, err)
+			continue
+		}
+
+		order := parseChecksumHashOrder(content)
+		if len(order) > 0 {
+			return order
+		}
+	}
+
+	return nil
+}
+
+func rankedChecksumHashOrderAssets(assets []checksumAsset) []checksumAsset {
+	candidates := make([]checksumAsset, 0, len(assets))
+	for _, asset := range assets {
+		lower := strings.ToLower(asset.Name)
+		if strings.Contains(lower, "hashes_order") {
+			candidates = append(candidates, asset)
+		}
+	}
+
+	return candidates
+}
+
 func fetchChecksumFile(url string, headers map[string]string) (string, error) {
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
@@ -110,7 +143,7 @@ func fetchChecksumFile(url string, headers map[string]string) (string, error) {
 	return string(body), nil
 }
 
-func parseSHA256Checksum(content, fileName string) string {
+func parseSHA256Checksum(content, fileName string, hashOrder []string) string {
 	targetName := strings.ToLower(fileName)
 	targetBase := strings.ToLower(filepath.Base(fileName))
 
@@ -122,18 +155,24 @@ func parseSHA256Checksum(content, fileName string) string {
 			continue
 		}
 
-		hash := sha256Pattern.FindString(line)
-		if hash == "" {
+		fields := strings.Fields(line)
+		lowerLine := strings.ToLower(line)
+		if strings.Contains(lowerLine, targetName) || strings.Contains(lowerLine, targetBase) {
+			if hash := selectSHA256FromOrderedFields(fields, hashOrder); hash != "" {
+				return hash
+			}
+
+			hashes := extractSHA256Hashes(line)
+			if len(hashes) == 1 {
+				return hashes[0]
+			}
 			continue
 		}
 
-		normalizedHash := strings.ToLower(hash)
-		lowerLine := strings.ToLower(line)
-		if strings.Contains(lowerLine, targetName) || strings.Contains(lowerLine, targetBase) {
-			return normalizedHash
+		hashes := extractSHA256Hashes(line)
+		if len(hashes) == 1 {
+			unmatched = append(unmatched, hashes[0])
 		}
-
-		unmatched = append(unmatched, normalizedHash)
 	}
 
 	if len(unmatched) == 1 {
@@ -141,4 +180,63 @@ func parseSHA256Checksum(content, fileName string) string {
 	}
 
 	return ""
+}
+
+func parseChecksumHashOrder(content string) []string {
+	order := []string{}
+	scanner := bufio.NewScanner(strings.NewReader(content))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+
+		order = append(order, normalizeHashAlgorithm(line))
+	}
+
+	return order
+}
+
+func extractSHA256Hashes(line string) []string {
+	matches := sha256Pattern.FindAllString(line, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+
+	hashes := make([]string, 0, len(matches))
+	for _, match := range matches {
+		hashes = append(hashes, strings.ToLower(match))
+	}
+
+	return hashes
+}
+
+func selectSHA256FromOrderedFields(fields, hashOrder []string) string {
+	if len(hashOrder) == 0 || len(fields) != len(hashOrder)+1 {
+		return ""
+	}
+
+	for index, algorithm := range hashOrder {
+		if algorithm == "sha256" {
+			hash := strings.ToLower(fields[index+1])
+			if sha256Pattern.MatchString(hash) && len(hash) == 64 {
+				return hash
+			}
+			return ""
+		}
+	}
+
+	return ""
+}
+
+func normalizeHashAlgorithm(value string) string {
+	var builder strings.Builder
+	builder.Grow(len(value))
+	for _, ch := range value {
+		if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') {
+			builder.WriteRune(ch)
+		}
+	}
+
+	return strings.ToLower(builder.String())
 }
