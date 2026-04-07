@@ -107,7 +107,7 @@ func TestCheckFinalPathErrorsWhenExistingWithoutForce(t *testing.T) {
 		t.Fatalf("write file: %v", err)
 	}
 
-	_, err := checkFinalPath(target, "ignored", false)
+	_, _, err := checkFinalPath(target, "ignored", false)
 	if err == nil {
 		t.Fatal("expected checkFinalPath to fail when file already exists")
 	}
@@ -120,12 +120,31 @@ func TestCheckFinalPathAllowsOverwriteWhenForced(t *testing.T) {
 		t.Fatalf("write file: %v", err)
 	}
 
-	finalPath, err := checkFinalPath(target, "ignored", true)
+	finalPath, overwrite, err := checkFinalPath(target, "ignored", true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if finalPath != target {
 		t.Fatalf("unexpected final path: %s", finalPath)
+	}
+	if !overwrite {
+		t.Fatal("expected overwrite to remain enabled")
+	}
+}
+
+func TestCheckFinalPathKeepsOverwriteDisabledForNewPath(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "tool")
+
+	finalPath, overwrite, err := checkFinalPath(target, "ignored", false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if finalPath != target {
+		t.Fatalf("unexpected final path: %s", finalPath)
+	}
+	if overwrite {
+		t.Fatal("expected overwrite to stay disabled")
 	}
 }
 
