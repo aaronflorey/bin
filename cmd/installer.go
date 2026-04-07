@@ -106,14 +106,15 @@ func installBinary(opts InstallOpts) (*InstallResult, error) {
 	}
 
 	resolvedPath := opts.Path
+	overwrite := opts.Force
 	if opts.ResolvePath {
-		resolvedPath, err = checkFinalPath(resolvedPath, assets.SanitizeName(pResult.Name, pResult.Version), opts.Force)
+		resolvedPath, overwrite, err = checkFinalPath(resolvedPath, assets.SanitizeName(pResult.Name, pResult.Version), overwrite)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	hash, err := saveToDisk(pResult, resolvedPath, opts.Force)
+	hash, err := saveToDisk(pResult, resolvedPath, overwrite)
 	if err != nil {
 		return nil, fmt.Errorf("error installing binary: %w", err)
 	}
@@ -203,10 +204,10 @@ func ensureReleaseAge(providerID, version string, publishedAt *time.Time, minAge
 // and returns the correct final file path. It also
 // checks if the path already exists and prompts
 // the user to override
-func checkFinalPath(path, fileName string, overwrite bool) (string, error) {
+func checkFinalPath(path, fileName string, overwrite bool) (string, bool, error) {
 	fi, err := os.Stat(os.ExpandEnv(path))
 	if err != nil && !os.IsNotExist(err) {
-		return "", err
+		return "", overwrite, err
 	}
 
 	finalPath := path
@@ -217,19 +218,21 @@ func checkFinalPath(path, fileName string, overwrite bool) (string, error) {
 
 	if _, err := os.Stat(os.ExpandEnv(finalPath)); err == nil {
 		if overwrite {
-			return finalPath, nil
+			return finalPath, true, nil
 		}
 
 		if !prompt.IsInteractive() {
-			return "", fmt.Errorf("path %s already exists, use --force to overwrite", finalPath)
+			return "", overwrite, fmt.Errorf("path %s already exists, use --force to overwrite", finalPath)
 		}
 
 		if err := prompt.Confirm(fmt.Sprintf("Path %s already exists. Overwrite?", finalPath)); err != nil {
-			return "", err
+			return "", overwrite, err
 		}
+
+		overwrite = true
 	}
 
-	return finalPath, nil
+	return finalPath, overwrite, nil
 }
 
 // saveToDisk saves the specified binary to the desired path
