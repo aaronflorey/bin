@@ -88,6 +88,10 @@ func New(u, provider string) (Provider, error) {
 		return nil, err
 	}
 
+	if provider == "generic" {
+		return newGenericURL(purl)
+	}
+
 	if strings.Contains(purl.Host, "github") || provider == "github" {
 		return newGitHub(purl)
 	}
@@ -102,6 +106,10 @@ func New(u, provider string) (Provider, error) {
 
 	if strings.Contains(purl.Host, "releases.hashicorp.com") || provider == "hashicorp" {
 		return newHashiCorp(purl)
+	}
+
+	if strings.EqualFold(purl.Scheme, "http") || strings.EqualFold(purl.Scheme, "https") {
+		return newGenericURL(purl)
 	}
 
 	return nil, fmt.Errorf("can't find provider for url %s", u)
