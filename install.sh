@@ -90,9 +90,34 @@ download_file() {
 	fail "either curl or wget is required"
 }
 
+extract_bootstrap_binary() {
+	archive_path="$1"
+	asset_name="$2"
+	dest="$3"
+	extract_dir="$4"
+
+	case "$asset_name" in
+		*.tar.gz|*.tgz)
+			tar -xzf "$archive_path" -C "$extract_dir"
+			cp "$extract_dir/bin" "$dest"
+			return
+			;;
+		*.zip)
+			if ! command -v unzip >/dev/null 2>&1; then
+				fail "unzip is required to extract ${asset_name}"
+			fi
+			unzip -q "$archive_path" -d "$extract_dir"
+			cp "$extract_dir/bin" "$dest"
+			return
+			;;
+		esac
+
+	cp "$archive_path" "$dest"
+}
+
 find_download_url() {
 	json="$1"
-	asset_regex="_${OS}_${ARCH}$"
+	asset_regex="_${OS}_${ARCH}(\.(tar\.gz|tgz|zip|exe))?$"
 
 	if command -v jq >/dev/null 2>&1; then
 		artifacts_url="$(printf '%s\n' "$json" | jq -r \
@@ -119,7 +144,7 @@ find_download_url() {
 
 	if command -v jq >/dev/null 2>&1; then
 		printf '%s\n' "$json" | jq -r --arg asset_regex "$asset_regex" \
-			'.assets[]?.browser_download_url | select(test($asset_regex))' \
+			'.assets[]? | select(.name | test($asset_regex)) | .browser_download_url' \
 			| head -n 1
 		return
 	fi
@@ -128,8 +153,8 @@ find_download_url() {
 		| tr ',' '\n' \
 		| grep '"browser_download_url"' \
 		| sed -n 's/.*"browser_download_url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
-		| grep "^https://" \
-		| grep -E "_${OS}_${ARCH}$" \
+		| grep '^https://' \
+		| grep -E "${asset_regex}$" \
 		| head -n 1
 }
 
@@ -228,13 +253,20 @@ DOWNLOAD_URL="$(find_download_url "$RELEASE_JSON")"
 [ -n "$DOWNLOAD_URL" ] || fail "failed to find a release asset for ${OS}/${ARCH}"
 
 BOOTSTRAP_BIN="$(mktemp /tmp/bin.XXXXXX)"
+BOOTSTRAP_DOWNLOAD="$(mktemp /tmp/bin-download.XXXXXX)"
+BOOTSTRAP_DIR="$(mktemp -d /tmp/bin-install.XXXXXX)"
+BOOTSTRAP_ASSET_NAME="$(basename "$DOWNLOAD_URL")"
 cleanup() {
 	rm -f "$BOOTSTRAP_BIN"
+	rm -f "$BOOTSTRAP_DOWNLOAD"
+	rm -rf "$BOOTSTRAP_DIR"
 }
 trap cleanup EXIT INT TERM
 
 log "Downloading ${TAG_NAME} from ${DOWNLOAD_URL}"
-download_file "$DOWNLOAD_URL" "$BOOTSTRAP_BIN"
+download_file "$DOWNLOAD_URL" "$BOOTSTRAP_DOWNLOAD"
+[ -f "$BOOTSTRAP_DOWNLOAD" ] || fail "downloaded asset did not contain the bin binary"
+extract_bootstrap_binary "$BOOTSTRAP_DOWNLOAD" "$BOOTSTRAP_ASSET_NAME" "$BOOTSTRAP_BIN" "$BOOTSTRAP_DIR"
 [ -f "$BOOTSTRAP_BIN" ] || fail "downloaded asset did not contain the bin binary"
 chmod 0755 "$BOOTSTRAP_BIN"
 
