@@ -121,7 +121,7 @@ jobs:
 
 | Command                     | Description                                | Example                          |
 | --------------------------- | ------------------------------------------ | -------------------------------- |
-| `bin install <repo> [path]` | Install binary from GitHub or Docker       | `bin install github.com/cli/cli` |
+| `bin install <repo> [path]` or `bin install <repo>...` | Install one or many binaries                | `bin install github.com/cli/cli github.com/sharkdp/fd` |
 | `bin list`                  | List installed binaries and versions       | `bin list`                       |
 | `bin export [file]`         | Export installed binaries as JSON          | `bin export bins.json`           |
 | `bin import [file]`         | Import binaries from JSON                  | `bin import bins.json`           |
@@ -135,6 +135,8 @@ jobs:
 | `bin help`                  | Show help for any command                  | `bin help install`               |
 
 **Tips**: if `bin` is unable to found the right package, try `bin install -a` to show all possible download options (skip scoring & filtering).
+
+When installing multiple repos in one command, custom paths are not supported. Use either `bin install <repo> [path]` for a single repo or `bin install <repo>...` for many repos.
 
 `bin export` writes JSON to stdout by default and can write to a file when `[file]` is provided.  
 `bin import` reads JSON from stdin by default and can read from a file when `[file]` is provided.  
@@ -172,6 +174,9 @@ You _can_ however install a specific pre-release by specifying the URL for the p
 ```shell
 # installs latest Kind release
 bin install github.com/kubernetes-sigs/kind
+
+# installs multiple repositories sequentially into default path
+bin install github.com/kubernetes-sigs/kind github.com/sharkdp/fd github.com/cli/cli
 
 # installs a specific release
 bin install github.com/kubernetes-sigs/kind/releases/tag/v0.8.0
