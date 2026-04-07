@@ -24,6 +24,7 @@ While this makes distribution easier, it creates challenges for updates and trac
   - [Docker Images](#docker-images)
   - [Hashicorp Releases](#hashicorp-releases)
   - [Go Install](#go-install)
+  - [Generic URLs](#generic-urls)
 
 For a comprehensive list, see the [Tools Wiki](https://github.com/aaronflorey/bin/wiki/Tools-list).
 
@@ -297,6 +298,30 @@ Ensure `go` is present in your `PATH`.
 
 ```shell
 bin install goinstall://github.com/jrhouston/tfk8s@v0.1.8
+```
+
+### Generic URLs
+
+Use the generic provider for direct HTTP(S) download URLs that are not tied to GitHub/GitLab/Codeberg/HashiCorp.
+
+`bin` resolves metadata using `HEAD` (with a lightweight `GET` fallback when needed), then:
+
+1. Reads `Content-Disposition` filename when present.
+2. Falls back to the final redirect URL filename.
+3. Falls back to the original URL filename.
+4. Fails if no version is found
+
+Automatic update detection requires a semver-like token in that resolved filename (for example `tool_0.16.0_darwin_arm64`).
+If no version can be inferred from metadata/filename, generic provider operations fail with an error.
+
+#### Usage
+
+```shell
+# auto-detected fallback provider for unknown HTTP(S) hosts
+bin install https://downloads.example.com/tools/server-linux-x64_0.16.0
+
+# force generic provider explicitly
+bin install --provider generic https://downloads.example.com/tools/server-linux-x64_0.16.0
 ```
 
 ## 🔧 Configuration

@@ -16,12 +16,20 @@ type mockProvider struct {
 	latestVersion    string
 	latestVersionURL string
 	publishedAt      *time.Time
+	release          *providers.ReleaseInfo
+	returnNilRelease bool
 	err              error
 }
 
 func (m mockProvider) GetLatestVersion() (*providers.ReleaseInfo, error) {
 	if m.err != nil {
 		return nil, m.err
+	}
+	if m.returnNilRelease {
+		return nil, nil
+	}
+	if m.release != nil {
+		return m.release, nil
 	}
 	return &providers.ReleaseInfo{
 		Version:     m.latestVersion,
@@ -151,5 +159,53 @@ func TestShouldUpdateToExplicitVersion(t *testing.T) {
 	}
 	if !shouldUpdateToExplicitVersion("1.1.0", "1.2.0") {
 		t.Fatal("should update when explicit version is newer")
+	}
+}
+
+func TestGetLatestVersionSkipsWhenProviderCannotInferVersion(t *testing.T) {
+	b := &config.Binary{
+		Path:       "/home/user/bin/tool",
+		Version:    "1.1.0",
+		URL:        "https://downloads.example.test/tool",
+		RemoteName: "tool",
+		Provider:   "generic",
+	}
+
+	p := mockProvider{id: "generic", returnNilRelease: true}
+	got, err := getLatestVersion(b, p)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("expected nil update info, got %+v", got)
+	}
+}
+
+func TestGetLatestVersionDetectsGenericSemverUpdate(t *testing.T) {
+	b := &config.Binary{
+		Path:       "/home/user/bin/tool",
+		Version:    "0.15.0",
+		URL:        "https://downloads.example.test/tool",
+		RemoteName: "tool",
+		Provider:   "generic",
+	}
+
+	p := mockProvider{
+		id: "generic",
+		release: &providers.ReleaseInfo{
+			Version: "0.16.0",
+			URL:     "https://cdn.example.test/tool_0.16.0_darwin_arm64",
+		},
+	}
+
+	got, err := getLatestVersion(b, p)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected update info")
+	}
+	if got.version != "0.16.0" {
+		t.Fatalf("unexpected version: %s", got.version)
 	}
 }
