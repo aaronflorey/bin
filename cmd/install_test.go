@@ -64,3 +64,66 @@ func TestExistingBinaryForInstallMatchesRequestedPath(t *testing.T) {
 		t.Fatal("expected existing binary to be found by requested path")
 	}
 }
+
+func TestParseInstallTargetsSingleURL(t *testing.T) {
+	targets, err := parseInstallTargets([]string{"github.com/cli/cli"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(targets) != 1 {
+		t.Fatalf("expected 1 target, got %d", len(targets))
+	}
+	if targets[0].url != "github.com/cli/cli" || targets[0].path != "" {
+		t.Fatalf("unexpected target: %+v", targets[0])
+	}
+}
+
+func TestParseInstallTargetsSingleURLWithPath(t *testing.T) {
+	targets, err := parseInstallTargets([]string{"github.com/cli/cli", "./bin/gh"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(targets) != 1 {
+		t.Fatalf("expected 1 target, got %d", len(targets))
+	}
+	if targets[0].url != "github.com/cli/cli" || targets[0].path != "./bin/gh" {
+		t.Fatalf("unexpected target: %+v", targets[0])
+	}
+}
+
+func TestParseInstallTargetsTwoURLs(t *testing.T) {
+	targets, err := parseInstallTargets([]string{"github.com/cli/cli", "github.com/sharkdp/fd"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(targets) != 2 {
+		t.Fatalf("expected 2 targets, got %d", len(targets))
+	}
+	if targets[0].path != "" || targets[1].path != "" {
+		t.Fatalf("expected no explicit paths: %+v", targets)
+	}
+}
+
+func TestParseInstallTargetsThreeURLs(t *testing.T) {
+	targets, err := parseInstallTargets([]string{"github.com/cli/cli", "github.com/sharkdp/fd", "docker://hashicorp/terraform:light"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(targets) != 3 {
+		t.Fatalf("expected 3 targets, got %d", len(targets))
+	}
+}
+
+func TestParseInstallTargetsRejectsMixedMultiArgs(t *testing.T) {
+	_, err := parseInstallTargets([]string{"github.com/cli/cli", "github.com/sharkdp/fd", "./bin/custom"})
+	if err == nil {
+		t.Fatal("expected parseInstallTargets to reject non-url argument in multi-url mode")
+	}
+	if !strings.Contains(err.Error(), "all arguments must be URLs") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
