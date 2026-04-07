@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.1](https://github.com/aaronflorey/bin/compare/v2.1.0...v2.1.1) (2026-04-07)
+
+
+### Bug Fixes
+
+* panic in tie breaker code ([81c5ced](https://github.com/aaronflorey/bin/commit/81c5ced023599b81014ef20357b85f1b9f4a5a95))
+
 ## [2.1.0](https://github.com/aaronflorey/bin/compare/v2.0.0...v2.1.0) (2026-04-07)
 
 
