@@ -182,6 +182,12 @@ func TestFilterAssets(t *testing.T) {
 			{Name: "cli-linux-amd64.gz", URL: "https://example.test/cli-linux-amd64.gz"},
 			{Name: "cli-linux-amd64-musl.gz", URL: "https://example.test/cli-linux-amd64-musl.gz"},
 		}}, "cli-linux-amd64.gz", testLinuxAMDResolver},
+		{args{"arrow-tools", []*Asset{
+			{Name: "csv2arrow-x86_64-unknown-linux-gnu.tar.xz", URL: "https://example.test/domoritz/arrow-tools/releases/download/v0.26.0/csv2arrow-x86_64-unknown-linux-gnu.tar.xz"},
+			{Name: "csv2parquet-x86_64-unknown-linux-gnu.tar.xz", URL: "https://example.test/domoritz/arrow-tools/releases/download/v0.26.0/csv2parquet-x86_64-unknown-linux-gnu.tar.xz"},
+			{Name: "json2arrow-x86_64-unknown-linux-gnu.tar.xz", URL: "https://example.test/domoritz/arrow-tools/releases/download/v0.26.0/json2arrow-x86_64-unknown-linux-gnu.tar.xz"},
+			{Name: "json2parquet-x86_64-unknown-linux-gnu.tar.xz", URL: "https://example.test/domoritz/arrow-tools/releases/download/v0.26.0/json2parquet-x86_64-unknown-linux-gnu.tar.xz"},
+		}}, "csv2arrow-x86_64-unknown-linux-gnu.tar.xz", testLinuxAMDResolver},
 	}
 
 	f := NewFilter(&FilterOpts{SkipScoring: false})
