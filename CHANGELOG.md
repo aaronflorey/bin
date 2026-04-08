@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.2](https://github.com/aaronflorey/bin/compare/v2.1.1...v2.1.2) (2026-04-08)
+
+
+### Bug Fixes
+
+* don't download .sbom.json files ([a1bf130](https://github.com/aaronflorey/bin/commit/a1bf130f7675a2dd4d0d05827ca1a3623c9b68fb))
+
 ## [2.1.1](https://github.com/aaronflorey/bin/compare/v2.1.0...v2.1.1) (2026-04-07)
 
 
