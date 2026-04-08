@@ -351,6 +351,26 @@ func TestLooksLikeMetadataAsset(t *testing.T) {
 			out:  true,
 		},
 		{
+			name: "sbom file",
+			in:   "DockerSandboxes-linux-amd64.sbom.json",
+			out:  true,
+		},
+		{
+			name: "provenance artifact",
+			in:   "tool-linux-amd64.provenance.json",
+			out:  true,
+		},
+		{
+			name: "attestation sidecar suffix",
+			in:   "tool-darwin-arm64.attestation.json",
+			out:  true,
+		},
+		{
+			name: "cyclonedx sidecar suffix",
+			in:   "tool-linux-amd64.cyclonedx.json",
+			out:  true,
+		},
+		{
 			name: "binary archive",
 			in:   "tool-darwin-aarch64.tar.gz",
 			out:  false,
