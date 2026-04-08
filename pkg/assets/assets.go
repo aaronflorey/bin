@@ -35,12 +35,16 @@ var (
 		".sha256", ".sha512", ".sha1", ".md5",
 		".sha256sum", ".sha512sum",
 		".sigstore.json", ".intoto.jsonl",
+		".sbom.json", ".spdx.json", ".cyclonedx.json",
+		".provenance.json", ".attestation.json", ".attest.json",
 		".sig", ".minisig", ".pem", ".crt", ".cer", ".asc",
 	}
 
 	metadataTokens = []string{
 		"checksum", "sha256sum", "sha512sum",
 		"sigstore", "intoto",
+		"sbom", "spdx", "cyclonedx",
+		"provenance", "attestation", "attest",
 	}
 
 	archiveJunkSuffixes = []string{
