@@ -207,6 +207,8 @@ func (f *Filter) ParseAutoSelection(autoSelect string) string {
 // select the proper one and ask the user to manually select one
 // in case it can't determine it
 func (f *Filter) FilterAssets(repoName string, as []*Asset, autoSelect string) (*FilteredAsset, error) {
+	f.repoName = repoName
+	matchName := f.preferredMatchName(repoName)
 	as = filterInstallableAssets(as)
 
 	matches := []*FilteredAsset{}
@@ -217,7 +219,7 @@ func (f *Filter) FilterAssets(repoName string, as []*Asset, autoSelect string) (
 		if !f.opts.SkipScoring {
 			scores := map[string]int{}
 			scoreKeys := []string{}
-			scores[repoName] = 1
+			scores[matchName] = 1
 			for _, os := range resolver.GetOS() {
 				scores[os] = 10
 			}
@@ -272,7 +274,7 @@ func (f *Filter) FilterAssets(repoName string, as []*Asset, autoSelect string) (
 			}
 			matches = rankLinuxLibCMatches(matches)
 			matches = rankArchitectureMatches(matches)
-			matches = applyTieBreakers(repoName, matches)
+			matches = applyTieBreakers(matchName, matches)
 
 		} else {
 			log.Debugf("--all flag was supplied, skipping scoring")
@@ -329,6 +331,19 @@ func (f *Filter) FilterAssets(repoName string, as []*Asset, autoSelect string) (
 	}
 
 	return gf, nil
+}
+
+func (f *Filter) preferredMatchName(repoName string) string {
+	if f.opts == nil {
+		return repoName
+	}
+	if f.opts.PackageName != "" {
+		return f.opts.PackageName
+	}
+	if f.opts.PackagePath != "" {
+		return filepath.Base(f.opts.PackagePath)
+	}
+	return repoName
 }
 
 func rankLinuxLibCMatches(matches []*FilteredAsset) []*FilteredAsset {

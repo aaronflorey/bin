@@ -329,6 +329,68 @@ func TestFilterAssetsFailsNonInteractiveWhenStillAmbiguous(t *testing.T) {
 	}
 }
 
+func TestFilterAssetsPrefersPackageNameForMultiToolRepos(t *testing.T) {
+	originalResolver := resolver
+	originalSelect := selectOption
+	originalIsInteractive := isInteractive
+	defer func() {
+		resolver = originalResolver
+		selectOption = originalSelect
+		isInteractive = originalIsInteractive
+	}()
+
+	resolver = testDarwinARMResolver
+	isInteractive = func() bool { return false }
+	selectOption = func(msg string, opts []fmt.Stringer) (interface{}, error) {
+		t.Fatal("selectOption should not be called when package name can break the tie")
+		return nil, nil
+	}
+
+	f := NewFilter(&FilterOpts{PackageName: "csv2parquet"})
+	result, err := f.FilterAssets("arrow-tools", []*Asset{
+		{Name: "csv2arrow-aarch64-apple-darwin.tar.xz", URL: "https://example.test/domoritz/arrow-tools/releases/download/v0.26.0/csv2arrow-aarch64-apple-darwin.tar.xz"},
+		{Name: "csv2parquet-aarch64-apple-darwin.tar.xz", URL: "https://example.test/domoritz/arrow-tools/releases/download/v0.26.0/csv2parquet-aarch64-apple-darwin.tar.xz"},
+		{Name: "json2arrow-aarch64-apple-darwin.tar.xz", URL: "https://example.test/domoritz/arrow-tools/releases/download/v0.26.0/json2arrow-aarch64-apple-darwin.tar.xz"},
+		{Name: "json2parquet-aarch64-apple-darwin.tar.xz", URL: "https://example.test/domoritz/arrow-tools/releases/download/v0.26.0/json2parquet-aarch64-apple-darwin.tar.xz"},
+	}, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Name != "csv2parquet-aarch64-apple-darwin.tar.xz" {
+		t.Fatalf("expected csv2parquet-aarch64-apple-darwin.tar.xz, got %s", result.Name)
+	}
+}
+
+func TestFilterAssetsFallsBackToPackagePathBasename(t *testing.T) {
+	originalResolver := resolver
+	originalSelect := selectOption
+	originalIsInteractive := isInteractive
+	defer func() {
+		resolver = originalResolver
+		selectOption = originalSelect
+		isInteractive = originalIsInteractive
+	}()
+
+	resolver = testDarwinARMResolver
+	isInteractive = func() bool { return false }
+	selectOption = func(msg string, opts []fmt.Stringer) (interface{}, error) {
+		t.Fatal("selectOption should not be called when package path can break the tie")
+		return nil, nil
+	}
+
+	f := NewFilter(&FilterOpts{PackagePath: "csv2parquet-aarch64-apple-darwin/csv2parquet"})
+	result, err := f.FilterAssets("arrow-tools", []*Asset{
+		{Name: "csv2arrow-aarch64-apple-darwin.tar.xz", URL: "https://example.test/domoritz/arrow-tools/releases/download/v0.26.0/csv2arrow-aarch64-apple-darwin.tar.xz"},
+		{Name: "csv2parquet-aarch64-apple-darwin.tar.xz", URL: "https://example.test/domoritz/arrow-tools/releases/download/v0.26.0/csv2parquet-aarch64-apple-darwin.tar.xz"},
+	}, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Name != "csv2parquet-aarch64-apple-darwin.tar.xz" {
+		t.Fatalf("expected csv2parquet-aarch64-apple-darwin.tar.xz, got %s", result.Name)
+	}
+}
+
 func TestLooksLikeMetadataAsset(t *testing.T) {
 	cases := []struct {
 		name string
