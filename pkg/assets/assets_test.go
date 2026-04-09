@@ -188,6 +188,12 @@ func TestFilterAssets(t *testing.T) {
 			{Name: "json2arrow-x86_64-unknown-linux-gnu.tar.xz", URL: "https://example.test/domoritz/arrow-tools/releases/download/v0.26.0/json2arrow-x86_64-unknown-linux-gnu.tar.xz"},
 			{Name: "json2parquet-x86_64-unknown-linux-gnu.tar.xz", URL: "https://example.test/domoritz/arrow-tools/releases/download/v0.26.0/json2parquet-x86_64-unknown-linux-gnu.tar.xz"},
 		}}, "csv2arrow-x86_64-unknown-linux-gnu.tar.xz", testLinuxAMDResolver},
+		{args{"goreleaser", []*Asset{
+			{Name: "goreleaser_2.15.2_linux_amd64.flatpak", URL: "https://example.test/goreleaser/goreleaser/releases/download/v2.15.2/goreleaser_2.15.2_linux_amd64.flatpak"},
+			{Name: "goreleaser-2.15.2-1-x86_64.pkg.tar.zst", URL: "https://example.test/goreleaser/goreleaser/releases/download/v2.15.2/goreleaser-2.15.2-1-x86_64.pkg.tar.zst"},
+			{Name: "goreleaser_2.15.2_amd64.deb", URL: "https://example.test/goreleaser/goreleaser/releases/download/v2.15.2/goreleaser_2.15.2_amd64.deb"},
+			{Name: "goreleaser_Linux_x86_64.tar.gz", URL: "https://example.test/goreleaser/goreleaser/releases/download/v2.15.2/goreleaser_Linux_x86_64.tar.gz"},
+		}}, "goreleaser_Linux_x86_64.tar.gz", testLinuxAMDResolver},
 	}
 
 	f := NewFilter(&FilterOpts{SkipScoring: false})
@@ -447,6 +453,37 @@ func TestLooksLikeMetadataAsset(t *testing.T) {
 	}
 }
 
+func TestLooksLikePackageArtifact(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		out  bool
+	}{
+		{
+			name: "flatpak package",
+			in:   "goreleaser_2.15.2_linux_amd64.flatpak",
+			out:  true,
+		},
+		{
+			name: "arch package",
+			in:   "goreleaser-2.15.2-1-x86_64.pkg.tar.zst",
+			out:  true,
+		},
+		{
+			name: "binary tarball",
+			in:   "goreleaser_Linux_x86_64.tar.gz",
+			out:  false,
+		},
+	}
+
+	for _, c := range cases {
+		result := looksLikePackageArtifact(c.in)
+		if result != c.out {
+			t.Fatalf("%s: expected %v, got %v", c.name, c.out, result)
+		}
+	}
+}
+
 func TestLooksLikeArchiveJunk(t *testing.T) {
 	cases := []struct {
 		name string
@@ -612,6 +649,14 @@ func TestIsSupportedExt(t *testing.T) {
 		{
 			"suite-4.8.0.AppImage",
 			true,
+		},
+		{
+			"goreleaser_2.15.2_linux_amd64.flatpak",
+			false,
+		},
+		{
+			"goreleaser-2.15.2-1-x86_64.pkg.tar.zst",
+			false,
 		},
 		{
 			"suite-4.7.1-win64.msi",

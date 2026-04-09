@@ -47,6 +47,10 @@ var (
 		"provenance", "attestation", "attest",
 	}
 
+	packageArtifactSuffixes = []string{
+		".apk", ".deb", ".flatpak", ".msi", ".pkg.tar", ".pkg.tar.xz", ".pkg.tar.zst", ".rpm",
+	}
+
 	archiveJunkSuffixes = []string{
 		".md", ".markdown", ".rst", ".adoc", ".txt", ".rtf",
 		".html", ".htm", ".pdf",
@@ -1130,6 +1134,11 @@ func (f *Filter) processZip(name string, r io.Reader, autoSelect string) (*final
 // isSupportedExt checks if this provider supports
 // dealing with this specific file extension
 func isSupportedExt(filename string) bool {
+	if looksLikePackageArtifact(filename) {
+		log.Debugf("Filename %s is a package-manager artifact", filename)
+		return false
+	}
+
 	if ext := strings.TrimPrefix(filepath.Ext(filename), "."); len(ext) > 0 {
 		switch filetype.GetType(ext) {
 		case msiType, matchers.TypeDeb, matchers.TypeRpm, ascType:
@@ -1166,7 +1175,9 @@ func filterAssetsBy(as []*Asset, skip func(name string) bool, label string) []*A
 }
 
 func filterInstallableAssets(as []*Asset) []*Asset {
-	return filterAssetsBy(as, looksLikeMetadataAsset, "metadata")
+	return filterAssetsBy(as, func(name string) bool {
+		return looksLikeMetadataAsset(name) || looksLikePackageArtifact(name)
+	}, "metadata/package")
 }
 
 func filterArchiveAssets(as []*Asset) []*Asset {
@@ -1183,6 +1194,12 @@ func looksLikeMetadataAsset(name string) bool {
 	}
 
 	return bstrings.ContainsAny(lower, metadataTokens)
+}
+
+func looksLikePackageArtifact(name string) bool {
+	lower := strings.ToLower(name)
+
+	return bstrings.HasAnySuffix(lower, packageArtifactSuffixes)
 }
 
 func looksLikeArchiveJunk(name string) bool {
