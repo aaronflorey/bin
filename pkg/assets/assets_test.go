@@ -397,6 +397,37 @@ func TestFilterAssetsFallsBackToPackagePathBasename(t *testing.T) {
 	}
 }
 
+func TestFilterAssetsIgnoresMetadataPackageName(t *testing.T) {
+	originalResolver := resolver
+	originalSelect := selectOption
+	originalIsInteractive := isInteractive
+	defer func() {
+		resolver = originalResolver
+		selectOption = originalSelect
+		isInteractive = originalIsInteractive
+	}()
+
+	resolver = testDarwinARMResolver
+	isInteractive = func() bool { return false }
+	selectOption = func(msg string, opts []fmt.Stringer) (interface{}, error) {
+		t.Fatal("selectOption should not be called when metadata package name is ignored")
+		return nil, nil
+	}
+
+	f := NewFilter(&FilterOpts{PackageName: "ghtkn_darwin_arm64.tar.gz.sbom.json"})
+	result, err := f.FilterAssets("ghtkn", []*Asset{
+		{Name: "ghtkn_darwin_amd64.tar.gz", URL: "https://example.test/suzuki-shunsuke/ghtkn/releases/download/v0.2.4/ghtkn_darwin_amd64.tar.gz"},
+		{Name: "ghtkn_darwin_arm64.tar.gz", URL: "https://example.test/suzuki-shunsuke/ghtkn/releases/download/v0.2.4/ghtkn_darwin_arm64.tar.gz"},
+		{Name: "ghtkn_darwin_arm64.tar.gz.sbom.json", URL: "https://example.test/suzuki-shunsuke/ghtkn/releases/download/v0.2.4/ghtkn_darwin_arm64.tar.gz.sbom.json"},
+	}, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Name != "ghtkn_darwin_arm64.tar.gz" {
+		t.Fatalf("expected ghtkn_darwin_arm64.tar.gz, got %s", result.Name)
+	}
+}
+
 func TestLooksLikeMetadataAsset(t *testing.T) {
 	cases := []struct {
 		name string
