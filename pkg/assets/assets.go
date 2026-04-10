@@ -341,7 +341,7 @@ func (f *Filter) preferredMatchName(repoName string) string {
 	if f.opts == nil {
 		return repoName
 	}
-	if f.opts.PackageName != "" {
+	if f.opts.PackageName != "" && !looksLikeMetadataAsset(f.opts.PackageName) && !looksLikePackageArtifact(f.opts.PackageName) {
 		return f.opts.PackageName
 	}
 	if f.opts.PackagePath != "" {
