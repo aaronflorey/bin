@@ -313,5 +313,7 @@ func setupTestConfig(t *testing.T) string {
 	if err := config.CheckAndLoad(); err != nil {
 		t.Fatalf("failed to load test config: %v", err)
 	}
+	config.Get().DefaultPath = defaultPath
+	config.Get().Bins = map[string]*config.Binary{}
 	return defaultPath
 }

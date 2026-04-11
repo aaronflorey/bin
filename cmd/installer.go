@@ -81,13 +81,7 @@ type InstallResult struct {
 // installBinary fetches a binary from a provider, saves it to disk,
 // and updates the config.
 func installBinary(opts InstallOpts) (*InstallResult, error) {
-	p, err := providers.New(opts.URL, opts.Provider)
-	if err != nil {
-		return nil, err
-	}
-	log.Debugf("Using provider '%s' for '%s'", p.GetID(), opts.URL)
-
-	pResult, err := p.Fetch(&opts.FetchOpts)
+	p, pResult, err := fetchBinary(providers.New, opts.URL, opts.Provider, opts.FetchOpts)
 	if err != nil {
 		return nil, err
 	}
@@ -157,6 +151,21 @@ func installBinary(opts InstallOpts) (*InstallResult, error) {
 		Version: pResult.Version,
 		Path:    configPath,
 	}, nil
+}
+
+func fetchBinary(newProvider providerFactory, url, forcedProvider string, fetchOpts providers.FetchOpts) (providers.Provider, *providers.File, error) {
+	p, err := newProvider(url, forcedProvider)
+	if err != nil {
+		return nil, nil, err
+	}
+	log.Debugf("Using provider '%s' for '%s'", p.GetID(), url)
+
+	pResult, err := p.Fetch(&fetchOpts)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return p, pResult, nil
 }
 
 func existingConfigBinary(opts InstallOpts) (*config.Binary, bool) {
