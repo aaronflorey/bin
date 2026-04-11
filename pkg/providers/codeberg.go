@@ -53,7 +53,15 @@ func (c *codeberg) Fetch(opts *FetchOpts) (*File, error) {
 		candidates = append(candidates, &assets.Asset{Name: a.Name, URL: a.DownloadURL})
 		checksumAssets = append(checksumAssets, checksumAsset{Name: a.Name, URL: a.DownloadURL})
 	}
-	f := assets.NewFilter(&assets.FilterOpts{SkipScoring: opts.All, PackagePath: opts.PackagePath, SkipPathCheck: opts.SkipPatchCheck, PackageName: opts.PackageName, NonInteractive: opts.NonInteractive})
+	f := assets.NewFilter(&assets.FilterOpts{
+		SkipScoring:    opts.All,
+		PackagePath:    opts.PackagePath,
+		SkipPathCheck:  opts.SkipPatchCheck,
+		PackageName:    opts.PackageName,
+		SystemPackage:  opts.SystemPackage,
+		PackageType:    opts.PackageType,
+		NonInteractive: opts.NonInteractive,
+	})
 
 	autoSelect := f.ParseAutoSelection(opts.AutoSelect)
 	gf, err := f.FilterAssets(c.repo, candidates, autoSelect)

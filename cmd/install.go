@@ -24,6 +24,7 @@ type installOpts struct {
 	autoSelect     string
 	minAgeDays     int
 	pin            bool
+	systemPackage  bool
 	nonInteractive bool
 }
 
@@ -54,7 +55,7 @@ func newInstallCmd() *installCmd {
 				return fmt.Errorf("--min-age-days must be a positive integer")
 			}
 
-			targets, err := parseInstallTargets(args)
+			targets, err := parseInstallTargets(args, root.opts.systemPackage)
 			if err != nil {
 				return err
 			}
@@ -85,6 +86,7 @@ func newInstallCmd() *installCmd {
 	root.cmd.Flags().StringVarP(&root.opts.autoSelect, "select", "s", "", "Auto select installation file (skips interactive prompt)")
 	root.cmd.Flags().IntVar(&root.opts.minAgeDays, "min-age-days", 0, "Require the selected release to be at least this many days old")
 	root.cmd.Flags().BoolVar(&root.opts.pin, "pin", false, "Pin installed version without prompting")
+	root.cmd.Flags().BoolVar(&root.opts.systemPackage, "system-package", false, "Install from compatible system package artifacts (deb, rpm, apk, flatpak)")
 	root.cmd.Flags().BoolVar(&root.opts.nonInteractive, "non-interactive", false, "Disable all interactive prompts (auto-select best option)")
 	return root
 }
@@ -93,6 +95,8 @@ func (root *installCmd) installTarget(cmd *cobra.Command, target installTarget) 
 	resolved, err := resolveFetchRequest(target.url, root.opts.provider, providers.FetchOpts{
 		All:            root.opts.all,
 		AutoSelect:     root.opts.autoSelect,
+		PackageName:    "",
+		SystemPackage:  root.opts.systemPackage,
 		NonInteractive: root.opts.nonInteractive,
 	})
 	if err != nil {
@@ -121,7 +125,13 @@ func (root *installCmd) installTarget(cmd *cobra.Command, target installTarget) 
 	cfg := config.Get()
 
 	resolvedPath := target.path
-	if resolvedPath == "" {
+	if root.opts.systemPackage {
+		if systemPackagePathLooksExplicit(target.path) {
+			return fmt.Errorf("--system-package does not accept filesystem paths; optional second argument must be a command name")
+		}
+		resolvedPath = ""
+		resolved.fetchOpts.PackageName = target.path
+	} else if resolvedPath == "" {
 		resolvedPath = defaultPath
 	} else if !strings.Contains(resolvedPath, "/") {
 		resolvedPath = filepath.Join(defaultPath, resolvedPath)
@@ -141,8 +151,22 @@ func (root *installCmd) installTarget(cmd *cobra.Command, target installTarget) 
 		if resolved.fetchOpts.PackageName == "" {
 			resolved.fetchOpts.PackageName = existing.RemoteName
 		}
+		if effectiveInstallMode(existing.InstallMode) == installModeSystemPackage {
+			resolved.fetchOpts.SystemPackage = true
+			resolved.fetchOpts.PackageType = normalizePackageType(existing.PackageType)
+		}
 
-		res, err := installBinary(InstallOpts{
+		if root.opts.systemPackage {
+			resolved.fetchOpts.PackageName = target.path
+			logSystemPackageSelected(resolved.fetchOpts.PackageType, target.path)
+		}
+
+		installer := installBinary
+		if resolved.fetchOpts.SystemPackage {
+			installer = installSystemPackage
+		}
+
+		res, err := installer(InstallOpts{
 			URL:         resolved.url,
 			Provider:    root.opts.provider,
 			Path:        existing.Path,
@@ -151,7 +175,7 @@ func (root *installCmd) installTarget(cmd *cobra.Command, target installTarget) 
 			Pinned:      pinVersion,
 			MinAgeDays:  minAgeDays,
 			FetchOpts:   resolved.fetchOpts,
-			ResolvePath: false,
+			ResolvePath: !resolved.fetchOpts.SystemPackage,
 		})
 		if err != nil {
 			return err
@@ -161,7 +185,15 @@ func (root *installCmd) installTarget(cmd *cobra.Command, target installTarget) 
 		return nil
 	}
 
-	res, err := installBinary(InstallOpts{
+	installer := installBinary
+	if root.opts.systemPackage {
+		resolved.fetchOpts.SystemPackage = true
+		resolved.fetchOpts.PackageName = target.path
+		logSystemPackageSelected(resolved.fetchOpts.PackageType, target.path)
+		installer = installSystemPackage
+	}
+
+	res, err := installer(InstallOpts{
 		URL:         resolved.url,
 		Provider:    root.opts.provider,
 		Path:        resolvedPath,
@@ -169,7 +201,7 @@ func (root *installCmd) installTarget(cmd *cobra.Command, target installTarget) 
 		Pinned:      pinVersion,
 		MinAgeDays:  minAgeDays,
 		FetchOpts:   resolved.fetchOpts,
-		ResolvePath: true,
+		ResolvePath: !root.opts.systemPackage,
 	})
 	if err != nil {
 		return err
@@ -179,7 +211,7 @@ func (root *installCmd) installTarget(cmd *cobra.Command, target installTarget) 
 	return nil
 }
 
-func parseInstallTargets(args []string) ([]installTarget, error) {
+func parseInstallTargets(args []string, systemPackage bool) ([]installTarget, error) {
 	if len(args) == 0 {
 		return nil, fmt.Errorf("expected at least one install target")
 	}
@@ -189,6 +221,9 @@ func parseInstallTargets(args []string) ([]installTarget, error) {
 	}
 
 	if len(args) == 2 && !looksLikeInstallURL(args[1]) {
+		if systemPackage && systemPackagePathLooksExplicit(args[1]) {
+			return nil, fmt.Errorf("--system-package does not accept filesystem paths; optional second argument must be a command name")
+		}
 		return []installTarget{{url: args[0], path: args[1]}}, nil
 	}
 

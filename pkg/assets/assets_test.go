@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"fmt"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -512,6 +513,82 @@ func TestLooksLikePackageArtifact(t *testing.T) {
 		if result != c.out {
 			t.Fatalf("%s: expected %v, got %v", c.name, c.out, result)
 		}
+	}
+}
+
+func TestFilterAssetsIgnoresPackageArtifactsByDefault(t *testing.T) {
+	originalResolver := resolver
+	originalLookPath := lookPath
+	defer func() {
+		resolver = originalResolver
+		lookPath = originalLookPath
+	}()
+
+	resolver = testLinuxAMDResolver
+	lookPath = func(string) (string, error) { return "/usr/bin/dpkg", nil }
+
+	f := NewFilter(&FilterOpts{})
+	result, err := f.FilterAssets("tool", []*Asset{
+		{Name: "tool-linux-amd64.deb", URL: "https://example.test/tool-linux-amd64.deb"},
+		{Name: "tool-linux-amd64.tar.gz", URL: "https://example.test/tool-linux-amd64.tar.gz"},
+	}, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Name != "tool-linux-amd64.tar.gz" {
+		t.Fatalf("expected non-package artifact, got %s", result.Name)
+	}
+}
+
+func TestFilterAssetsSelectsCompatibleSystemPackageWhenEnabled(t *testing.T) {
+	originalResolver := resolver
+	originalLookPath := lookPath
+	defer func() {
+		resolver = originalResolver
+		lookPath = originalLookPath
+	}()
+
+	resolver = testLinuxAMDResolver
+	lookPath = func(name string) (string, error) {
+		if name == "dpkg" {
+			return "/usr/bin/dpkg", nil
+		}
+		return "", exec.ErrNotFound
+	}
+
+	f := NewFilter(&FilterOpts{SystemPackage: true, PackageType: "deb", NonInteractive: true})
+	result, err := f.FilterAssets("tool", []*Asset{
+		{Name: "tool-linux-amd64.deb", URL: "https://example.test/tool-linux-amd64.deb"},
+		{Name: "tool-linux-amd64.tar.gz", URL: "https://example.test/tool-linux-amd64.tar.gz"},
+	}, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Name != "tool-linux-amd64.deb" {
+		t.Fatalf("expected deb package artifact, got %s", result.Name)
+	}
+}
+
+func TestFilterAssetsFailsWhenRequiredSystemPackageUnavailable(t *testing.T) {
+	originalResolver := resolver
+	originalLookPath := lookPath
+	defer func() {
+		resolver = originalResolver
+		lookPath = originalLookPath
+	}()
+
+	resolver = testLinuxAMDResolver
+	lookPath = func(string) (string, error) { return "", exec.ErrNotFound }
+
+	f := NewFilter(&FilterOpts{SystemPackage: true, PackageType: "deb", NonInteractive: true})
+	_, err := f.FilterAssets("tool", []*Asset{
+		{Name: "tool-linux-amd64.deb", URL: "https://example.test/tool-linux-amd64.deb"},
+	}, "")
+	if err == nil {
+		t.Fatal("expected filtering to fail when package manager tool is unavailable")
+	}
+	if !strings.Contains(err.Error(), "Could not find any compatible files") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

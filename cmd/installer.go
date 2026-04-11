@@ -136,6 +136,8 @@ func installBinary(opts InstallOpts) (*InstallResult, error) {
 		Hash:        hashString,
 		URL:         opts.URL,
 		Provider:    p.GetID(),
+		InstallMode: installModeBinary,
+		PackageType: "",
 		PackagePath: pResult.PackagePath,
 		Pinned:      pinned,
 		MinAgeDays:  minAgeDays,
