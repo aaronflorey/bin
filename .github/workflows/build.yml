@@ -105,6 +105,31 @@ jobs:
       run: |
         mkdir -p "$HOME" "$BIN_EXE_DIR"
         ./bin-test install --force "${{ matrix.tool.repo }}"
+  system-package-smoke:
+    name: system package smoke (.deb)
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: 'go.mod'
+        check-latest: true
+    - name: Build bin
+      run: go build -o ./bin-test .
+    - name: Install and remove ripgrep via system package mode
+      env:
+        HOME: ${{ runner.temp }}/bin-home-system-package
+        BIN_EXE_DIR: ${{ runner.temp }}/bin-tools-system-package
+      run: |
+        mkdir -p "$HOME" "$BIN_EXE_DIR"
+        sudo ./bin-test install --system-package --non-interactive "github.com/BurntSushi/ripgrep" rg
+        command -v rg
+        rg --version
+        sudo ./bin-test remove --yes rg
   pinned-install-smoke:
     name: pinned install smoke
     runs-on: ubuntu-latest
