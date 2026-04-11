@@ -32,6 +32,13 @@ type installTarget struct {
 	path string
 }
 
+type resolvedFetchRequest struct {
+	url                string
+	requestedVersion   string
+	hasExplicitVersion bool
+	fetchOpts          providers.FetchOpts
+}
+
 func newInstallCmd() *installCmd {
 	root := &installCmd{}
 	// nolint: dupl
@@ -83,37 +90,31 @@ func newInstallCmd() *installCmd {
 }
 
 func (root *installCmd) installTarget(cmd *cobra.Command, target installTarget) error {
-	u := target.url
-	normalizedURL, requestedVersion, hasExplicitVersion, err := providers.NormalizeGitHubURL(u, root.opts.provider)
+	resolved, err := resolveFetchRequest(target.url, root.opts.provider, providers.FetchOpts{
+		All:            root.opts.all,
+		AutoSelect:     root.opts.autoSelect,
+		NonInteractive: root.opts.nonInteractive,
+	})
 	if err != nil {
 		return err
 	}
 
 	pinVersion := root.opts.pin
-	if hasExplicitVersion && !pinVersion {
+	if resolved.hasExplicitVersion && !pinVersion {
 		if root.opts.nonInteractive {
 			// Auto-pin in non-interactive mode when explicit version is detected
-			log.Debugf("Auto-pinning version %s in non-interactive mode", requestedVersion)
+			log.Debugf("Auto-pinning version %s in non-interactive mode", resolved.requestedVersion)
 			pinVersion = true
 		} else if prompt.IsInteractive() {
-			err := prompt.Confirm(fmt.Sprintf("Detected release URL for version %s. Do you want to pin this version?", requestedVersion))
+			err := prompt.Confirm(fmt.Sprintf("Detected release URL for version %s. Do you want to pin this version?", resolved.requestedVersion))
 			if err == nil {
 				pinVersion = true
 			} else if err.Error() != "command aborted" {
 				return err
 			}
 		} else {
-			log.Debugf("Skipping pin prompt for %s in non-interactive mode", requestedVersion)
+			log.Debugf("Skipping pin prompt for %s in non-interactive mode", resolved.requestedVersion)
 		}
-	}
-
-	fetchOpts := providers.FetchOpts{
-		All:            root.opts.all,
-		AutoSelect:     root.opts.autoSelect,
-		NonInteractive: root.opts.nonInteractive,
-	}
-	if requestedVersion != "" {
-		fetchOpts.Version = requestedVersion
 	}
 
 	defaultPath := config.Get().DefaultPath
@@ -131,25 +132,25 @@ func (root *installCmd) installTarget(cmd *cobra.Command, target installTarget) 
 		minAgeDays = &root.opts.minAgeDays
 	}
 
-	existing := existingBinaryForInstall(cfg.Bins, normalizedURL, root.opts.provider, resolvedPath)
+	existing := existingBinaryForInstall(cfg.Bins, resolved.url, root.opts.provider, resolvedPath)
 	if existing != nil {
 		log.Infof("Binary already exists in config (%s). Updating it instead", existing.Path)
-		if fetchOpts.PackagePath == "" {
-			fetchOpts.PackagePath = existing.PackagePath
+		if resolved.fetchOpts.PackagePath == "" {
+			resolved.fetchOpts.PackagePath = existing.PackagePath
 		}
-		if fetchOpts.PackageName == "" {
-			fetchOpts.PackageName = existing.RemoteName
+		if resolved.fetchOpts.PackageName == "" {
+			resolved.fetchOpts.PackageName = existing.RemoteName
 		}
 
 		res, err := installBinary(InstallOpts{
-			URL:         normalizedURL,
+			URL:         resolved.url,
 			Provider:    root.opts.provider,
 			Path:        existing.Path,
 			ConfigPath:  existing.Path,
 			Force:       true,
 			Pinned:      pinVersion,
 			MinAgeDays:  minAgeDays,
-			FetchOpts:   fetchOpts,
+			FetchOpts:   resolved.fetchOpts,
 			ResolvePath: false,
 		})
 		if err != nil {
@@ -161,13 +162,13 @@ func (root *installCmd) installTarget(cmd *cobra.Command, target installTarget) 
 	}
 
 	res, err := installBinary(InstallOpts{
-		URL:         normalizedURL,
+		URL:         resolved.url,
 		Provider:    root.opts.provider,
 		Path:        resolvedPath,
 		Force:       root.opts.force,
 		Pinned:      pinVersion,
 		MinAgeDays:  minAgeDays,
-		FetchOpts:   fetchOpts,
+		FetchOpts:   resolved.fetchOpts,
 		ResolvePath: true,
 	})
 	if err != nil {
@@ -224,4 +225,22 @@ func existingBinaryForInstall(bins map[string]*config.Binary, normalizedURL, for
 	}
 
 	return nil
+}
+
+func resolveFetchRequest(rawURL, forcedProvider string, fetchOpts providers.FetchOpts) (*resolvedFetchRequest, error) {
+	normalizedURL, requestedVersion, hasExplicitVersion, err := providers.NormalizeGitHubURL(rawURL, forcedProvider)
+	if err != nil {
+		return nil, err
+	}
+
+	if requestedVersion != "" {
+		fetchOpts.Version = requestedVersion
+	}
+
+	return &resolvedFetchRequest{
+		url:                normalizedURL,
+		requestedVersion:   requestedVersion,
+		hasExplicitVersion: hasExplicitVersion,
+		fetchOpts:          fetchOpts,
+	}, nil
 }
