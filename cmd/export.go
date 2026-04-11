@@ -58,6 +58,8 @@ type portableBinary struct {
 	Hash        string `json:"hash"`
 	URL         string `json:"url"`
 	Provider    string `json:"provider"`
+	InstallMode string `json:"install_mode,omitempty"`
+	PackageType string `json:"package_type,omitempty"`
 	PackagePath string `json:"package_path"`
 	Pinned      bool   `json:"pinned"`
 	MinAgeDays  int    `json:"min_age_days,omitempty"`
@@ -90,6 +92,8 @@ func buildExportBins(bins map[string]*config.Binary) ([]*portableBinary, error) 
 			Hash:        hash,
 			URL:         binCfg.URL,
 			Provider:    binCfg.Provider,
+			InstallMode: binCfg.InstallMode,
+			PackageType: binCfg.PackageType,
 			PackagePath: binCfg.PackagePath,
 			Pinned:      binCfg.Pinned,
 			MinAgeDays:  binCfg.MinAgeDays,

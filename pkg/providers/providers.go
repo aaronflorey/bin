@@ -42,6 +42,8 @@ type FetchOpts struct {
 	AutoSelect     string
 	PackageName    string
 	PackagePath    string
+	SystemPackage  bool
+	PackageType    string
 	SkipPatchCheck bool
 	Version        string
 	NonInteractive bool

@@ -289,6 +289,76 @@ func TestImportOutputsInstalledUpdatedSkipped(t *testing.T) {
 	}
 }
 
+func TestExportImportRoundTripsInstallMetadata(t *testing.T) {
+	setupTestConfig(t)
+
+	installedPath := filepath.Join(t.TempDir(), "flatpak-tool")
+	if err := os.WriteFile(installedPath, []byte("flatpak-tool-content"), 0o755); err != nil {
+		t.Fatalf("failed to write installed test binary: %v", err)
+	}
+
+	if err := config.UpsertBinary(&config.Binary{
+		Path:        installedPath,
+		RemoteName:  "flatpak-tool",
+		Version:     "1.2.3",
+		Hash:        "old-hash",
+		URL:         "https://example.com/tools/flatpak-tool/releases/tag/v1.2.3",
+		Provider:    "github",
+		InstallMode: installModeSystemPackage,
+		PackageType: "flatpak",
+	}); err != nil {
+		t.Fatalf("failed to seed binary: %v", err)
+	}
+
+	cmd := newExportCmd().cmd
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected export error: %v", err)
+	}
+
+	var exported []portableBinary
+	if err := json.Unmarshal(out.Bytes(), &exported); err != nil {
+		t.Fatalf("failed to decode export payload: %v", err)
+	}
+	if len(exported) != 1 {
+		t.Fatalf("expected one exported entry, got %d", len(exported))
+	}
+	if exported[0].InstallMode != installModeSystemPackage {
+		t.Fatalf("unexpected install mode: %s", exported[0].InstallMode)
+	}
+	if exported[0].PackageType != "flatpak" {
+		t.Fatalf("unexpected package type: %s", exported[0].PackageType)
+	}
+
+	setupTestConfig(t)
+	importPayload, err := json.Marshal(exported)
+	if err != nil {
+		t.Fatalf("failed to marshal import payload: %v", err)
+	}
+
+	importCmd := newImportCmd().cmd
+	importCmd.SetIn(bytes.NewReader(importPayload))
+	importCmd.SetArgs([]string{})
+	if err := importCmd.Execute(); err != nil {
+		t.Fatalf("unexpected import error: %v", err)
+	}
+
+	defaultPath := config.Get().DefaultPath
+	importedPath := filepath.Join(defaultPath, exported[0].Name)
+	binCfg, ok := config.Get().Bins[importedPath]
+	if !ok {
+		t.Fatalf("expected imported binary at %s", importedPath)
+	}
+	if binCfg.InstallMode != installModeSystemPackage {
+		t.Fatalf("unexpected imported install mode: %s", binCfg.InstallMode)
+	}
+	if binCfg.PackageType != "flatpak" {
+		t.Fatalf("unexpected imported package type: %s", binCfg.PackageType)
+	}
+}
+
 func setupTestConfig(t *testing.T) string {
 	t.Helper()
 

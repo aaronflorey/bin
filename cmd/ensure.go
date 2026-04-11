@@ -32,6 +32,7 @@ func newEnsureCmd() *ensureCmd {
 
 			for _, binCfg := range binsToProcess {
 				ep := os.ExpandEnv(binCfg.Path)
+				installMode := effectiveInstallMode(binCfg.InstallMode)
 				_, statErr := os.Stat(ep)
 
 				if statErr == nil {
@@ -50,17 +51,25 @@ func newEnsureCmd() *ensureCmd {
 					return statErr
 				}
 
-				res, err := installBinary(InstallOpts{
-					URL:      binCfg.URL,
-					Provider: binCfg.Provider,
-					Path:     ep,
-					Force:    true,
-					FetchOpts: providers.FetchOpts{
-						Version:     binCfg.Version,
-						PackagePath: binCfg.PackagePath,
-						PackageName: binCfg.RemoteName,
-					},
-					ResolvePath: false,
+				fetchOpts := providers.FetchOpts{
+					Version:     binCfg.Version,
+					PackagePath: binCfg.PackagePath,
+					PackageName: binCfg.RemoteName,
+				}
+				installer := installBinary
+				if installMode == installModeSystemPackage {
+					fetchOpts.SystemPackage = true
+					fetchOpts.PackageType = normalizePackageType(binCfg.PackageType)
+					installer = installSystemPackage
+				}
+
+				res, err := installer(InstallOpts{
+					URL:         binCfg.URL,
+					Provider:    binCfg.Provider,
+					Path:        ep,
+					Force:       true,
+					FetchOpts:   fetchOpts,
+					ResolvePath: installMode != installModeSystemPackage,
 					ConfigPath:  binCfg.Path,
 				})
 				if err != nil {

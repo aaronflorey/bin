@@ -100,6 +100,12 @@ type Binary struct {
 	Hash       string `json:"hash"`
 	URL        string `json:"url"`
 	Provider   string `json:"provider"`
+	// InstallMode indicates whether this binary is managed as a direct
+	// downloaded executable ("binary") or a system package ("system-package").
+	InstallMode string `json:"install_mode,omitempty"`
+	// PackageType stores the selected package artifact type for system-package
+	// installs (deb, rpm, apk, flatpak).
+	PackageType string `json:"package_type,omitempty"`
 	// if file is installed from a package format (zip, tar, etc) store
 	// the package path in config so we don't ask the user to select
 	// the path again when upgrading

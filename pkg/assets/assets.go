@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"sort"
@@ -145,6 +146,13 @@ type FilterOpts struct {
 	// so we don't prompt the user to pick the file again on updates
 	PackagePath string
 
+	// SystemPackage enables package-manager artifact selection.
+	SystemPackage bool
+
+	// PackageType restricts package-manager artifact selection to a specific
+	// type (deb, rpm, apk, flatpak).
+	PackageType string
+
 	// NonInteractive disables all interactive prompts and auto-selects
 	// the best option using tie-breaking heuristics
 	NonInteractive bool
@@ -171,6 +179,7 @@ func (runtimeResolver) GetOSSpecificExtensions() []string {
 var resolver platformResolver = runtimeResolver{}
 var selectOption = options.Select
 var isInteractive = options.IsInteractive
+var lookPath = exec.LookPath
 
 // httpClient is a shared HTTP client with reasonable timeouts for downloading assets.
 var httpClient = &http.Client{
@@ -213,7 +222,7 @@ func (f *Filter) ParseAutoSelection(autoSelect string) string {
 func (f *Filter) FilterAssets(repoName string, as []*Asset, autoSelect string) (*FilteredAsset, error) {
 	f.repoName = repoName
 	matchName := f.preferredMatchName(repoName)
-	as = filterInstallableAssets(as)
+	as = filterInstallableAssets(f.opts, as)
 
 	matches := []*FilteredAsset{}
 	if len(as) == 1 {
@@ -244,7 +253,7 @@ func (f *Filter) FilterAssets(repoName string, as []*Asset, autoSelect string) (
 				candidate := a.Name
 				candidateScore := 0
 				if bstrings.ContainsAny(strings.ToLower(candidate), scoreKeys) &&
-					isSupportedExt(candidate) {
+					f.supportsAssetExt(candidate) {
 					for toMatch, score := range scores {
 						if strings.Contains(strings.ToLower(candidate), strings.ToLower(toMatch)) {
 							log.Debugf("Candidate %s contains %s. Adding score %d", candidate, toMatch, score)
@@ -348,6 +357,20 @@ func (f *Filter) preferredMatchName(repoName string) string {
 		return filepath.Base(f.opts.PackagePath)
 	}
 	return repoName
+}
+
+func (f *Filter) supportsAssetExt(filename string) bool {
+	if f != nil && f.opts != nil && f.opts.SystemPackage {
+		ptype, ok := detectSystemPackageType(filename)
+		if ok {
+			if f.opts.PackageType == "" {
+				return true
+			}
+			return normalizePackageType(f.opts.PackageType) == ptype
+		}
+	}
+
+	return isSupportedExt(filename)
 }
 
 func rankLinuxLibCMatches(matches []*FilteredAsset) []*FilteredAsset {
@@ -1174,10 +1197,91 @@ func filterAssetsBy(as []*Asset, skip func(name string) bool, label string) []*A
 	return filtered
 }
 
-func filterInstallableAssets(as []*Asset) []*Asset {
+func filterInstallableAssets(opts *FilterOpts, as []*Asset) []*Asset {
+	if opts != nil && opts.SystemPackage {
+		packagesOnly := make([]*Asset, 0, len(as))
+		for _, a := range as {
+			if looksLikeMetadataAsset(a.Name) {
+				continue
+			}
+			ptype, ok := detectSystemPackageType(a.Name)
+			if !ok {
+				continue
+			}
+			if opts.PackageType != "" && normalizePackageType(opts.PackageType) != ptype {
+				continue
+			}
+			if !isCompatibleSystemPackageAsset(a.Name, ptype) {
+				continue
+			}
+			packagesOnly = append(packagesOnly, a)
+		}
+		return packagesOnly
+	}
+
 	return filterAssetsBy(as, func(name string) bool {
 		return looksLikeMetadataAsset(name) || looksLikePackageArtifact(name)
 	}, "metadata/package")
+}
+
+func isCompatibleSystemPackageAsset(name, packageType string) bool {
+	if !isPackageManagerAvailable(packageType) {
+		return false
+	}
+	if !isSystemPackageOSCompatible(packageType) {
+		return false
+	}
+	return isSystemPackageArchCompatible(name)
+}
+
+func isPackageManagerAvailable(packageType string) bool {
+	var tool string
+	switch packageType {
+	case "deb":
+		tool = "dpkg"
+	case "rpm":
+		tool = "rpm"
+	case "apk":
+		tool = "apk"
+	case "flatpak":
+		tool = "flatpak"
+	default:
+		return false
+	}
+
+	_, err := lookPath(tool)
+	return err == nil
+}
+
+func isSystemPackageOSCompatible(_ string) bool {
+	osValues := resolver.GetOS()
+	for _, osValue := range osValues {
+		if strings.EqualFold(osValue, "linux") {
+			return true
+		}
+	}
+	return false
+}
+
+func isSystemPackageArchCompatible(name string) bool {
+	lower := strings.ToLower(name)
+	archTokens := resolver.GetArch()
+	for _, token := range archTokens {
+		if strings.Contains(lower, strings.ToLower(token)) {
+			return true
+		}
+	}
+
+	knownArchTokens := []string{
+		"amd64", "x86_64", "x64", "arm64", "aarch64", "armv7", "armv6", "386", "i386", "i686",
+	}
+	for _, token := range knownArchTokens {
+		if strings.Contains(lower, token) {
+			return false
+		}
+	}
+
+	return true
 }
 
 func filterArchiveAssets(as []*Asset) []*Asset {
@@ -1200,6 +1304,32 @@ func looksLikePackageArtifact(name string) bool {
 	lower := strings.ToLower(name)
 
 	return bstrings.HasAnySuffix(lower, packageArtifactSuffixes)
+}
+
+func detectSystemPackageType(name string) (string, bool) {
+	lower := strings.ToLower(name)
+
+	switch {
+	case strings.HasSuffix(lower, ".flatpak"), strings.HasSuffix(lower, ".flatpack"):
+		return "flatpak", true
+	case strings.HasSuffix(lower, ".deb"):
+		return "deb", true
+	case strings.HasSuffix(lower, ".rpm"):
+		return "rpm", true
+	case strings.HasSuffix(lower, ".apk"):
+		return "apk", true
+	default:
+		return "", false
+	}
+}
+
+func normalizePackageType(packageType string) string {
+	switch strings.ToLower(strings.TrimSpace(packageType)) {
+	case "flatpack":
+		return "flatpak"
+	default:
+		return strings.ToLower(strings.TrimSpace(packageType))
+	}
 }
 
 func looksLikeArchiveJunk(name string) bool {

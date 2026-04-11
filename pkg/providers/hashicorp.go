@@ -110,7 +110,14 @@ func (g *hashiCorp) Fetch(opts *FetchOpts) (*File, error) {
 		checksumAssets = append(checksumAssets, checksumAsset{Name: link.Filename, URL: link.URL})
 	}
 
-	f := assets.NewFilter(&assets.FilterOpts{SkipScoring: opts.All, PackagePath: opts.PackagePath, SkipPathCheck: opts.SkipPatchCheck, NonInteractive: opts.NonInteractive})
+	f := assets.NewFilter(&assets.FilterOpts{
+		SkipScoring:    opts.All,
+		PackagePath:    opts.PackagePath,
+		SkipPathCheck:  opts.SkipPatchCheck,
+		SystemPackage:  opts.SystemPackage,
+		PackageType:    opts.PackageType,
+		NonInteractive: opts.NonInteractive,
+	})
 	autoSelect := f.ParseAutoSelection(opts.AutoSelect)
 	gf, err := f.FilterAssets(g.repo, candidates, autoSelect)
 	if err != nil {

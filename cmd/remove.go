@@ -7,12 +7,18 @@ import (
 	"os/exec"
 
 	"github.com/aaronflorey/bin/pkg/config"
+	"github.com/aaronflorey/bin/pkg/prompt"
 	"github.com/aaronflorey/bin/pkg/providers"
 	"github.com/spf13/cobra"
 )
 
 type removeCmd struct {
-	cmd *cobra.Command
+	cmd  *cobra.Command
+	opts removeOpts
+}
+
+type removeOpts struct {
+	yes bool
 }
 
 func newRemoveCmd() *removeCmd {
@@ -35,7 +41,6 @@ func newRemoveCmd() *removeCmd {
 			}
 
 			targets := []removeTarget{}
-			pathsToDelete := []string{}
 			resolvedPaths := map[string]string{}
 
 			bins := cfg.Bins
@@ -59,7 +64,6 @@ func newRemoveCmd() *removeCmd {
 				ebp := os.ExpandEnv(bp)
 				if _, ok := bins[ebp]; ok {
 					targets = append(targets, removeTarget{configPath: ebp, deletePath: os.ExpandEnv(bp), binary: bins[ebp]})
-					pathsToDelete = append(pathsToDelete, os.ExpandEnv(bp))
 				}
 			}
 
@@ -67,38 +71,47 @@ func newRemoveCmd() *removeCmd {
 				return nil
 			}
 
-			existingToRemove := make([]string, 0, len(targets))
-			for _, target := range targets {
-				existingToRemove = append(existingToRemove, target.configPath)
-			}
-
 			// Execute pre-remove hooks before any changes
 			if err := config.ExecuteHooks(config.GetHooks(config.PreRemove)); err != nil {
 				return err
 			}
 
-			// Update config first to maintain consistency
-			if err := config.RemoveBinaries(existingToRemove); err != nil {
-				return err
-			}
-
 			for _, target := range targets {
-				p, err := providers.New(target.binary.URL, target.binary.Provider)
-				if err != nil {
-					fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not initialize provider cleanup for %s: %v\n", target.binary.Path, err)
+				if effectiveInstallMode(target.binary.InstallMode) == installModeSystemPackage {
+					if !root.opts.yes {
+						if !prompt.IsInteractive() {
+							return fmt.Errorf("system-package removal requires --yes in non-interactive mode")
+						}
+						if err := prompt.Confirm(fmt.Sprintf("Uninstall system package backing %s?", target.binary.Path)); err != nil {
+							return err
+						}
+					}
+
+					if err := uninstallSystemPackage(target.binary); err != nil {
+						return err
+					}
+					if err := config.RemoveBinaries([]string{target.configPath}); err != nil {
+						return err
+					}
 					continue
 				}
 
-				err = p.Cleanup(&providers.CleanupOpts{Version: target.binary.Version, Path: target.deletePath})
+				p, err := providers.New(target.binary.URL, target.binary.Provider)
 				if err != nil {
-					fmt.Fprintf(cmd.ErrOrStderr(), "warning: cleanup failed for %s: %v\n", target.binary.Path, err)
+					fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not initialize provider cleanup for %s: %v\n", target.binary.Path, err)
+				} else {
+					err = p.Cleanup(&providers.CleanupOpts{Version: target.binary.Version, Path: target.deletePath})
+					if err != nil {
+						fmt.Fprintf(cmd.ErrOrStderr(), "warning: cleanup failed for %s: %v\n", target.binary.Path, err)
+					}
 				}
-			}
 
-			// Now delete the files
-			for _, path := range pathsToDelete {
-				if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-					return fmt.Errorf("error removing path %s: %v", path, err)
+				if err := os.Remove(target.deletePath); err != nil && !os.IsNotExist(err) {
+					return fmt.Errorf("error removing path %s: %v", target.deletePath, err)
+				}
+
+				if err := config.RemoveBinaries([]string{target.configPath}); err != nil {
+					return err
 				}
 			}
 
@@ -110,6 +123,7 @@ func newRemoveCmd() *removeCmd {
 	}
 
 	root.cmd = cmd
+	root.cmd.Flags().BoolVarP(&root.opts.yes, "yes", "y", false, "Assume yes for system package uninstall confirmation")
 	enableSpinner(root.cmd)
 	return root
 }

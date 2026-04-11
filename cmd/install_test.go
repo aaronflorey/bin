@@ -66,7 +66,7 @@ func TestExistingBinaryForInstallMatchesRequestedPath(t *testing.T) {
 }
 
 func TestParseInstallTargetsSingleURL(t *testing.T) {
-	targets, err := parseInstallTargets([]string{"github.com/cli/cli"})
+	targets, err := parseInstallTargets([]string{"github.com/cli/cli"}, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestParseInstallTargetsSingleURL(t *testing.T) {
 }
 
 func TestParseInstallTargetsSingleURLWithPath(t *testing.T) {
-	targets, err := parseInstallTargets([]string{"github.com/cli/cli", "./bin/gh"})
+	targets, err := parseInstallTargets([]string{"github.com/cli/cli", "./bin/gh"}, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestParseInstallTargetsSingleURLWithPath(t *testing.T) {
 }
 
 func TestParseInstallTargetsTwoURLs(t *testing.T) {
-	targets, err := parseInstallTargets([]string{"github.com/cli/cli", "github.com/sharkdp/fd"})
+	targets, err := parseInstallTargets([]string{"github.com/cli/cli", "github.com/sharkdp/fd"}, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestParseInstallTargetsTwoURLs(t *testing.T) {
 }
 
 func TestParseInstallTargetsThreeURLs(t *testing.T) {
-	targets, err := parseInstallTargets([]string{"github.com/cli/cli", "github.com/sharkdp/fd", "docker://hashicorp/terraform:light"})
+	targets, err := parseInstallTargets([]string{"github.com/cli/cli", "github.com/sharkdp/fd", "docker://hashicorp/terraform:light"}, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -119,11 +119,21 @@ func TestParseInstallTargetsThreeURLs(t *testing.T) {
 }
 
 func TestParseInstallTargetsRejectsMixedMultiArgs(t *testing.T) {
-	_, err := parseInstallTargets([]string{"github.com/cli/cli", "github.com/sharkdp/fd", "./bin/custom"})
+	_, err := parseInstallTargets([]string{"github.com/cli/cli", "github.com/sharkdp/fd", "./bin/custom"}, false)
 	if err == nil {
 		t.Fatal("expected parseInstallTargets to reject non-url argument in multi-url mode")
 	}
 	if !strings.Contains(err.Error(), "all arguments must be URLs") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestParseInstallTargetsSystemPackageRejectsFilesystemPath(t *testing.T) {
+	_, err := parseInstallTargets([]string{"github.com/cli/cli", "./bin/gh"}, true)
+	if err == nil {
+		t.Fatal("expected parseInstallTargets to reject filesystem path in --system-package mode")
+	}
+	if !strings.Contains(err.Error(), "does not accept filesystem paths") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
