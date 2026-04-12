@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"os"
+	"strings"
 
 	"github.com/aaronflorey/bin/pkg/config"
 	"github.com/aaronflorey/bin/pkg/providers"
@@ -73,7 +74,7 @@ func runEnsure(args []string) error {
 			installer = installSystemPackage
 		}
 
-		res, err := installer(InstallOpts{
+		opts := InstallOpts{
 			URL:         binCfg.URL,
 			Provider:    binCfg.Provider,
 			Path:        ep,
@@ -81,7 +82,13 @@ func runEnsure(args []string) error {
 			FetchOpts:   fetchOpts,
 			ResolvePath: installMode != installModeSystemPackage,
 			ConfigPath:  binCfg.Path,
-		})
+		}
+		res, err := installer(opts)
+		if err != nil && installMode == installModeBinary && fetchOpts.PackagePath != "" && isPackagePathSelectionError(err) {
+			log.Warnf("%s package path %q did not match the latest archive; retrying without package path", ep, fetchOpts.PackagePath)
+			opts.FetchOpts.PackagePath = ""
+			res, err = installer(opts)
+		}
 		if err != nil {
 			return err
 		}
@@ -89,4 +96,13 @@ func runEnsure(args []string) error {
 	}
 
 	return nil
+}
+
+func isPackagePathSelectionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "no files found in tar archive") ||
+		strings.Contains(msg, "no files found in zip archive")
 }
