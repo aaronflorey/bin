@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.2.0](https://github.com/aaronflorey/bin/compare/v2.1.2...v2.2.0) (2026-04-12)
+
+
+### Features
+
+* fix releases with multiple tools ([2a9ced6](https://github.com/aaronflorey/bin/commit/2a9ced652b9a2c6c58dff0c27d080868917b1422))
+* **import:** Run ensure after import by default ([20ce645](https://github.com/aaronflorey/bin/commit/20ce645ee8630ae6a65fa4790f9c5daf0d4be39d))
+* **run:** Add cached run command ([321fd3c](https://github.com/aaronflorey/bin/commit/321fd3cf317430092deeafcc1d44b296c0e7278f))
+* **system-package:** Add opt-in system package install mode ([aace7b0](https://github.com/aaronflorey/bin/commit/aace7b04307de00c2633abb57229d16d6a3b9f52))
+
+
+### Bug Fixes
+
+* **assets:** Ignore metadata package names ([25d2b4c](https://github.com/aaronflorey/bin/commit/25d2b4c280985d7d278a08844d90f54a0ea618d8))
+* **assets:** Skip package manager release artifacts ([b444d30](https://github.com/aaronflorey/bin/commit/b444d30bc23a23478d79bc671ee4b7842c33c003))
+* **ensure:** Retry without package path on archive mismatch ([d6c3f83](https://github.com/aaronflorey/bin/commit/d6c3f83b4fce870b42576bc1e7a9b2850ba1b22d))
+
 ## [2.1.2](https://github.com/aaronflorey/bin/compare/v2.1.1...v2.1.2) (2026-04-08)
 
 
