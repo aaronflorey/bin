@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.3.0](https://github.com/aaronflorey/bin/compare/v2.2.0...v2.3.0) (2026-04-12)
+
+
+### Features
+
+* **config:** Add gh token auth toggle and key hints ([e07d6bd](https://github.com/aaronflorey/bin/commit/e07d6bd090bdc16816bbc0feb43ad87e36292270))
+* **run:** Auto-pass args and prune stale cached versions ([8e63212](https://github.com/aaronflorey/bin/commit/8e63212054ece00973136cce5bd909dad895d8dc))
+
+
+### Bug Fixes
+
+* **providers:** Satisfy staticcheck in GitHub auth guard ([75f3c55](https://github.com/aaronflorey/bin/commit/75f3c55d3227112809f256e7f49f8492f1cb6209))
+
 ## [2.2.0](https://github.com/aaronflorey/bin/compare/v2.1.2...v2.2.0) (2026-04-12)
 
 
