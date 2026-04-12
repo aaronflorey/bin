@@ -24,64 +24,69 @@ func newEnsureCmd() *ensureCmd {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg := config.Get()
-			binsToProcess, err := resolveBinsToProcess(cfg.Bins, args)
-			if err != nil {
-				return err
-			}
-
-			for _, binCfg := range binsToProcess {
-				ep := os.ExpandEnv(binCfg.Path)
-				installMode := effectiveInstallMode(binCfg.InstallMode)
-				_, statErr := os.Stat(ep)
-
-				if statErr == nil {
-					hash, err := hashFile(ep)
-					if err != nil {
-						return err
-					}
-
-					if hash == binCfg.Hash {
-						continue
-					}
-
-					log.Infof("%s hash does not match with config's, re-installing", ep)
-
-				} else if !os.IsNotExist(statErr) {
-					return statErr
-				}
-
-				fetchOpts := providers.FetchOpts{
-					Version:     binCfg.Version,
-					PackagePath: binCfg.PackagePath,
-					PackageName: binCfg.RemoteName,
-				}
-				installer := installBinary
-				if installMode == installModeSystemPackage {
-					fetchOpts.SystemPackage = true
-					fetchOpts.PackageType = normalizePackageType(binCfg.PackageType)
-					installer = installSystemPackage
-				}
-
-				res, err := installer(InstallOpts{
-					URL:         binCfg.URL,
-					Provider:    binCfg.Provider,
-					Path:        ep,
-					Force:       true,
-					FetchOpts:   fetchOpts,
-					ResolvePath: installMode != installModeSystemPackage,
-					ConfigPath:  binCfg.Path,
-				})
-				if err != nil {
-					return err
-				}
-				log.Infof("Done ensuring %s to %s", os.ExpandEnv(binCfg.Path), color.GreenString(res.Version))
-			}
-			return nil
+			return runEnsure(args)
 		},
 	}
 
 	root.cmd = cmd
 	enableSpinner(root.cmd)
 	return root
+}
+
+func runEnsure(args []string) error {
+	cfg := config.Get()
+	binsToProcess, err := resolveBinsToProcess(cfg.Bins, args)
+	if err != nil {
+		return err
+	}
+
+	for _, binCfg := range binsToProcess {
+		ep := os.ExpandEnv(binCfg.Path)
+		installMode := effectiveInstallMode(binCfg.InstallMode)
+		_, statErr := os.Stat(ep)
+
+		if statErr == nil {
+			hash, err := hashFile(ep)
+			if err != nil {
+				return err
+			}
+
+			if hash == binCfg.Hash {
+				continue
+			}
+
+			log.Infof("%s hash does not match with config's, re-installing", ep)
+
+		} else if !os.IsNotExist(statErr) {
+			return statErr
+		}
+
+		fetchOpts := providers.FetchOpts{
+			Version:     binCfg.Version,
+			PackagePath: binCfg.PackagePath,
+			PackageName: binCfg.RemoteName,
+		}
+		installer := installBinary
+		if installMode == installModeSystemPackage {
+			fetchOpts.SystemPackage = true
+			fetchOpts.PackageType = normalizePackageType(binCfg.PackageType)
+			installer = installSystemPackage
+		}
+
+		res, err := installer(InstallOpts{
+			URL:         binCfg.URL,
+			Provider:    binCfg.Provider,
+			Path:        ep,
+			Force:       true,
+			FetchOpts:   fetchOpts,
+			ResolvePath: installMode != installModeSystemPackage,
+			ConfigPath:  binCfg.Path,
+		})
+		if err != nil {
+			return err
+		}
+		log.Infof("Done ensuring %s to %s", os.ExpandEnv(binCfg.Path), color.GreenString(res.Version))
+	}
+
+	return nil
 }

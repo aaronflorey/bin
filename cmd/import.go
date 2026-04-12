@@ -15,11 +15,13 @@ import (
 // portableBinary is defined in export.go.
 
 type importCmd struct {
-	cmd *cobra.Command
+	cmd        *cobra.Command
+	skipEnsure bool
+	runEnsure  func(args []string) error
 }
 
 func newImportCmd() *importCmd {
-	root := &importCmd{}
+	root := &importCmd{runEnsure: runEnsure}
 	cmd := &cobra.Command{
 		Use:           "import [file]",
 		Short:         "Imports binaries from a JSON export",
@@ -99,6 +101,11 @@ func newImportCmd() *importCmd {
 				}
 			}
 
+			toEnsure := make([]string, 0, len(toUpsert))
+			for _, bin := range toUpsert {
+				toEnsure = append(toEnsure, bin.Path)
+			}
+
 			_, err = fmt.Fprintf(
 				cmd.OutOrStdout(),
 				"import complete: installed=%d updated=%d skipped=%d\n",
@@ -106,11 +113,20 @@ func newImportCmd() *importCmd {
 				updatedCount,
 				skippedCount,
 			)
-			return err
+			if err != nil {
+				return err
+			}
+
+			if root.skipEnsure || len(toEnsure) == 0 {
+				return nil
+			}
+
+			return root.runEnsure(toEnsure)
 		},
 	}
 
 	root.cmd = cmd
+	root.cmd.Flags().BoolVar(&root.skipEnsure, "skip-ensure", false, "Do not run ensure after importing")
 	enableSpinner(root.cmd)
 	return root
 }
