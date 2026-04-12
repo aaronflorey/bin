@@ -173,7 +173,7 @@ func newGitHub(u *url.URL) (Provider, error) {
 	guu := os.Getenv("GHES_UPLOAD_URL")
 	gau := os.Getenv("GHES_AUTH_TOKEN")
 
-	if token == "" && !(len(gbu) > 0 && len(guu) > 0 && len(gau) > 0) && config.Get().UseGHAuth {
+	if token == "" && (len(gbu) == 0 || len(guu) == 0 || len(gau) == 0) && config.Get().UseGHAuth {
 		if out, err := runGHAuthToken(); err == nil {
 			token = strings.TrimSpace(string(out))
 		} else {
