@@ -170,6 +170,14 @@ You _can_ however install a specific pre-release by specifying the URL for the p
 | `GHES_UPLOAD_URL`    | no        | [github enterprise](https://github.com/github/gh-es) upload URL (often is your GitHub Enterprise hostname).                                                                                                                                |
 | `GHES_AUTH_TOKEN`    | no        | [github enterprise](https://github.com/github/gh-es) auth token similar to `GITHUB_AUTH_TOKEN`.                                                                                                                                            |
 
+You can also enable GitHub CLI token lookup with:
+
+```shell
+bin set-config use_gh_for_github_token true
+```
+
+When enabled, `bin` will run `gh auth token` for GitHub.com requests when no `GITHUB_AUTH_TOKEN`/`GITHUB_TOKEN` is set.
+
 #### Usage
 
 ```shell

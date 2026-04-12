@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/aaronflorey/bin/pkg/config"
 	"github.com/spf13/cobra"
@@ -14,9 +15,12 @@ type setConfigCmd struct {
 
 func newSetConfigCmd() *setConfigCmd {
 	root := &setConfigCmd{}
+	validKeys := config.ValidKeys()
+	validKeysText := strings.Join(validKeys, ", ")
 	cmd := &cobra.Command{
 		Use:           "set-config {key} {value}",
 		Short:         "Set a config value",
+		Long:          fmt.Sprintf("Set a config value. Valid keys: %s", validKeysText),
 		Args:          cobra.ExactArgs(2),
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -25,7 +29,7 @@ func newSetConfigCmd() *setConfigCmd {
 
 			if err := config.Set(key, value); err != nil {
 				if errors.Is(err, config.ErrInvalidConfigKey) {
-					return fmt.Errorf("unsupported config key %q", key)
+					return fmt.Errorf("unsupported config key %q. Valid keys: %s", key, validKeysText)
 				}
 				return err
 			}

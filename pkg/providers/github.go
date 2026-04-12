@@ -6,14 +6,20 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/aaronflorey/bin/pkg/assets"
+	"github.com/aaronflorey/bin/pkg/config"
 	"github.com/caarlos0/log"
 	"github.com/google/go-github/v73/github"
 	"golang.org/x/oauth2"
 )
+
+var runGHAuthToken = func() ([]byte, error) {
+	return exec.Command("gh", "auth", "token").Output()
+}
 
 type gitHub struct {
 	url    *url.URL
@@ -166,6 +172,14 @@ func newGitHub(u *url.URL) (Provider, error) {
 	gbu := os.Getenv("GHES_BASE_URL")
 	guu := os.Getenv("GHES_UPLOAD_URL")
 	gau := os.Getenv("GHES_AUTH_TOKEN")
+
+	if token == "" && !(len(gbu) > 0 && len(guu) > 0 && len(gau) > 0) && config.Get().UseGHAuth {
+		if out, err := runGHAuthToken(); err == nil {
+			token = strings.TrimSpace(string(out))
+		} else {
+			log.Debugf("Could not get GitHub token from gh CLI: %v", err)
+		}
+	}
 
 	var tc *http.Client
 

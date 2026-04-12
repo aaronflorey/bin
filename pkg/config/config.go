@@ -11,6 +11,8 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -36,6 +38,7 @@ type config struct {
 	// if necessary
 	DefaultPath  string             `json:"default_path"`
 	DefaultChmod string             `json:"default_chmod,omitempty"`
+	UseGHAuth    bool               `json:"use_gh_for_github_token,omitempty"`
 	Bins         map[string]*Binary `json:"bins"`
 	Hooks        []RunHook          `json:"hooks,omitempty"`
 }
@@ -194,10 +197,22 @@ func Get() *config {
 	return &cfg
 }
 
+func ValidKeys() []string {
+	keys := []string{"default_path", "use_gh_for_github_token"}
+	sort.Strings(keys)
+	return keys
+}
+
 func Set(key, value string) error {
 	switch key {
 	case "default_path":
 		cfg.DefaultPath = value
+	case "use_gh_for_github_token":
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("invalid boolean value %q for %s", value, key)
+		}
+		cfg.UseGHAuth = parsed
 	default:
 		return fmt.Errorf("%w: %s", ErrInvalidConfigKey, key)
 	}
