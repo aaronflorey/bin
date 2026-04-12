@@ -148,7 +148,7 @@ func TestImportReadsFromStdinWhenNoPathIsProvided(t *testing.T) {
 
 	cmd := newImportCmd().cmd
 	cmd.SetIn(bytes.NewReader(payload))
-	cmd.SetArgs([]string{})
+	cmd.SetArgs([]string{"--skip-ensure"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("unexpected import command error: %v", err)
@@ -192,7 +192,7 @@ func TestImportReadsFromFileWhenPathIsProvided(t *testing.T) {
 	}
 
 	cmd := newImportCmd().cmd
-	cmd.SetArgs([]string{inPath})
+	cmd.SetArgs([]string{"--skip-ensure", inPath})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("unexpected import command error: %v", err)
@@ -268,7 +268,7 @@ func TestImportOutputsInstalledUpdatedSkipped(t *testing.T) {
 	cmd.SetIn(bytes.NewReader(payload))
 	var out bytes.Buffer
 	cmd.SetOut(&out)
-	cmd.SetArgs([]string{})
+	cmd.SetArgs([]string{"--skip-ensure"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("unexpected import command error: %v", err)
@@ -340,7 +340,7 @@ func TestExportImportRoundTripsInstallMetadata(t *testing.T) {
 
 	importCmd := newImportCmd().cmd
 	importCmd.SetIn(bytes.NewReader(importPayload))
-	importCmd.SetArgs([]string{})
+	importCmd.SetArgs([]string{"--skip-ensure"})
 	if err := importCmd.Execute(); err != nil {
 		t.Fatalf("unexpected import error: %v", err)
 	}
@@ -356,6 +356,85 @@ func TestExportImportRoundTripsInstallMetadata(t *testing.T) {
 	}
 	if binCfg.PackageType != "flatpak" {
 		t.Fatalf("unexpected imported package type: %s", binCfg.PackageType)
+	}
+}
+
+func TestImportRunsEnsureByDefault(t *testing.T) {
+	defaultPath := setupTestConfig(t)
+
+	name := "ensure-imported-tool"
+	path := filepath.Join(defaultPath, name)
+	imported := []map[string]any{
+		{
+			"name":        name,
+			"remote_name": name,
+			"version":     "1.2.3",
+			"hash":        "some-hash",
+			"url":         "https://example.com/tools/ensure-imported-tool/releases/tag/v1.2.3",
+			"provider":    "github",
+		},
+	}
+	payload, err := json.Marshal(imported)
+	if err != nil {
+		t.Fatalf("failed to marshal import payload: %v", err)
+	}
+
+	imp := newImportCmd()
+	called := false
+	var gotArgs []string
+	imp.runEnsure = func(args []string) error {
+		called = true
+		gotArgs = append(gotArgs, args...)
+		return nil
+	}
+	imp.cmd.SetIn(bytes.NewReader(payload))
+	imp.cmd.SetArgs([]string{})
+
+	if err := imp.cmd.Execute(); err != nil {
+		t.Fatalf("unexpected import error: %v", err)
+	}
+
+	if !called {
+		t.Fatalf("expected ensure to run by default")
+	}
+	if len(gotArgs) != 1 || gotArgs[0] != path {
+		t.Fatalf("unexpected ensure args: got %v, want [%s]", gotArgs, path)
+	}
+}
+
+func TestImportSkipEnsureFlagSkipsEnsure(t *testing.T) {
+	setupTestConfig(t)
+
+	imported := []map[string]any{
+		{
+			"name":        "skip-ensure-imported-tool",
+			"remote_name": "skip-ensure-imported-tool",
+			"version":     "1.2.3",
+			"hash":        "some-hash",
+			"url":         "https://example.com/tools/skip-ensure-imported-tool/releases/tag/v1.2.3",
+			"provider":    "github",
+		},
+	}
+	payload, err := json.Marshal(imported)
+	if err != nil {
+		t.Fatalf("failed to marshal import payload: %v", err)
+	}
+
+	imp := newImportCmd()
+	called := false
+	imp.runEnsure = func(args []string) error {
+		called = true
+		return nil
+	}
+	imp.cmd.SetIn(bytes.NewReader(payload))
+	imp.cmd.SetArgs([]string{"--skip-ensure"})
+
+	if err := imp.cmd.Execute(); err != nil {
+		t.Fatalf("unexpected import error: %v", err)
+	}
+
+	if called {
+		t.Fatalf("expected ensure to be skipped")
 	}
 }
 

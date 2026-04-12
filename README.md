@@ -124,7 +124,7 @@ jobs:
 | `bin install <repo> [path]` or `bin install <repo>...` | Install one or many binaries                | `bin install github.com/cli/cli github.com/sharkdp/fd` |
 | `bin list`                  | List installed binaries and versions       | `bin list`                       |
 | `bin export [file]`         | Export installed binaries as JSON          | `bin export bins.json`           |
-| `bin import [file]`         | Import binaries from JSON                  | `bin import bins.json`           |
+| `bin import [file]`         | Import binaries from JSON and ensure them  | `bin import bins.json`           |
 | `bin outdated`              | Show binaries with newer versions available | `bin outdated --format=json`     |
 | `bin update [binary...]`    | Update binaries (all or specified)         | `bin update`                     |
 | `bin remove <binary...>`    | Remove one or more binaries                | `bin remove gh kubectl`          |
@@ -140,6 +140,7 @@ When installing multiple repos in one command, custom paths are not supported. U
 
 `bin export` writes JSON to stdout by default and can write to a file when `[file]` is provided.  
 `bin import` reads JSON from stdin by default and can read from a file when `[file]` is provided.  
+By default it runs `ensure` for imported/updated entries after writing config; use `--skip-ensure` to skip that step.  
 `bin outdated` supports `--format=text` (default) and `--format=json`.  
 Imported binaries are mapped to your local default path using the exported binary `name`.
 
