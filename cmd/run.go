@@ -1,12 +1,14 @@
 package cmd
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/aaronflorey/bin/pkg/assets"
 	"github.com/aaronflorey/bin/pkg/providers"
@@ -62,6 +64,24 @@ func newRunCmd() *runCmd {
 				return err
 			}
 
+			versionKey, err := runVersionKey(root.newProvider, resolved.url, root.opts.provider, resolved.fetchOpts.Version)
+			if err != nil {
+				return err
+			}
+			if versionKey != "" {
+				cachedPath, ok, err := lookupCachedRunBinary(root.userCacheDir, resolved.url, versionKey)
+				if err != nil {
+					return err
+				}
+				if ok {
+					if err := pruneOldCachedRunBinaries(root.userCacheDir, resolved.url, versionKey, cachedPath); err != nil {
+						return err
+					}
+					log.Infof("Reusing cached binary %s", cachedPath)
+					return executeCachedBinary(cmd, root.execCommand, cachedPath, target.args)
+				}
+			}
+
 			_, file, err := fetchBinary(root.newProvider, resolved.url, root.opts.provider, resolved.fetchOpts)
 			if err != nil {
 				return err
@@ -77,11 +97,21 @@ func newRunCmd() *runCmd {
 				return err
 			}
 
+			if file.Version != "" {
+				if err := recordCachedRunBinary(root.userCacheDir, resolved.url, file.Version, cachePath); err != nil {
+					return err
+				}
+				if err := pruneOldCachedRunBinaries(root.userCacheDir, resolved.url, file.Version, cachePath); err != nil {
+					return err
+				}
+			}
+
 			return executeCachedBinary(cmd, root.execCommand, cachePath, target.args)
 		},
 	}
 
 	root.cmd = cmd
+	root.cmd.Flags().SetInterspersed(false)
 	enableSpinner(root.cmd)
 	root.cmd.Flags().BoolVarP(&root.opts.all, "all", "a", false, "Show all possible download options (skip scoring & filtering)")
 	root.cmd.Flags().StringVarP(&root.opts.provider, "provider", "p", "", "Forces to use a specific provider")
@@ -96,6 +126,15 @@ func parseRunTarget(args []string, argsLenAtDash int) (*runTarget, error) {
 	if argsLenAtDash >= 0 {
 		urlArgs = args[:argsLenAtDash]
 		passthroughArgs = args[argsLenAtDash:]
+		if len(passthroughArgs) > 0 && passthroughArgs[0] == "--" {
+			passthroughArgs = passthroughArgs[1:]
+		}
+	} else if len(args) >= 1 {
+		urlArgs = args[:1]
+		passthroughArgs = args[1:]
+		if len(passthroughArgs) > 0 && passthroughArgs[0] == "--" {
+			passthroughArgs = passthroughArgs[1:]
+		}
 	}
 
 	if len(urlArgs) != 1 {
@@ -160,6 +199,174 @@ func closeFetchedFile(file *providers.File) {
 	if err := closer.Close(); err != nil {
 		log.Debugf("Error closing fetched binary stream: %v", err)
 	}
+}
+
+func runVersionKey(newProvider providerFactory, normalizedURL, forcedProvider, requestedVersion string) (string, error) {
+	if requestedVersion != "" {
+		return requestedVersion, nil
+	}
+
+	p, err := newProvider(normalizedURL, forcedProvider)
+	if err != nil {
+		return "", err
+	}
+
+	release, err := p.GetLatestVersion()
+	if err != nil {
+		return "", err
+	}
+	if release == nil {
+		return "", nil
+	}
+
+	return release.Version, nil
+}
+
+func runCacheIndexPath(userCacheDir func() (string, error)) (string, error) {
+	cacheDir, err := userCacheDir()
+	if err != nil {
+		return "", err
+	}
+
+	return filepath.Join(cacheDir, "bin", "run-index.json"), nil
+}
+
+func runCacheKey(url, version string) string {
+	return fmt.Sprintf("%s|%s", url, version)
+}
+
+func runCacheKeyPrefix(url string) string {
+	return url + "|"
+}
+
+func loadRunCacheIndex(path string) (map[string]string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return map[string]string{}, nil
+		}
+		return nil, err
+	}
+
+	out := map[string]string{}
+	if len(raw) == 0 {
+		return out, nil
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, err
+	}
+
+	return out, nil
+}
+
+func saveRunCacheIndex(path string, index map[string]string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+
+	raw, err := json.MarshalIndent(index, "", "    ")
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(path, raw, 0o644)
+}
+
+func lookupCachedRunBinary(userCacheDir func() (string, error), normalizedURL, version string) (string, bool, error) {
+	indexPath, err := runCacheIndexPath(userCacheDir)
+	if err != nil {
+		return "", false, err
+	}
+
+	index, err := loadRunCacheIndex(indexPath)
+	if err != nil {
+		return "", false, err
+	}
+
+	path, ok := index[runCacheKey(normalizedURL, version)]
+	if !ok {
+		return "", false, nil
+	}
+
+	if info, err := os.Stat(path); err == nil && !info.IsDir() {
+		return path, true, nil
+	}
+
+	delete(index, runCacheKey(normalizedURL, version))
+	if err := saveRunCacheIndex(indexPath, index); err != nil {
+		return "", false, err
+	}
+
+	return "", false, nil
+}
+
+func recordCachedRunBinary(userCacheDir func() (string, error), normalizedURL, version, path string) error {
+	indexPath, err := runCacheIndexPath(userCacheDir)
+	if err != nil {
+		return err
+	}
+
+	index, err := loadRunCacheIndex(indexPath)
+	if err != nil {
+		return err
+	}
+
+	index[runCacheKey(normalizedURL, version)] = path
+	return saveRunCacheIndex(indexPath, index)
+}
+
+func pruneOldCachedRunBinaries(userCacheDir func() (string, error), normalizedURL, currentVersion, currentPath string) error {
+	indexPath, err := runCacheIndexPath(userCacheDir)
+	if err != nil {
+		return err
+	}
+
+	index, err := loadRunCacheIndex(indexPath)
+	if err != nil {
+		return err
+	}
+
+	prefix := runCacheKeyPrefix(normalizedURL)
+	pathsToMaybeDelete := []string{}
+	changed := false
+	for key, path := range index {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		if key == runCacheKey(normalizedURL, currentVersion) {
+			continue
+		}
+		pathsToMaybeDelete = append(pathsToMaybeDelete, path)
+		delete(index, key)
+		changed = true
+	}
+
+	if !changed {
+		return nil
+	}
+
+	if err := saveRunCacheIndex(indexPath, index); err != nil {
+		return err
+	}
+
+	referencedPaths := map[string]struct{}{}
+	for _, path := range index {
+		referencedPaths[path] = struct{}{}
+	}
+
+	for _, path := range pathsToMaybeDelete {
+		if path == "" || path == currentPath {
+			continue
+		}
+		if _, stillReferenced := referencedPaths[path]; stillReferenced {
+			continue
+		}
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func executeCachedBinary(cmd *cobra.Command, execCommand func(string, ...string) *exec.Cmd, path string, args []string) error {

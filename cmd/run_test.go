@@ -107,6 +107,29 @@ func TestRunForwardsArgsAfterDash(t *testing.T) {
 	}
 }
 
+func TestRunForwardsArgsWithoutDashAfterURL(t *testing.T) {
+	setupTestConfig(t)
+	cacheDir := t.TempDir()
+	provider := &runTestProvider{name: "tool", version: "1.2.3", content: "binary"}
+	cmd := newRunCmd()
+	cmd.newProvider = func(_, _ string) (providers.Provider, error) { return provider, nil }
+	cmd.userCacheDir = func() (string, error) { return cacheDir, nil }
+
+	var gotArgs []string
+	cmd.execCommand = helperExecCommand(t, 0, func(name string, args []string) {
+		gotArgs = args
+	})
+
+	cmd.cmd.SetArgs([]string{"github.com/cli/cli", "-markdown", "--compact"})
+	if err := cmd.cmd.Execute(); err != nil {
+		t.Fatalf("unexpected run command error: %v", err)
+	}
+
+	if len(gotArgs) != 2 || gotArgs[0] != "-markdown" || gotArgs[1] != "--compact" {
+		t.Fatalf("unexpected passthrough args: %v", gotArgs)
+	}
+}
+
 func TestRunReusesCachedExecutableWhenVersionAlreadyExists(t *testing.T) {
 	setupTestConfig(t)
 	cacheDir := t.TempDir()
@@ -135,6 +158,109 @@ func TestRunReusesCachedExecutableWhenVersionAlreadyExists(t *testing.T) {
 	}
 	if string(raw) != "cached-binary" {
 		t.Fatalf("expected cached binary to be reused, got %q", string(raw))
+	}
+}
+
+func TestRunSkipsFetchWhenIndexedCacheExists(t *testing.T) {
+	setupTestConfig(t)
+	cacheDir := t.TempDir()
+	provider := &runTestProvider{name: "tool", version: "1.0.0", content: "new-binary"}
+	cmd := newRunCmd()
+	cmd.newProvider = func(_, _ string) (providers.Provider, error) { return provider, nil }
+	cmd.userCacheDir = func() (string, error) { return cacheDir, nil }
+
+	cachePath := filepath.Join(cacheDir, "bin", "tool-1.0.0")
+	if err := os.MkdirAll(filepath.Dir(cachePath), 0o755); err != nil {
+		t.Fatalf("mkdir cache dir: %v", err)
+	}
+	if err := os.WriteFile(cachePath, []byte("cached-binary"), 0o755); err != nil {
+		t.Fatalf("seed cache file: %v", err)
+	}
+
+	resolved, err := resolveFetchRequest("github.com/cli/cli", "", providers.FetchOpts{})
+	if err != nil {
+		t.Fatalf("resolve request: %v", err)
+	}
+	if err := recordCachedRunBinary(cmd.userCacheDir, resolved.url, provider.version, cachePath); err != nil {
+		t.Fatalf("record cache index: %v", err)
+	}
+
+	var gotPath string
+	cmd.execCommand = helperExecCommand(t, 0, func(name string, args []string) {
+		gotPath = name
+	})
+
+	cmd.cmd.SetArgs([]string{"github.com/cli/cli"})
+	if err := cmd.cmd.Execute(); err != nil {
+		t.Fatalf("unexpected run command error: %v", err)
+	}
+
+	if provider.fetchCount != 0 {
+		t.Fatalf("expected no fetch when indexed cache exists, got %d", provider.fetchCount)
+	}
+	if gotPath != cachePath {
+		t.Fatalf("unexpected executable path: got %q want %q", gotPath, cachePath)
+	}
+}
+
+func TestRunAutomaticallyPrunesOldCacheVersionsForURL(t *testing.T) {
+	setupTestConfig(t)
+	cacheDir := t.TempDir()
+	provider := &runTestProvider{name: "tool", version: "1.1.0", content: "new-binary"}
+	cmd := newRunCmd()
+	cmd.newProvider = func(_, _ string) (providers.Provider, error) { return provider, nil }
+	cmd.userCacheDir = func() (string, error) { return cacheDir, nil }
+	cmd.execCommand = helperExecCommand(t, 0, nil)
+
+	resolved, err := resolveFetchRequest("github.com/cli/cli", "", providers.FetchOpts{})
+	if err != nil {
+		t.Fatalf("resolve request: %v", err)
+	}
+
+	currentPath := filepath.Join(cacheDir, "bin", "tool-1.1.0")
+	oldPath := filepath.Join(cacheDir, "bin", "tool-1.0.0")
+	if err := os.MkdirAll(filepath.Dir(currentPath), 0o755); err != nil {
+		t.Fatalf("mkdir cache dir: %v", err)
+	}
+	if err := os.WriteFile(currentPath, []byte("current-binary"), 0o755); err != nil {
+		t.Fatalf("seed current cache file: %v", err)
+	}
+	if err := os.WriteFile(oldPath, []byte("old-binary"), 0o755); err != nil {
+		t.Fatalf("seed old cache file: %v", err)
+	}
+
+	if err := recordCachedRunBinary(cmd.userCacheDir, resolved.url, "1.1.0", currentPath); err != nil {
+		t.Fatalf("record current cache index: %v", err)
+	}
+	if err := recordCachedRunBinary(cmd.userCacheDir, resolved.url, "1.0.0", oldPath); err != nil {
+		t.Fatalf("record old cache index: %v", err)
+	}
+
+	cmd.cmd.SetArgs([]string{"github.com/cli/cli"})
+	if err := cmd.cmd.Execute(); err != nil {
+		t.Fatalf("unexpected run command error: %v", err)
+	}
+
+	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+		t.Fatalf("expected old cache file to be removed, got err=%v", err)
+	}
+	if _, err := os.Stat(currentPath); err != nil {
+		t.Fatalf("expected current cache file to remain: %v", err)
+	}
+
+	indexPath, err := runCacheIndexPath(cmd.userCacheDir)
+	if err != nil {
+		t.Fatalf("cache index path: %v", err)
+	}
+	index, err := loadRunCacheIndex(indexPath)
+	if err != nil {
+		t.Fatalf("load cache index: %v", err)
+	}
+	if _, ok := index[runCacheKey(resolved.url, "1.0.0")]; ok {
+		t.Fatalf("expected old cache index entry to be removed")
+	}
+	if _, ok := index[runCacheKey(resolved.url, "1.1.0")]; !ok {
+		t.Fatalf("expected current cache index entry to remain")
 	}
 }
 
