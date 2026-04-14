@@ -142,6 +142,7 @@ When installing multiple repos in one command, custom paths are not supported. U
 `bin import` reads JSON from stdin by default and can read from a file when `[file]` is provided.  
 By default it runs `ensure` for imported/updated entries after writing config; use `--skip-ensure` to skip that step.  
 `bin outdated` supports `--format=text` (default) and `--format=json`.  
+`bin update` with no arguments opens an interactive multi-select list of outdated binaries; confirm to update the selected entries.  
 Imported binaries are mapped to your local default path using the exported binary `name`.
 
 ```shell
