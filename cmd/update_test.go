@@ -363,4 +363,3 @@ func TestUpdateYesFlagNoArgsSkipsInteractiveSelector(t *testing.T) {
 		t.Fatal("did not expect interactive selector to be called with --yes")
 	}
 }
-

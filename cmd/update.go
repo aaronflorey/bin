@@ -310,7 +310,7 @@ func selectUpdatesForInteractiveSession(updates []availableUpdate) ([]availableU
 		})
 	}
 
-	selectedPaths, err := prompt.MultiSelect(
+	selectedPaths, err := prompt.MultiSelectItems(
 		"Select binaries to update",
 		"up/down: move  space: toggle  a: toggle all  enter: confirm  q: abort",
 		items,
