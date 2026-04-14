@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"fmt"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -207,5 +209,157 @@ func TestGetLatestVersionDetectsGenericSemverUpdate(t *testing.T) {
 	}
 	if got.version != "0.16.0" {
 		t.Fatalf("unexpected version: %s", got.version)
+	}
+}
+
+func TestUpdateWithoutArgsUsesInteractiveSelector(t *testing.T) {
+	setupTestConfig(t)
+
+	outdatedPath := filepath.Join(t.TempDir(), "generic-update-selector-tool")
+	writeTestBinary(t, outdatedPath)
+	if err := config.UpsertBinary(&config.Binary{
+		Path:     outdatedPath,
+		Version:  "1.0.0",
+		URL:      "https://example.com/generic-update-selector-tool",
+		Provider: "github",
+	}); err != nil {
+		t.Fatalf("failed to seed binary: %v", err)
+	}
+
+	cmd := newUpdateCmd()
+	cmd.newProvider = func(u, _ string) (providers.Provider, error) {
+		if u != "https://example.com/generic-update-selector-tool" {
+			return nil, fmt.Errorf("unexpected provider request for %s", u)
+		}
+		return mockProvider{latestVersion: "1.1.0", latestVersionURL: "https://example.com/generic-update-selector-tool/releases/tag/v1.1.0"}, nil
+	}
+
+	selectorCalled := false
+	cmd.selectItems = func(updates []availableUpdate) ([]availableUpdate, error) {
+		selectorCalled = true
+		if len(updates) != 1 {
+			t.Fatalf("expected 1 update candidate, got %d", len(updates))
+		}
+		return nil, nil
+	}
+
+	if err := cmd.cmd.Execute(); err != nil {
+		t.Fatalf("unexpected update command error: %v", err)
+	}
+	if !selectorCalled {
+		t.Fatal("expected interactive selector to be called")
+	}
+}
+
+func TestUpdateWithArgsSkipsInteractiveSelector(t *testing.T) {
+	setupTestConfig(t)
+
+	outdatedPath := filepath.Join(t.TempDir(), "generic-update-no-selector-tool")
+	writeTestBinary(t, outdatedPath)
+	if err := config.UpsertBinary(&config.Binary{
+		Path:     outdatedPath,
+		Version:  "1.0.0",
+		URL:      "https://example.com/generic-update-no-selector-tool",
+		Provider: "github",
+	}); err != nil {
+		t.Fatalf("failed to seed binary: %v", err)
+	}
+
+	cmd := newUpdateCmd()
+	cmd.newProvider = func(u, _ string) (providers.Provider, error) {
+		if u != "https://example.com/generic-update-no-selector-tool" {
+			return nil, fmt.Errorf("unexpected provider request for %s", u)
+		}
+		return mockProvider{latestVersion: "1.2.0", latestVersionURL: "https://example.com/generic-update-no-selector-tool/releases/tag/v1.2.0"}, nil
+	}
+
+	selectorCalled := false
+	cmd.selectItems = func(updates []availableUpdate) ([]availableUpdate, error) {
+		selectorCalled = true
+		return updates, nil
+	}
+
+	cmd.cmd.SetArgs([]string{"--dry-run", outdatedPath})
+	err := cmd.cmd.Execute()
+	if err == nil {
+		t.Fatal("expected dry-run command to return an error")
+	}
+	if !strings.Contains(err.Error(), "dry-run mode") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if selectorCalled {
+		t.Fatal("did not expect interactive selector to be called when args are provided")
+	}
+}
+
+func TestUpdateDryRunNoArgsSkipsInteractiveSelector(t *testing.T) {
+	setupTestConfig(t)
+
+	outdatedPath := filepath.Join(t.TempDir(), "generic-update-dryrun-tool")
+	writeTestBinary(t, outdatedPath)
+	if err := config.UpsertBinary(&config.Binary{
+		Path:     outdatedPath,
+		Version:  "1.0.0",
+		URL:      "https://example.com/generic-update-dryrun-tool",
+		Provider: "github",
+	}); err != nil {
+		t.Fatalf("failed to seed binary: %v", err)
+	}
+
+	cmd := newUpdateCmd()
+	cmd.newProvider = func(u, _ string) (providers.Provider, error) {
+		return mockProvider{latestVersion: "1.1.0", latestVersionURL: "https://example.com/generic-update-dryrun-tool/releases/tag/v1.1.0"}, nil
+	}
+
+	selectorCalled := false
+	cmd.selectItems = func(updates []availableUpdate) ([]availableUpdate, error) {
+		selectorCalled = true
+		return updates, nil
+	}
+
+	cmd.cmd.SetArgs([]string{"--dry-run"})
+	err := cmd.cmd.Execute()
+	if err == nil {
+		t.Fatal("expected dry-run command to return an error")
+	}
+	if !strings.Contains(err.Error(), "dry-run mode") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if selectorCalled {
+		t.Fatal("did not expect interactive selector to be called with --dry-run")
+	}
+}
+
+func TestUpdateYesFlagNoArgsSkipsInteractiveSelector(t *testing.T) {
+	setupTestConfig(t)
+
+	outdatedPath := filepath.Join(t.TempDir(), "generic-update-yes-tool")
+	writeTestBinary(t, outdatedPath)
+	if err := config.UpsertBinary(&config.Binary{
+		Path:     outdatedPath,
+		Version:  "1.0.0",
+		URL:      "https://example.com/generic-update-yes-tool",
+		Provider: "github",
+	}); err != nil {
+		t.Fatalf("failed to seed binary: %v", err)
+	}
+
+	cmd := newUpdateCmd()
+	cmd.newProvider = func(u, _ string) (providers.Provider, error) {
+		return mockProvider{latestVersion: "1.1.0", latestVersionURL: "https://example.com/generic-update-yes-tool/releases/tag/v1.1.0"}, nil
+	}
+
+	selectorCalled := false
+	cmd.selectItems = func(updates []availableUpdate) ([]availableUpdate, error) {
+		selectorCalled = true
+		return updates, nil
+	}
+
+	// Inject a dry-run to avoid actually downloading in case --yes bypass fails.
+	cmd.cmd.SetArgs([]string{"--yes", "--dry-run"})
+	cmd.cmd.Execute() //nolint:errcheck
+
+	if selectorCalled {
+		t.Fatal("did not expect interactive selector to be called with --yes")
 	}
 }
