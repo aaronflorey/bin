@@ -355,7 +355,7 @@ func TestUpdateYesFlagNoArgsSkipsInteractiveSelector(t *testing.T) {
 		return updates, nil
 	}
 
-	// Inject a dry-run to avoid actually downloading. We check selector first.
+	// Inject a dry-run to avoid actually downloading in case --yes bypass fails.
 	cmd.cmd.SetArgs([]string{"--yes", "--dry-run"})
 	cmd.cmd.Execute() //nolint:errcheck
 
