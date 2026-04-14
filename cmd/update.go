@@ -19,7 +19,10 @@ type updateCmd struct {
 	cmd         *cobra.Command
 	opts        updateOpts
 	newProvider providerFactory
+	selectItems updateSelectionFunc
 }
+
+type updateSelectionFunc func([]availableUpdate) ([]availableUpdate, error)
 
 type updateOpts struct {
 	yesToUpdate     bool
@@ -33,7 +36,7 @@ type updateOpts struct {
 type updateInfo struct{ version, url string }
 
 func newUpdateCmd() *updateCmd {
-	root := &updateCmd{newProvider: providers.New}
+	root := &updateCmd{newProvider: providers.New, selectItems: selectUpdatesForInteractiveSession}
 	// nolint: dupl
 	cmd := &cobra.Command{
 		Use:           "update [binary_path]",
@@ -57,6 +60,20 @@ func newUpdateCmd() *updateCmd {
 				updates, updateFailures, err = collectAvailableUpdates(binsToProcess, root.newProvider, root.opts.continueOnError, root.opts.parallelism)
 				if err != nil {
 					return err
+				}
+			}
+
+			if len(args) == 0 && !hasExplicitVersion && len(updates) > 0 {
+				updates, err = root.selectItems(updates)
+				if err != nil {
+					return err
+				}
+				if len(updates) == 0 {
+					for _, err := range updateFailures {
+						log.Warnf("%v", err)
+					}
+					log.Infof("No binaries selected for update")
+					return nil
 				}
 			}
 
@@ -276,4 +293,43 @@ func shouldUpdateToExplicitVersion(currentVersion, explicitVersion string) bool 
 	}
 
 	return true
+}
+
+func selectUpdatesForInteractiveSession(updates []availableUpdate) ([]availableUpdate, error) {
+	if len(updates) == 0 || !prompt.IsInteractive() {
+		return updates, nil
+	}
+
+	items := make([]prompt.MultiSelectItem, 0, len(updates))
+	for _, update := range updates {
+		items = append(items, prompt.MultiSelectItem{
+			Value:       update.binary.Path,
+			Label:       fmt.Sprintf("%s (%s -> %s)", update.binary.Path, update.binary.Version, update.info.version),
+			Description: update.info.url,
+			Selected:    true,
+		})
+	}
+
+	selectedPaths, err := prompt.MultiSelect(
+		"Select binaries to update",
+		"up/down: move  space: toggle  a: toggle all  enter: confirm  q: abort",
+		items,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	selected := map[string]struct{}{}
+	for _, path := range selectedPaths {
+		selected[path] = struct{}{}
+	}
+
+	filtered := make([]availableUpdate, 0, len(selectedPaths))
+	for _, update := range updates {
+		if _, ok := selected[update.binary.Path]; ok {
+			filtered = append(filtered, update)
+		}
+	}
+
+	return filtered, nil
 }
