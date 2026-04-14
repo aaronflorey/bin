@@ -2,10 +2,13 @@ package cmd
 
 import (
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -15,6 +18,9 @@ import (
 	"github.com/aaronflorey/bin/pkg/providers"
 	"github.com/caarlos0/log"
 )
+
+var isPromptInteractive = prompt.IsInteractive
+var confirmPrompt = prompt.Confirm
 
 // applyChmod applies the DefaultChmod setting from config, if set.
 // This is a no-op on non-Linux platforms where DefaultChmod is not set by default.
@@ -326,7 +332,19 @@ func resolveBinsToProcess(allBins map[string]*config.Binary, args []string) (map
 	for _, a := range args {
 		bin, err := getBinPath(a)
 		if err != nil {
-			return nil, err
+			if !errors.Is(err, exec.ErrNotFound) && !errors.Is(err, os.ErrNotExist) {
+				return nil, err
+			}
+
+			suggestedBin, suggestErr := resolveManagedBinSuggestion(allBins, a)
+			if suggestErr != nil {
+				return nil, suggestErr
+			}
+			if suggestedBin == "" {
+				return nil, err
+			}
+
+			bin = suggestedBin
 		}
 		binCfg, ok := allBins[bin]
 		if !ok {
@@ -335,6 +353,62 @@ func resolveBinsToProcess(allBins map[string]*config.Binary, args []string) (map
 		bins[bin] = binCfg
 	}
 	return bins, nil
+}
+
+func resolveManagedBinSuggestion(allBins map[string]*config.Binary, input string) (string, error) {
+	if strings.Contains(input, "/") {
+		return "", nil
+	}
+
+	target := strings.ToLower(input)
+	type candidate struct {
+		name string
+		path string
+	}
+
+	var candidates []candidate
+	for path, bin := range allBins {
+		name := filepath.Base(path)
+		if bin != nil && bin.Path != "" {
+			name = filepath.Base(bin.Path)
+		}
+
+		if !strings.HasPrefix(strings.ToLower(name), target) {
+			continue
+		}
+
+		candidates = append(candidates, candidate{name: name, path: path})
+	}
+
+	if len(candidates) == 0 {
+		return "", nil
+	}
+
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].name != candidates[j].name {
+			return candidates[i].name < candidates[j].name
+		}
+		return candidates[i].path < candidates[j].path
+	})
+
+	if len(candidates) == 1 {
+		suggested := candidates[0]
+		if isPromptInteractive() {
+			if err := confirmPrompt(fmt.Sprintf("Did you mean %q?", suggested.name)); err != nil {
+				return "", err
+			}
+			return suggested.path, nil
+		}
+
+		return "", fmt.Errorf("%w: binary %q not found in configuration; did you mean %q?", exec.ErrNotFound, input, suggested.name)
+	}
+
+	matches := make([]string, 0, len(candidates))
+	for _, c := range candidates {
+		matches = append(matches, c.name)
+	}
+
+	return "", fmt.Errorf("%w: binary %q not found in configuration; multiple matches: %s", exec.ErrNotFound, input, strings.Join(matches, ", "))
 }
 
 // hashFile computes the hex-encoded SHA256 hash of the file at path.
