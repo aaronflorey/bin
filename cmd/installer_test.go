@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -161,5 +163,110 @@ func TestFindManagedDuplicateByHash(t *testing.T) {
 	}
 	if duplicatePath != "/tmp/tool-c" {
 		t.Fatalf("unexpected duplicate path: %s", duplicatePath)
+	}
+}
+
+func TestResolveManagedBinSuggestionNonInteractive(t *testing.T) {
+	previousInteractive := isPromptInteractive
+	previousConfirm := confirmPrompt
+	isPromptInteractive = func() bool { return false }
+	confirmPrompt = func(_ string) error { return nil }
+	defer func() {
+		isPromptInteractive = previousInteractive
+		confirmPrompt = previousConfirm
+	}()
+
+	_, err := resolveManagedBinSuggestion(map[string]*config.Binary{
+		"/tmp/unison": {Path: "/tmp/unison"},
+	}, "uni")
+	if err == nil {
+		t.Fatal("expected suggestion error")
+	}
+	if !errors.Is(err, exec.ErrNotFound) {
+		t.Fatalf("expected not found error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), `did you mean "unison"`) {
+		t.Fatalf("unexpected suggestion error: %v", err)
+	}
+}
+
+func TestResolveManagedBinSuggestionInteractiveAcceptsMatch(t *testing.T) {
+	previousInteractive := isPromptInteractive
+	previousConfirm := confirmPrompt
+	isPromptInteractive = func() bool { return true }
+	prompted := ""
+	confirmPrompt = func(message string) error {
+		prompted = message
+		return nil
+	}
+	defer func() {
+		isPromptInteractive = previousInteractive
+		confirmPrompt = previousConfirm
+	}()
+
+	path, err := resolveManagedBinSuggestion(map[string]*config.Binary{
+		"/tmp/unison": {Path: "/tmp/unison"},
+	}, "uni")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if path != "/tmp/unison" {
+		t.Fatalf("unexpected suggested path: %s", path)
+	}
+	if prompted != `Did you mean "unison"?` {
+		t.Fatalf("unexpected prompt message: %s", prompted)
+	}
+}
+
+func TestResolveManagedBinSuggestionAmbiguous(t *testing.T) {
+	previousInteractive := isPromptInteractive
+	previousConfirm := confirmPrompt
+	isPromptInteractive = func() bool { return false }
+	confirmPrompt = func(_ string) error { return nil }
+	defer func() {
+		isPromptInteractive = previousInteractive
+		confirmPrompt = previousConfirm
+	}()
+
+	_, err := resolveManagedBinSuggestion(map[string]*config.Binary{
+		"/tmp/unicode": {Path: "/tmp/unicode"},
+		"/tmp/unison":  {Path: "/tmp/unison"},
+	}, "uni")
+	if err == nil {
+		t.Fatal("expected ambiguous suggestion error")
+	}
+	if !errors.Is(err, exec.ErrNotFound) {
+		t.Fatalf("expected not found error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "multiple matches: unicode, unison") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+func TestResolveBinsToProcessUsesAcceptedSuggestion(t *testing.T) {
+	setupTestConfig(t)
+	path := filepath.Join(t.TempDir(), "unison")
+	if err := config.UpsertBinary(&config.Binary{Path: path, URL: "https://example.test/acme/unison", Version: "1.0.0"}); err != nil {
+		t.Fatalf("failed to seed binary: %v", err)
+	}
+
+	previousInteractive := isPromptInteractive
+	previousConfirm := confirmPrompt
+	isPromptInteractive = func() bool { return true }
+	confirmPrompt = func(_ string) error { return nil }
+	defer func() {
+		isPromptInteractive = previousInteractive
+		confirmPrompt = previousConfirm
+	}()
+
+	bins, err := resolveBinsToProcess(config.Get().Bins, []string{"uni"})
+	if err != nil {
+		t.Fatalf("unexpected resolve error: %v", err)
+	}
+	if len(bins) != 1 {
+		t.Fatalf("expected one resolved binary, got %d", len(bins))
+	}
+	if _, ok := bins[path]; !ok {
+		t.Fatalf("expected resolved path %q", path)
 	}
 }

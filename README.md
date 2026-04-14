@@ -135,6 +135,7 @@ jobs:
 | `bin help`                  | Show help for any command                  | `bin help install`               |
 
 **Tips**: if `bin` is unable to found the right package, try `bin install -a` to show all possible download options (skip scoring & filtering).
+For commands that target managed binaries (for example `update`/`outdated`/`ensure`), you can use a unique prefix (like `uni`) and `bin` will suggest a matching managed name.
 
 When installing multiple repos in one command, custom paths are not supported. Use either `bin install <repo> [path]` for a single repo or `bin install <repo>...` for many repos.
 
