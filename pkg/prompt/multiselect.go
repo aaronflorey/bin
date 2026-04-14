@@ -11,6 +11,11 @@ import (
 	"github.com/charmbracelet/lipgloss/v2"
 )
 
+type MultiSelectOption struct {
+	Label string
+	Value string
+}
+
 type MultiSelectItem struct {
 	Value       string
 	Label       string
@@ -43,7 +48,23 @@ var (
 	footerStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
 )
 
-func MultiSelect(title, hint string, items []MultiSelectItem) ([]string, error) {
+func MultiSelect(title string, options []MultiSelectOption) ([]string, error) {
+	items := make([]MultiSelectItem, 0, len(options))
+	for _, option := range options {
+		items = append(items, MultiSelectItem{
+			Value: option.Value,
+			Label: option.Label,
+		})
+	}
+
+	return MultiSelectItems(
+		title,
+		"up/down: move  space: toggle  a: toggle all  enter: confirm  q: abort",
+		items,
+	)
+}
+
+func MultiSelectItems(title, hint string, items []MultiSelectItem) ([]string, error) {
 	if len(items) == 0 {
 		return nil, nil
 	}
@@ -187,7 +208,7 @@ func (m multiSelectModel) View() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(footerStyle.Render("Selected items will be updated."))
+	b.WriteString(footerStyle.Render("Selected items will be applied."))
 	b.WriteString("\n")
 
 	return b.String()

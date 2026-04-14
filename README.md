@@ -127,7 +127,7 @@ jobs:
 | `bin import [file]`         | Import binaries from JSON and ensure them  | `bin import bins.json`           |
 | `bin outdated`              | Show binaries with newer versions available | `bin outdated --format=json`     |
 | `bin update [binary...]`    | Update binaries (all or specified)         | `bin update`                     |
-| `bin remove <binary...>`    | Remove one or more binaries                | `bin remove gh kubectl`          |
+| `bin remove [binary...]`    | Remove binaries (aliases: `rm`, `r`, `uninstall`) | `bin remove gh kubectl`          |
 | `bin ensure`                | Ensure all configured binaries are present | `bin ensure`                     |
 | `bin pin <binary...>`       | Pin current version (prevent updates)      | `bin pin terraform`              |
 | `bin unpin <binary...>`     | Unpin binaries (allow updates)             | `bin unpin terraform`            |
@@ -135,11 +135,13 @@ jobs:
 | `bin help`                  | Show help for any command                  | `bin help install`               |
 
 **Tips**: if `bin` is unable to found the right package, try `bin install -a` to show all possible download options (skip scoring & filtering).
+For commands that target managed binaries (for example `update`/`outdated`/`ensure`), you can use a unique prefix (like `uni`) and `bin` will suggest a matching managed name.
 
 When installing multiple repos in one command, custom paths are not supported. Use either `bin install <repo> [path]` for a single repo or `bin install <repo>...` for many repos.
 
 `bin export` writes JSON to stdout by default and can write to a file when `[file]` is provided.  
 `bin import` reads JSON from stdin by default and can read from a file when `[file]` is provided.  
+`bin remove` with no arguments opens an interactive multi-select picker of configured binaries.  
 By default it runs `ensure` for imported/updated entries after writing config; use `--skip-ensure` to skip that step.  
 `bin outdated` supports `--format=text` (default) and `--format=json`.  
 `bin update` with no arguments opens an interactive multi-select list of outdated binaries; confirm to update the selected entries.  
