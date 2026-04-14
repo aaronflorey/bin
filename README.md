@@ -127,7 +127,7 @@ jobs:
 | `bin import [file]`         | Import binaries from JSON and ensure them  | `bin import bins.json`           |
 | `bin outdated`              | Show binaries with newer versions available | `bin outdated --format=json`     |
 | `bin update [binary...]`    | Update binaries (all or specified)         | `bin update`                     |
-| `bin remove <binary...>`    | Remove one or more binaries                | `bin remove gh kubectl`          |
+| `bin remove [binary...]`    | Remove binaries (aliases: `rm`, `r`, `uninstall`) | `bin remove gh kubectl`          |
 | `bin ensure`                | Ensure all configured binaries are present | `bin ensure`                     |
 | `bin pin <binary...>`       | Pin current version (prevent updates)      | `bin pin terraform`              |
 | `bin unpin <binary...>`     | Unpin binaries (allow updates)             | `bin unpin terraform`            |
@@ -140,6 +140,7 @@ When installing multiple repos in one command, custom paths are not supported. U
 
 `bin export` writes JSON to stdout by default and can write to a file when `[file]` is provided.  
 `bin import` reads JSON from stdin by default and can read from a file when `[file]` is provided.  
+`bin remove` with no arguments opens an interactive multi-select picker of configured binaries.  
 By default it runs `ensure` for imported/updated entries after writing config; use `--skip-ensure` to skip that step.  
 `bin outdated` supports `--format=text` (default) and `--format=json`.  
 Imported binaries are mapped to your local default path using the exported binary `name`.
