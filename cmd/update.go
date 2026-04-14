@@ -63,7 +63,7 @@ func newUpdateCmd() *updateCmd {
 				}
 			}
 
-			if len(args) == 0 && !hasExplicitVersion && len(updates) > 0 {
+			if len(args) == 0 && !hasExplicitVersion && !root.opts.yesToUpdate && !root.opts.dryRun && len(updates) > 0 {
 				updates, err = root.selectItems(updates)
 				if err != nil {
 					return err
