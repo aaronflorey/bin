@@ -245,6 +245,11 @@ if [ "$CONFIG_EXISTS" = "false" ]; then
 	printf '{\n  "default_path": "%s",\n  "bins": {}\n}\n' "$INSTALL_DIR" > "$CONFIG_PATH"
 fi
 
+if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ] && [ "${SUDO_USER}" != "root" ]; then
+	chown "${DETECTED_USER}:" "$CONFIG_DIR"
+	[ "$CONFIG_EXISTS" = "false" ] && chown "${DETECTED_USER}:" "$CONFIG_PATH"
+fi
+
 RELEASE_JSON="$(http_get "$API_URL")"
 TAG_NAME="$(printf '%s\n' "$RELEASE_JSON" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
 [ -n "$TAG_NAME" ] || fail "failed to determine latest release tag"
