@@ -195,6 +195,11 @@ func TestFilterAssets(t *testing.T) {
 			{Name: "goreleaser_2.15.2_amd64.deb", URL: "https://example.test/goreleaser/goreleaser/releases/download/v2.15.2/goreleaser_2.15.2_amd64.deb"},
 			{Name: "goreleaser_Linux_x86_64.tar.gz", URL: "https://example.test/goreleaser/goreleaser/releases/download/v2.15.2/goreleaser_Linux_x86_64.tar.gz"},
 		}}, "goreleaser_Linux_x86_64.tar.gz", testLinuxAMDResolver},
+		{args{"wesm/agentsview", []*Asset{
+			{Name: "AgentsView_0.25.0_amd64.AppImage", URL: "https://example.test/wesm/agentsview/releases/download/v0.25.0/AgentsView_0.25.0_amd64.AppImage"},
+			{Name: "agentsview_0.25.0_linux_amd64.tar.gz", URL: "https://example.test/wesm/agentsview/releases/download/v0.25.0/agentsview_0.25.0_linux_amd64.tar.gz"},
+			{Name: "agentsview_0.25.0_windows_amd64.zip", URL: "https://example.test/wesm/agentsview/releases/download/v0.25.0/agentsview_0.25.0_windows_amd64.zip"},
+		}}, "agentsview_0.25.0_linux_amd64.tar.gz", testLinuxAMDResolver},
 	}
 
 	f := NewFilter(&FilterOpts{SkipScoring: false})

@@ -240,7 +240,7 @@ func (f *Filter) FilterAssets(repoName string, as []*Asset, autoSelect string) (
 				scores[arch] = 5
 			}
 			for _, osSpecificExtension := range resolver.GetOSSpecificExtensions() {
-				scores[osSpecificExtension] = 15
+				scores[osSpecificExtension] = osSpecificExtensionScore(osSpecificExtension)
 			}
 
 			for key := range scores {
@@ -344,6 +344,15 @@ func (f *Filter) FilterAssets(repoName string, as []*Asset, autoSelect string) (
 	}
 
 	return gf, nil
+}
+
+func osSpecificExtensionScore(extension string) int {
+	if strings.EqualFold(extension, "AppImage") {
+		// AppImages are Linux-compatible, but should not outrank native Linux binaries.
+		return 8
+	}
+
+	return 15
 }
 
 func (f *Filter) preferredMatchName(repoName string) string {
