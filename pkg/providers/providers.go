@@ -13,6 +13,8 @@ import (
 
 var ErrInvalidProvider = errors.New("invalid provider")
 
+var ErrReleaseHistoryUnsupported = errors.New("release history unsupported")
+
 type File struct {
 	Data        io.Reader
 	Name        string
@@ -27,6 +29,7 @@ type ReleaseInfo struct {
 	Version     string
 	URL         string
 	PublishedAt *time.Time
+	Body        string
 }
 
 func (f *File) Hash() ([]byte, error) {
@@ -66,6 +69,19 @@ type Provider interface {
 
 	// GetID returns the unique identiifer of this provider
 	GetID() string
+}
+
+type ReleaseHistoryProvider interface {
+	ListReleases(limit int) ([]*ReleaseInfo, error)
+}
+
+func GetReleaseHistory(p Provider, limit int) ([]*ReleaseInfo, error) {
+	historyProvider, ok := p.(ReleaseHistoryProvider)
+	if !ok {
+		return nil, fmt.Errorf("%w for provider %q", ErrReleaseHistoryUnsupported, p.GetID())
+	}
+
+	return historyProvider.ListReleases(limit)
 }
 
 var (

@@ -37,6 +37,23 @@ func (cmd *rootCmd) Execute(args []string) {
 
 	defer spinner.Stop()
 
+	if cmd.shouldLaunchTUI != nil && cmd.shouldLaunchTUI(args) {
+		if cmd.loadConfig != nil {
+			err := cmd.loadConfig()
+			if err != nil {
+				log.WithError(err).Error("Error loading config file")
+				cmd.exit(1)
+				return
+			}
+		}
+
+		if err := cmd.launchTUI(); err != nil {
+			log.WithError(err).Error("command failed")
+			cmd.exit(1)
+		}
+		return
+	}
+
 	if defaultCommand(cmd.cmd, args) {
 		if len(args) == 0 {
 			cmd.cmd.SetArgs(append([]string{"list"}, args...))
@@ -66,11 +83,18 @@ type rootCmd struct {
 	debug bool
 	exit  func(int)
 	args  []string
+
+	shouldLaunchTUI func([]string) bool
+	launchTUI       func() error
+	loadConfig      func() error
 }
 
 func newRootCmd(version string, exit func(int)) *rootCmd {
 	root := &rootCmd{
-		exit: exit,
+		exit:            exit,
+		shouldLaunchTUI: shouldLaunchZeroArgTUI,
+		launchTUI:       runTUI,
+		loadConfig:      config.CheckAndLoad,
 	}
 	cmd := &cobra.Command{
 		Use:           "bin",
@@ -109,6 +133,7 @@ func newRootCmd(version string, exit func(int)) *rootCmd {
 		newInstallCmd().cmd,
 		newRunCmd().cmd,
 		newEnsureCmd().cmd,
+		newTUICmd().cmd,
 		newOutdatedCmd().cmd,
 		newUpdateCmd().cmd,
 		newSetConfigCmd().cmd,

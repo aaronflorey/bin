@@ -110,11 +110,27 @@ func (c *codeberg) GetLatestVersion() (*ReleaseInfo, error) {
 		return nil, err
 	}
 
-	return &ReleaseInfo{
-		Version:     release.TagName,
-		URL:         release.HTMLURL,
-		PublishedAt: codebergPublishedAt(release),
-	}, nil
+	return codebergReleaseInfo(release), nil
+}
+
+func (c *codeberg) ListReleases(limit int) ([]*ReleaseInfo, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+
+	releases, _, err := c.client.ListReleases(c.owner, c.repo, gitea.ListReleasesOptions{
+		ListOptions: gitea.ListOptions{PageSize: limit},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	history := make([]*ReleaseInfo, 0, len(releases))
+	for _, release := range releases {
+		history = append(history, codebergReleaseInfo(release))
+	}
+
+	return history, nil
 }
 
 func (c *codeberg) GetID() string {
@@ -130,6 +146,19 @@ func codebergPublishedAt(release *gitea.Release) *time.Time {
 		return nil
 	}
 	return PtrTime(release.PublishedAt)
+}
+
+func codebergReleaseInfo(release *gitea.Release) *ReleaseInfo {
+	if release == nil {
+		return nil
+	}
+
+	return &ReleaseInfo{
+		Version:     release.TagName,
+		URL:         release.HTMLURL,
+		PublishedAt: codebergPublishedAt(release),
+		Body:        release.Note,
+	}
 }
 
 func newCodeberg(u *url.URL) (Provider, error) {

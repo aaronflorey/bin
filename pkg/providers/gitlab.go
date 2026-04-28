@@ -6,13 +6,11 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"sort"
 	"strings"
 	"time"
 
 	"github.com/aaronflorey/bin/pkg/assets"
 	"github.com/caarlos0/log"
-	"github.com/coreos/go-semver/semver"
 	"github.com/yuin/goldmark"
 	goldast "github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/text"
@@ -221,8 +219,29 @@ func (g *gitLab) GetLatestVersion() (*ReleaseInfo, error) {
 	log.Debugf("Getting latest release for %s/%s", g.owner, g.repo)
 	projectPath := fmt.Sprintf("%s/%s", g.owner, g.repo)
 
+	release, resp, err := g.client.Releases.GetLatestRelease(projectPath, gitlab.WithContext(context.Background()))
+	if resp != nil && resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("repository %s/%s does not have releases", g.owner, g.repo)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if release == nil {
+		return nil, fmt.Errorf("no release metadata found for %s/%s", g.owner, g.repo)
+	}
+
+	return gitLabReleaseInfo(release), nil
+}
+
+func (g *gitLab) ListReleases(limit int) ([]*ReleaseInfo, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+
+	projectPath := fmt.Sprintf("%s/%s", g.owner, g.repo)
 	releases, resp, err := g.client.Releases.ListReleases(projectPath, &gitlab.ListReleasesOptions{
-		ListOptions: gitlab.ListOptions{PerPage: 100},
+		ListOptions: gitlab.ListOptions{PerPage: limit},
+		Sort:        gitlab.Ptr("desc"),
 	})
 	if resp != nil && resp.StatusCode == http.StatusNotFound {
 		return nil, fmt.Errorf("repository %s/%s does not have releases", g.owner, g.repo)
@@ -230,41 +249,13 @@ func (g *gitLab) GetLatestVersion() (*ReleaseInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(releases) == 0 {
-		return nil, fmt.Errorf("repository %s/%s does not have releases", g.owner, g.repo)
-	}
-	highestTagName := releases[0].TagName
-	highestRelease := releases[0]
-	var svs semver.Versions
-	svToTagName := map[string]string{}
-	tagNameToRelease := map[string]*gitlab.Release{}
+
+	history := make([]*ReleaseInfo, 0, len(releases))
 	for _, release := range releases {
-		tagName := strings.TrimPrefix(release.TagName, "v")
-		sv, err := semver.NewVersion(tagName)
-		if err != nil {
-			continue
-		}
-		if sv.PreRelease == "" && sv.Metadata == "" {
-			svs = append(svs, sv)
-			svToTagName[sv.String()] = release.TagName
-			tagNameToRelease[release.TagName] = release
-		}
-	}
-	if len(svs) > 0 {
-		sort.Sort(svs)
-		highestTagName = svToTagName[svs[len(svs)-1].String()]
-		highestRelease = tagNameToRelease[highestTagName]
+		history = append(history, gitLabReleaseInfo(release))
 	}
 
-	if highestRelease == nil {
-		return nil, fmt.Errorf("no release metadata found for %s/%s", g.owner, g.repo)
-	}
-
-	return &ReleaseInfo{
-		Version:     highestTagName,
-		URL:         highestRelease.Commit.WebURL,
-		PublishedAt: gitLabPublishedAt(highestRelease),
-	}, nil
+	return history, nil
 }
 
 func gitLabPublishedAt(release *gitlab.Release) *time.Time {
@@ -275,6 +266,24 @@ func gitLabPublishedAt(release *gitlab.Release) *time.Time {
 		return release.ReleasedAt
 	}
 	return release.CreatedAt
+}
+
+func gitLabReleaseInfo(release *gitlab.Release) *ReleaseInfo {
+	if release == nil {
+		return nil
+	}
+
+	url := release.Links.Self
+	if url == "" {
+		url = release.TagPath
+	}
+
+	return &ReleaseInfo{
+		Version:     release.TagName,
+		URL:         url,
+		PublishedAt: gitLabPublishedAt(release),
+		Body:        release.Description,
+	}
 }
 
 func newGitLab(u *url.URL) (Provider, error) {

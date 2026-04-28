@@ -120,11 +120,25 @@ func (g *gitHub) GetLatestVersion() (*ReleaseInfo, error) {
 		return nil, err
 	}
 
-	return &ReleaseInfo{
-		Version:     release.GetTagName(),
-		URL:         release.GetHTMLURL(),
-		PublishedAt: githubPublishedAt(release),
-	}, nil
+	return githubReleaseInfo(release), nil
+}
+
+func (g *gitHub) ListReleases(limit int) ([]*ReleaseInfo, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+
+	releases, _, err := g.client.Repositories.ListReleases(context.Background(), g.owner, g.repo, &github.ListOptions{PerPage: limit})
+	if err != nil {
+		return nil, err
+	}
+
+	history := make([]*ReleaseInfo, 0, len(releases))
+	for _, release := range releases {
+		history = append(history, githubReleaseInfo(release))
+	}
+
+	return history, nil
 }
 
 func (g *gitHub) GetID() string {
@@ -140,6 +154,19 @@ func githubPublishedAt(release *github.RepositoryRelease) *time.Time {
 		return nil
 	}
 	return PtrTime(release.PublishedAt.Time)
+}
+
+func githubReleaseInfo(release *github.RepositoryRelease) *ReleaseInfo {
+	if release == nil {
+		return nil
+	}
+
+	return &ReleaseInfo{
+		Version:     release.GetTagName(),
+		URL:         release.GetHTMLURL(),
+		PublishedAt: githubPublishedAt(release),
+		Body:        release.GetBody(),
+	}
 }
 
 func newGitHub(u *url.URL) (Provider, error) {
