@@ -19,6 +19,8 @@ type mockProvider struct {
 	latestVersionURL string
 	publishedAt      *time.Time
 	release          *providers.ReleaseInfo
+	history          []*providers.ReleaseInfo
+	historyErr       error
 	returnNilRelease bool
 	err              error
 }
@@ -45,6 +47,16 @@ func (m mockProvider) GetID() string {
 		return m.id
 	}
 	return "github"
+}
+
+func (m mockProvider) ListReleases(limit int) ([]*providers.ReleaseInfo, error) {
+	if m.historyErr != nil {
+		return nil, m.historyErr
+	}
+	if limit > 0 && len(m.history) > limit {
+		return m.history[:limit], nil
+	}
+	return m.history, nil
 }
 
 func TestGetLatestVersion(t *testing.T) {

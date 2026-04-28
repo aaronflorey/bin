@@ -1,0 +1,50 @@
+version: 1
+last_run: '1777270127'
+skills:
+  https://github.com/aaronflorey/agent-skills::charmbracelet:
+    destination: /home/aaron/Code/bin/./.agents/skills/charmbracelet
+    hash: 8fcd3375b0a15f4eb817e7752b570cf4a783db9ff59261e9331c712f52f14fa8
+    skill: charmbracelet
+    description: Build Go terminal user interfaces and interactive CLIs with the Charmbracelet ecosystem, especially Bubble Tea, Bubbles, Huh, Lip Gloss, Wish, Glamour, and Log. Use this skill when the user asks for a TUI, terminal UI, interactive CLI, Bubble Tea model/update/view code, Bubbles widgets, Huh forms, Lip Gloss layout or styling, Wish SSH apps, Glamour markdown rendering, or a polished Go terminal app.
+    source: https://github.com/aaronflorey/agent-skills
+    source_revision: branch:main
+    updated_at: '1777270127'
+    scope: project
+  https://github.com/aaronflorey/agent-skills::go-cobra:
+    destination: /home/aaron/Code/bin/./.agents/skills/go-cobra
+    hash: 24d4e4be96743db906973543fc949ce1419abf1647ab6439e5d71ac7f0e909a5
+    skill: go-cobra
+    description: Write, scaffold, and debug Go CLI applications with `github.com/spf13/cobra`. Use this skill whenever the user mentions Cobra, `cobra.Command`, a Go command-line app, subcommands, persistent or local flags, required flags, argument validation, shell completions, generated docs, or wants to build or refactor a cobra-based CLI.
+    source: https://github.com/aaronflorey/agent-skills
+    source_revision: branch:main
+    updated_at: '1777270127'
+    scope: project
+  https://github.com/aaronflorey/agent-skills::go-viper:
+    destination: /home/aaron/Code/bin/./.agents/skills/go-viper
+    hash: bb7e01580daccaedfbc8f4745ca52adeafcc7e96a8d302c7179897245225935c
+    skill: go-viper
+    description: Write, debug, and explain Go configuration code with `github.com/spf13/viper`. Use this skill whenever the user mentions Viper, `viper`, config structs, reading config from files plus env vars plus flags, Cobra or `pflag` integration, unmarshaling into structs, env key replacers, config precedence, config watching, or a clean Viper bootstrap.
+    source: https://github.com/aaronflorey/agent-skills
+    source_revision: branch:main
+    updated_at: '1777270127'
+    scope: project
+  https://github.com/aaronflorey/agent-skills::goreleaser:
+    destination: /home/aaron/Code/bin/./.agents/skills/goreleaser
+    hash: 699cf5a51d6fd92bc82c647c65d091e27b03c4d96f08ac804ab74411806d9dee
+    skill: goreleaser
+    description: '>'
+    source: https://github.com/aaronflorey/agent-skills
+    source_revision: branch:main
+    updated_at: '1777270127'
+    scope: project
+  https://github.com/aaronflorey/agent-skills::release-please:
+    destination: /home/aaron/Code/bin/./.agents/skills/release-please
+    hash: d2532033ef054189cdc1b14d38cb2db2c1667f0de48bf60359d28236013093a1
+    skill: release-please
+    description: Set up `release-please` for automated releases in a repository. Use this skill when the user mentions release-please, `googleapis/release-please-action`, release PRs, conventional commits, `release-please-config.json`, `.release-please-manifest.json`, GitHub Actions release automation, or wants to bootstrap or debug release-please in a new or existing repo.
+    source: https://github.com/aaronflorey/agent-skills
+    source_revision: branch:main
+    updated_at: '1777270127'
+    scope: project
+assets: {}
+latest_report: '{"run_id":"1777270127","config":"/home/aaron/Code/bin/kasetto.yaml","destination":"/home/aaron/Code/bin/./.agents/skills","dry_run":false,"summary":{"installed":5,"updated":0,"removed":0,"unchanged":0,"broken":0,"failed":0},"actions":[{"source":"https://github.com/aaronflorey/agent-skills","skill":"charmbracelet","status":"installed","error":null},{"source":"https://github.com/aaronflorey/agent-skills","skill":"go-cobra","status":"installed","error":null},{"source":"https://github.com/aaronflorey/agent-skills","skill":"go-viper","status":"installed","error":null},{"source":"https://github.com/aaronflorey/agent-skills","skill":"release-please","status":"installed","error":null},{"source":"https://github.com/aaronflorey/agent-skills","skill":"goreleaser","status":"installed","error":null}]}'

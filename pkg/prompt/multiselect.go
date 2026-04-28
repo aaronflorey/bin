@@ -6,9 +6,9 @@ import (
 	"os"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/aaronflorey/bin/pkg/spinner"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss/v2"
 )
 
 type MultiSelectOption struct {
@@ -89,7 +89,6 @@ func MultiSelectItems(title, hint string, items []MultiSelectItem) ([]string, er
 		model,
 		tea.WithInput(stdin),
 		tea.WithOutput(os.Stdout),
-		tea.WithAltScreen(),
 	)
 
 	finalModel, err := p.Run()
@@ -163,9 +162,11 @@ func (m multiSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m multiSelectModel) View() string {
+func (m multiSelectModel) View() tea.View {
 	if len(m.options) == 0 {
-		return ""
+		view := tea.NewView("")
+		view.AltScreen = true
+		return view
 	}
 
 	var b strings.Builder
@@ -211,5 +212,7 @@ func (m multiSelectModel) View() string {
 	b.WriteString(footerStyle.Render("Selected items will be applied."))
 	b.WriteString("\n")
 
-	return b.String()
+	view := tea.NewView(b.String())
+	view.AltScreen = true
+	return view
 }
