@@ -199,7 +199,7 @@ func openRootLogFile(path string) (io.WriteCloser, error) {
 }
 
 func newSpinnerLogger(extra io.Writer) log.Interface {
-	var writer io.Writer = spinner.Writer(os.Stderr)
+	writer := spinner.Writer(os.Stderr)
 	if extra != nil {
 		writer = io.MultiWriter(writer, extra)
 	}

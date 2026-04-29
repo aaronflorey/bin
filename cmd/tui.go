@@ -1308,9 +1308,7 @@ func wrapReleaseBody(body string, width int) []string {
 		}
 
 		wrapped := wrapText(sanitizeMarkdownLine(trimmed), width)
-		for _, line := range wrapped {
-			lines = append(lines, line)
-		}
+		lines = append(lines, wrapped...)
 	}
 	return lines
 }
@@ -1371,26 +1369,6 @@ func sanitizeMarkdownLine(line string) string {
 	trimmed = strings.TrimPrefix(trimmed, "* ")
 	trimmed = strings.TrimPrefix(trimmed, "+ ")
 	return strings.TrimSpace(trimmed)
-}
-
-func styleForReleaseLine(line string) lipgloss.Style {
-	clean := strings.ToLower(sanitizeMarkdownLine(line))
-	if strings.HasPrefix(clean, "added") {
-		return tuiAddedStyle
-	}
-	if strings.HasPrefix(clean, "changed") {
-		return tuiChangedStyle
-	}
-	if strings.HasPrefix(clean, "fixed") {
-		return tuiFixedStyle
-	}
-	if strings.HasPrefix(clean, "improved") || strings.HasPrefix(clean, "improvement") {
-		return tuiImprovedStyle
-	}
-	if strings.HasPrefix(strings.TrimSpace(line), "#") {
-		return tuiHeadingStyle
-	}
-	return lipgloss.NewStyle()
 }
 
 func renderReleaseHeading(line string) string {

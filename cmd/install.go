@@ -171,10 +171,8 @@ func (root *installCmd) installTarget(cmd *cobra.Command, target installTarget) 
 			logSystemPackageSelected(resolved.fetchOpts.PackageType, target.path)
 		}
 
-		installerMode := existing.InstallMode
 		if resolved.fetchOpts.SystemPackage {
-			installerMode = installModeSystemPackage
-			strategy = lifecycleForMode(installerMode)
+			strategy = lifecycleForMode(installModeSystemPackage)
 		}
 
 		res, err := strategy.install(InstallOpts{
