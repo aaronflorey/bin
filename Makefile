@@ -1,4 +1,4 @@
-.PHONY: help build verify download coverage
+.PHONY: help build verify download coverage hooks
 
 NO_COLOR=\033[0m
 GREEN=\033[32;01m
@@ -28,3 +28,6 @@ download: ## Download dependencies
 verify: download ## Code verification
 	gofmt -w -s ./.
 	golangci-lint run
+
+hooks: ## Install git hooks via lefthook
+	lefthook install
