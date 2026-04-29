@@ -46,6 +46,7 @@ func (c *codeberg) Fetch(opts *FetchOpts) (*File, error) {
 	if err != nil {
 		return nil, err
 	}
+	log.Debugf("Loaded Codeberg release %q for %s/%s with %d attachments", release.TagName, c.owner, c.repo, len(release.Attachments))
 
 	candidates := []*assets.Asset{}
 	checksumAssets := []checksumAsset{}
@@ -64,10 +65,13 @@ func (c *codeberg) Fetch(opts *FetchOpts) (*File, error) {
 	})
 
 	autoSelect := f.ParseAutoSelection(opts.AutoSelect)
+	log.Debugf("Filtering %d Codeberg assets for %s/%s (autoSelect=%q)", len(candidates), c.owner, c.repo, autoSelect)
 	gf, err := f.FilterAssets(c.repo, candidates, autoSelect)
 	if err != nil {
+		log.WithError(err).Debugf("Codeberg asset filtering failed for %s/%s", c.owner, c.repo)
 		return nil, err
 	}
+	log.Debugf("Selected Codeberg asset %q from %s/%s", gf.Name, c.owner, c.repo)
 
 	gf.ExtraHeaders = map[string]string{"Accept": "application/octet-stream"}
 	if c.token != "" {
@@ -76,6 +80,7 @@ func (c *codeberg) Fetch(opts *FetchOpts) (*File, error) {
 
 	outFile, err := f.ProcessURL(gf)
 	if err != nil {
+		log.WithError(err).Debugf("Codeberg asset processing failed for %s/%s asset %q", c.owner, c.repo, gf.Name)
 		return nil, err
 	}
 
@@ -83,6 +88,7 @@ func (c *codeberg) Fetch(opts *FetchOpts) (*File, error) {
 	if outFile.Name == gf.Name {
 		expectedSHA, err = expectedSHA256ForAsset(outFile.Name, checksumAssets, gf.ExtraHeaders)
 		if err != nil {
+			log.WithError(err).Debugf("Codeberg checksum lookup failed for %s/%s asset %q", c.owner, c.repo, outFile.Name)
 			return nil, err
 		}
 	}

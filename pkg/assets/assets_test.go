@@ -688,6 +688,21 @@ func TestLooksLikeArchiveJunk(t *testing.T) {
 			out:  true,
 		},
 		{
+			name: "top level completions directory",
+			in:   "completions/tool.bash",
+			out:  true,
+		},
+		{
+			name: "compressed manpage",
+			in:   "tool-1.0/manpages/tool.1.gz",
+			out:  true,
+		},
+		{
+			name: "top level manpages directory",
+			in:   "manpages/tool.1.gz",
+			out:  true,
+		},
+		{
 			name: "complete directory",
 			in:   "tool-1.0/complete/tool.bash",
 			out:  true,
@@ -738,6 +753,7 @@ func TestFilterArchiveAssetsComplexLayout(t *testing.T) {
 		{Name: "mytool-v1.0.0-aarch64-apple-darwin/autocomplete/_mytool.ps1"},
 		{Name: "mytool-v1.0.0-aarch64-apple-darwin/autocomplete/mytool.bash"},
 		{Name: "mytool-v1.0.0-aarch64-apple-darwin/autocomplete/mytool.fish"},
+		{Name: "mytool-v1.0.0-aarch64-apple-darwin/manpages/mytool.1.gz"},
 		{Name: "mytool-v1.0.0-aarch64-apple-darwin/mytool"},
 		{Name: "mytool-v1.0.0-aarch64-apple-darwin/mytool.1"},
 	}
@@ -842,6 +858,93 @@ func TestProcessTarMatchesByBasename(t *testing.T) {
 	}
 	if result.Name != "tool" {
 		t.Fatalf("expected file name 'tool', got %q", result.Name)
+	}
+}
+
+func TestProcessTarIgnoresCompressedManpages(t *testing.T) {
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	files := map[string]string{
+		"LICENSE":                    "license text",
+		"README.md":                  "readme text",
+		"completions/infisical.bash": "completion",
+		"completions/infisical.fish": "completion",
+		"completions/infisical.zsh":  "completion",
+		"manpages/infisical.1.gz":    "manpage",
+		"infisical":                  "binary content",
+	}
+	for name, content := range files {
+		hdr := &tar.Header{Name: name, Mode: 0755, Size: int64(len(content))}
+		if err := tw.WriteHeader(hdr); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write([]byte(content)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	f := NewFilter(&FilterOpts{})
+	result, err := f.processTar("cli", &buf, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Name != "infisical" {
+		t.Fatalf("expected file name 'infisical', got %q", result.Name)
+	}
+	if result.PackagePath != "infisical" {
+		t.Fatalf("expected package path 'infisical', got %q", result.PackagePath)
+	}
+}
+
+func TestProcessTarPrefersExecutableWhenRepoNameDiffers(t *testing.T) {
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	files := map[string]string{
+		"infisical":  "binary content",
+		"install.sh": "#!/bin/sh\nexit 0\n",
+	}
+	for name, content := range files {
+		hdr := &tar.Header{Name: name, Mode: 0755, Size: int64(len(content))}
+		if err := tw.WriteHeader(hdr); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write([]byte(content)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	f := NewFilter(&FilterOpts{})
+	result, err := f.processTar("cli", &buf, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Name != "infisical" {
+		t.Fatalf("expected file name 'infisical', got %q", result.Name)
+	}
+	if result.PackagePath != "infisical" {
+		t.Fatalf("expected package path 'infisical', got %q", result.PackagePath)
+	}
+}
+
+func TestPreferArchiveExecutableCandidates(t *testing.T) {
+	candidates := preferArchiveExecutableCandidates([]*Asset{
+		{Name: "bin/tool"},
+		{Name: "tool.exe"},
+		{Name: "tool"},
+		{Name: "scripts/install.sh"},
+	})
+
+	if len(candidates) != 2 {
+		t.Fatalf("expected 2 preferred archive candidates, got %d", len(candidates))
+	}
+	if candidates[0].Name != "tool.exe" || candidates[1].Name != "tool" {
+		t.Fatalf("unexpected preferred archive candidates: %+v", candidates)
 	}
 }
 

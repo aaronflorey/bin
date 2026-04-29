@@ -72,8 +72,10 @@ var (
 	}
 
 	archiveJunkDirs = []string{
-		"/autocomplete/", "/completions/", "/complete/", "/contrib/",
+		"/autocomplete/", "/completions/", "/complete/", "/contrib/", "/man/", "/manpages/",
 	}
+
+	compressedArchiveSuffixes = []string{".gz", ".xz", ".bz2", ".zst"}
 )
 
 type Asset struct {
@@ -1037,7 +1039,7 @@ func (f *Filter) processTar(name string, r io.Reader, autoSelect string) (*final
 		as = append(as, &Asset{Name: f, URL: ""})
 	}
 	as = filterArchiveAssets(as)
-	choice, err := f.FilterAssets(name, as, autoSelect)
+	choice, err := f.selectArchiveAsset(name, as, autoSelect)
 	if err != nil {
 		return nil, err
 	}
@@ -1137,7 +1139,7 @@ func (f *Filter) processZip(name string, r io.Reader, autoSelect string) (*final
 		as = append(as, &Asset{Name: f, URL: ""})
 	}
 	as = filterArchiveAssets(as)
-	choice, err := f.FilterAssets(name, as, autoSelect)
+	choice, err := f.selectArchiveAsset(name, as, autoSelect)
 	if err != nil {
 		return nil, err
 	}
@@ -1189,6 +1191,71 @@ func isSupportedExt(filename string) bool {
 	}
 
 	return true
+}
+
+func (f *Filter) selectArchiveAsset(repoName string, as []*Asset, autoSelect string) (*FilteredAsset, error) {
+	if autoSelect != "" || len(as) <= 1 {
+		return f.FilterAssets(repoName, as, autoSelect)
+	}
+
+	narrowed := preferArchiveExecutableCandidates(as)
+	if len(narrowed) == 1 {
+		log.Debugf("Selected archive entry %s before repo-name scoring", narrowed[0].Name)
+		return &FilteredAsset{RepoName: repoName, Name: narrowed[0].Name, DisplayName: narrowed[0].DisplayName, URL: narrowed[0].URL}, nil
+	}
+
+	return f.FilterAssets(repoName, narrowed, autoSelect)
+}
+
+func preferArchiveExecutableCandidates(as []*Asset) []*Asset {
+	if len(as) <= 1 {
+		return as
+	}
+
+	bestDepth := archiveEntryDepth(as[0].Name)
+	for _, a := range as[1:] {
+		if depth := archiveEntryDepth(a.Name); depth < bestDepth {
+			bestDepth = depth
+		}
+	}
+
+	shallowest := make([]*Asset, 0, len(as))
+	for _, a := range as {
+		if archiveEntryDepth(a.Name) == bestDepth {
+			shallowest = append(shallowest, a)
+		}
+	}
+	if len(shallowest) == 1 {
+		return shallowest
+	}
+
+	executables := make([]*Asset, 0, len(shallowest))
+	for _, a := range shallowest {
+		if isArchiveExecutableCandidate(a.Name) {
+			executables = append(executables, a)
+		}
+	}
+	if len(executables) > 0 {
+		return executables
+	}
+
+	return shallowest
+}
+
+func archiveEntryDepth(name string) int {
+	normalized := strings.Trim(strings.ReplaceAll(name, "\\", "/"), "/")
+	if normalized == "" {
+		return 0
+	}
+
+	return strings.Count(normalized, "/")
+}
+
+func isArchiveExecutableCandidate(name string) bool {
+	base := strings.ToLower(path.Base(strings.ReplaceAll(name, "\\", "/")))
+	ext := path.Ext(base)
+
+	return ext == "" || ext == ".exe" || ext == ".appimage"
 }
 
 // filterAssetsBy removes assets matching the skip predicate, falling back to
@@ -1326,9 +1393,10 @@ func looksLikePackageArtifact(name string) bool {
 
 func looksLikeArchiveJunk(name string) bool {
 	normalized := strings.ToLower(strings.ReplaceAll(name, "\\", "/"))
+	normalizedWithRoot := "/" + strings.TrimPrefix(normalized, "/")
 	base := path.Base(normalized)
 
-	if bstrings.ContainsAny(normalized, archiveJunkDirs) {
+	if bstrings.ContainsAny(normalizedWithRoot, archiveJunkDirs) {
 		return true
 	}
 
@@ -1337,13 +1405,32 @@ func looksLikeArchiveJunk(name string) bool {
 	}
 
 	ext := path.Ext(base)
+	stem := strings.TrimSuffix(base, ext)
+	if isCompressedArchiveSuffix(ext) {
+		innerExt := path.Ext(stem)
+		if looksLikeManPageExt(innerExt) {
+			return true
+		}
+		ext = innerExt
+		stem = strings.TrimSuffix(stem, innerExt)
+	}
+
 	if looksLikeManPageExt(ext) {
 		return true
 	}
 
-	stem := strings.TrimSuffix(base, ext)
 	for _, junk := range archiveJunkBaseNames {
 		if stem == junk || strings.HasPrefix(stem, junk+"-") || strings.HasPrefix(stem, junk+"_") {
+			return true
+		}
+	}
+
+	return false
+}
+
+func isCompressedArchiveSuffix(ext string) bool {
+	for _, suffix := range compressedArchiveSuffixes {
+		if ext == suffix {
 			return true
 		}
 	}

@@ -53,6 +53,7 @@ func (g *gitLab) Fetch(opts *FetchOpts) (*File, error) {
 	if err != nil {
 		return nil, err
 	}
+	log.Debugf("Loaded GitLab release %q for %s/%s", release.TagName, g.owner, g.repo)
 
 	candidates := []*assets.Asset{}
 	checksumAssets := []checksumAsset{}
@@ -156,6 +157,7 @@ func (g *gitLab) Fetch(opts *FetchOpts) (*File, error) {
 	if err := goldast.Walk(node, walker); err != nil {
 		return nil, err
 	}
+	log.Debugf("Collected %d GitLab candidate assets for %s/%s", len(candidates), g.owner, g.repo)
 
 	f := assets.NewFilter(&assets.FilterOpts{
 		SkipScoring:    opts.All,
@@ -167,10 +169,13 @@ func (g *gitLab) Fetch(opts *FetchOpts) (*File, error) {
 	})
 
 	autoSelect := f.ParseAutoSelection(opts.AutoSelect)
+	log.Debugf("Filtering %d GitLab assets for %s/%s (autoSelect=%q)", len(candidates), g.owner, g.repo, autoSelect)
 	gf, err := f.FilterAssets(g.repo, candidates, autoSelect)
 	if err != nil {
+		log.WithError(err).Debugf("GitLab asset filtering failed for %s/%s", g.owner, g.repo)
 		return nil, err
 	}
+	log.Debugf("Selected GitLab asset %q from %s/%s", gf.Name, g.owner, g.repo)
 
 	if g.token != "" {
 		if gf.ExtraHeaders == nil {
@@ -181,6 +186,7 @@ func (g *gitLab) Fetch(opts *FetchOpts) (*File, error) {
 
 	outFile, err := f.ProcessURL(gf)
 	if err != nil {
+		log.WithError(err).Debugf("GitLab asset processing failed for %s/%s asset %q", g.owner, g.repo, gf.Name)
 		return nil, err
 	}
 
@@ -188,6 +194,7 @@ func (g *gitLab) Fetch(opts *FetchOpts) (*File, error) {
 	if outFile.Name == gf.Name {
 		expectedSHA, err = expectedSHA256ForAsset(outFile.Name, checksumAssets, gf.ExtraHeaders)
 		if err != nil {
+			log.WithError(err).Debugf("GitLab checksum lookup failed for %s/%s asset %q", g.owner, g.repo, outFile.Name)
 			return nil, err
 		}
 	}

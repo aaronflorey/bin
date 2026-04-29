@@ -103,6 +103,8 @@ func newInstallCmd() *installCmd {
 }
 
 func (root *installCmd) installTarget(cmd *cobra.Command, target installTarget) error {
+	log.Debugf("Preparing install target url=%q path=%q", target.url, target.path)
+
 	resolved, err := resolveFetchRequest(target.url, root.opts.provider, providers.FetchOpts{
 		All:            root.opts.all,
 		AutoSelect:     root.opts.autoSelect,
@@ -113,6 +115,7 @@ func (root *installCmd) installTarget(cmd *cobra.Command, target installTarget) 
 	if err != nil {
 		return err
 	}
+	log.Debugf("Resolved install request %q to %q (requested version=%q, explicit=%t)", target.url, resolved.url, resolved.requestedVersion, resolved.hasExplicitVersion)
 
 	pinVersion := root.opts.pin
 	if resolved.hasExplicitVersion && !pinVersion {
@@ -147,6 +150,7 @@ func (root *installCmd) installTarget(cmd *cobra.Command, target installTarget) 
 	} else if !strings.Contains(resolvedPath, "/") {
 		resolvedPath = filepath.Join(defaultPath, resolvedPath)
 	}
+	log.Debugf("Install target %q resolved to path %q (system-package=%t)", resolved.url, resolvedPath, root.opts.systemPackage)
 
 	var minAgeDays *int
 	if cmd.Flags().Changed("min-age-days") {
@@ -155,6 +159,7 @@ func (root *installCmd) installTarget(cmd *cobra.Command, target installTarget) 
 
 	existing := existingBinaryForInstall(cfg.Bins, resolved.url, root.opts.provider, resolvedPath)
 	if existing != nil {
+		log.Debugf("Found existing managed binary for %q at %s", resolved.url, existing.Path)
 		log.Infof("Binary already exists in config (%s). Updating it instead", existing.Path)
 		strategy := lifecycleForMode(existing.InstallMode)
 		if err := strategy.applyStoredFetch(existing, &resolved.fetchOpts); err != nil {
@@ -185,6 +190,7 @@ func (root *installCmd) installTarget(cmd *cobra.Command, target installTarget) 
 			AllowProviderFallback: root.opts.provider == "" && existing.Provider != "",
 		})
 		if err != nil {
+			log.WithError(err).Debugf("Failed to update existing install for %q", resolved.url)
 			return err
 		}
 
@@ -208,6 +214,7 @@ func (root *installCmd) installTarget(cmd *cobra.Command, target installTarget) 
 		if !strategy.resolvePath(nil) {
 			attemptPath = ""
 		}
+		log.Debugf("Attempting %q install for %q (path=%q, provider=%q, packageType=%q)", mode, resolved.url, attemptPath, root.opts.provider, attemptFetchOpts.PackageType)
 
 		res, err := strategy.install(InstallOpts{
 			URL:                   resolved.url,
@@ -224,6 +231,7 @@ func (root *installCmd) installTarget(cmd *cobra.Command, target installTarget) 
 			log.Infof("Done installing %s %s", res.Name, res.Version)
 			return nil
 		}
+		log.WithError(err).Debugf("Install mode %q failed for %q", mode, resolved.url)
 		lastErr = err
 		if idx == len(modes)-1 || !shouldFallbackInstallMode(err) {
 			return err
