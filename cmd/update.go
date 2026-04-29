@@ -19,10 +19,12 @@ import (
 )
 
 type updateCmd struct {
-	cmd         *cobra.Command
-	opts        updateOpts
-	newProvider providerFactory
-	selectItems updateSelectionFunc
+	cmd           *cobra.Command
+	opts          updateOpts
+	newProvider   providerFactory
+	selectItems   updateSelectionFunc
+	confirm       func(string) error
+	isInteractive func() bool
 }
 
 type updateSelectionFunc func([]availableUpdate) ([]availableUpdate, error)
@@ -39,7 +41,12 @@ type updateOpts struct {
 type updateInfo struct{ version, url string }
 
 func newUpdateCmd() *updateCmd {
-	root := &updateCmd{newProvider: providers.New, selectItems: selectUpdatesForInteractiveSession}
+	root := &updateCmd{
+		newProvider:   providers.New,
+		selectItems:   selectUpdatesForInteractiveSession,
+		confirm:       prompt.Confirm,
+		isInteractive: prompt.IsInteractive,
+	}
 	// nolint: dupl
 	cmd := &cobra.Command{
 		Use:           "update [binary_path]",
@@ -100,12 +107,16 @@ func newUpdateCmd() *updateCmd {
 			}
 
 			if len(updates) > 0 && !root.opts.yesToUpdate {
+				if !root.isInteractive() {
+					return fmt.Errorf("update requires --yes or --dry-run in non-interactive mode")
+				}
+
 				for _, err := range updateFailures {
 					log.Warnf("%v", err)
 				}
 				updateFailures = map[*config.Binary]error{}
 
-				err := prompt.Confirm("Do you want to continue?")
+				err := root.confirm("Do you want to continue?")
 				if err != nil {
 					return err
 				}

@@ -27,6 +27,7 @@ var ErrInvalidConfigKey = errors.New("invalid config key")
 var (
 	osStat    = os.Stat
 	globFiles = filepath.Glob
+	cfgMu     sync.Mutex
 
 	linuxLibCOnce   sync.Once
 	linuxLibCCached []string
@@ -70,6 +71,9 @@ type RunHook struct {
 
 // GetHooks returns all configured hooks matching the given HookType.
 func GetHooks(t HookType) []RunHook {
+	cfgMu.Lock()
+	defer cfgMu.Unlock()
+
 	hooks := make([]RunHook, 0)
 	for _, hook := range cfg.Hooks {
 		if hook.Type == t {
@@ -121,6 +125,9 @@ type Binary struct {
 }
 
 func CheckAndLoad() error {
+	cfgMu.Lock()
+	defer cfgMu.Unlock()
+
 	configPath, err := getConfigPath()
 	if err != nil {
 		return err
@@ -139,6 +146,8 @@ func CheckAndLoad() error {
 	}
 
 	defer f.Close()
+
+	cfg = config{}
 
 	if err := json.NewDecoder(f).Decode(&cfg); err != nil {
 		if err == io.EOF {
@@ -178,7 +187,7 @@ func CheckAndLoad() error {
 			}
 		}
 
-		if err := write(); err != nil {
+		if err := writeLocked(); err != nil {
 			return err
 		}
 
@@ -207,6 +216,9 @@ func ValidKeys() []string {
 }
 
 func Set(key, value string) error {
+	cfgMu.Lock()
+	defer cfgMu.Unlock()
+
 	switch key {
 	case "default_path":
 		cfg.DefaultPath = value
@@ -220,7 +232,7 @@ func Set(key, value string) error {
 		return fmt.Errorf("%w: %s", ErrInvalidConfigKey, key)
 	}
 
-	return write()
+	return writeLocked()
 }
 
 // ForceInstallationDir returns the directory specified by the BIN_EXE_DIR
@@ -286,9 +298,12 @@ func checkDirWritable(dir string) error {
 // UpsertBinary adds or updates an existing
 // binary resource in the config
 func UpsertBinary(c *Binary) error {
+	cfgMu.Lock()
+	defer cfgMu.Unlock()
+
 	if c != nil {
 		cfg.Bins[c.Path] = c
-		err := write()
+		err := writeLocked()
 		if err != nil {
 			return err
 		}
@@ -300,41 +315,75 @@ func UpsertBinary(c *Binary) error {
 // UpsertBinaries adds or updates multiple binary resources
 // in the config, writing to disk once.
 func UpsertBinaries(binaries []*Binary) error {
+	cfgMu.Lock()
+	defer cfgMu.Unlock()
+
 	for _, c := range binaries {
 		if c != nil {
 			cfg.Bins[c.Path] = c
 		}
 	}
-	return write()
+	return writeLocked()
 }
 
 // RemoveBinaries removes the specified paths
 // from bin configuration. It doesn't care about the order
 func RemoveBinaries(paths []string) error {
+	cfgMu.Lock()
+	defer cfgMu.Unlock()
+
 	for _, p := range paths {
 		delete(cfg.Bins, p)
 	}
 
-	return write()
+	return writeLocked()
 }
 
 func write() error {
+	cfgMu.Lock()
+	defer cfgMu.Unlock()
+
+	return writeLocked()
+}
+
+func writeLocked() error {
 	configPath, err := getConfigPath()
 	if err != nil {
 		return err
 	}
 
-	f, err := os.OpenFile(configPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0664)
-	if err != nil {
+	configDir := filepath.Dir(configPath)
+	if err := os.MkdirAll(configDir, 0755); err != nil {
 		return err
 	}
 
-	defer f.Close()
+	f, err := os.CreateTemp(configDir, filepath.Base(configPath)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tempPath := f.Name()
+
+	defer func() {
+		_ = f.Close()
+		_ = os.Remove(tempPath)
+	}()
 
 	decoder := json.NewEncoder(f)
 	decoder.SetIndent("", "    ")
 	err = decoder.Encode(cfg)
 	if err != nil {
+		return err
+	}
+
+	if err := f.Chmod(0664); err != nil {
+		return err
+	}
+
+	if err := f.Close(); err != nil {
+		return err
+	}
+
+	if err := os.Rename(tempPath, configPath); err != nil {
 		return err
 	}
 
@@ -417,7 +466,7 @@ func getConfigPath() (string, error) {
 
 	c := os.Getenv("BIN_CONFIG")
 	if len(c) > 0 {
-		if _, err := os.Stat(c); !os.IsNotExist(err) {
+		if _, err := os.Stat(c); err == nil || os.IsNotExist(err) {
 			return c, nil
 		} else {
 			return "", err
