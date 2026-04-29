@@ -54,6 +54,7 @@ func (g *gitHub) Fetch(opts *FetchOpts) (*File, error) {
 	if err != nil {
 		return nil, err
 	}
+	log.Debugf("Loaded GitHub release %q for %s/%s with %d assets", release.GetTagName(), g.owner, g.repo, len(release.Assets))
 
 	candidates := []*assets.Asset{}
 	checksumAssets := []checksumAsset{}
@@ -74,10 +75,13 @@ func (g *gitHub) Fetch(opts *FetchOpts) (*File, error) {
 	})
 
 	autoSelect := f.ParseAutoSelection(opts.AutoSelect)
+	log.Debugf("Filtering %d GitHub assets for %s/%s (autoSelect=%q)", len(candidates), g.owner, g.repo, autoSelect)
 	gf, err := f.FilterAssets(g.repo, candidates, autoSelect)
 	if err != nil {
+		log.WithError(err).Debugf("GitHub asset filtering failed for %s/%s", g.owner, g.repo)
 		return nil, err
 	}
+	log.Debugf("Selected GitHub asset %q from %s/%s", gf.Name, g.owner, g.repo)
 
 	gf.ExtraHeaders = map[string]string{"Accept": "application/octet-stream"}
 	if g.token != "" {
@@ -86,6 +90,7 @@ func (g *gitHub) Fetch(opts *FetchOpts) (*File, error) {
 
 	outFile, err := f.ProcessURL(gf)
 	if err != nil {
+		log.WithError(err).Debugf("GitHub asset processing failed for %s/%s asset %q", g.owner, g.repo, gf.Name)
 		return nil, err
 	}
 
@@ -93,6 +98,7 @@ func (g *gitHub) Fetch(opts *FetchOpts) (*File, error) {
 	if outFile.Name == gf.Name {
 		expectedSHA, err = expectedSHA256ForAsset(outFile.Name, checksumAssets, gf.ExtraHeaders)
 		if err != nil {
+			log.WithError(err).Debugf("GitHub checksum lookup failed for %s/%s asset %q", g.owner, g.repo, outFile.Name)
 			return nil, err
 		}
 	}

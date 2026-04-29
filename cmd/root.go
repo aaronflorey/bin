@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -33,6 +34,12 @@ func (cmd *rootCmd) Execute(args []string) {
 	previousLogger := log.Log
 	defer func() {
 		log.Log = previousLogger
+	}()
+	defer func() {
+		if cmd.logWriter != nil {
+			_ = cmd.logWriter.Close()
+			cmd.logWriter = nil
+		}
 	}()
 
 	defer spinner.Stop()
@@ -79,11 +86,14 @@ func (cmd *rootCmd) Execute(args []string) {
 }
 
 type rootCmd struct {
-	cmd   *cobra.Command
-	debug bool
-	exit  func(int)
-	args  []string
+	cmd     *cobra.Command
+	logFile string
+	verbose bool
+	exit    func(int)
+	args    []string
 
+	logWriter       io.WriteCloser
+	openLogFile     func(string) (io.WriteCloser, error)
 	shouldLaunchTUI func([]string) bool
 	launchTUI       func() error
 	loadConfig      func() error
@@ -92,6 +102,7 @@ type rootCmd struct {
 func newRootCmd(version string, exit func(int)) *rootCmd {
 	root := &rootCmd{
 		exit:            exit,
+		openLogFile:     openRootLogFile,
 		shouldLaunchTUI: shouldLaunchZeroArgTUI,
 		launchTUI:       runTUI,
 		loadConfig:      config.CheckAndLoad,
@@ -102,33 +113,43 @@ func newRootCmd(version string, exit func(int)) *rootCmd {
 		Version:       version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		PersistentPreRun: func(cmd *cobra.Command, args []string) {
-			if cmd.Name() == "version" {
-				return
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			if err := root.configureLogger(); err != nil {
+				return err
 			}
 
-			if root.debug {
+			if root.verbose {
 				log.SetLevel(log.DebugLevel)
-				log.Debugf("debug logs enabled, version: %s\n", version)
+				log.Debugf("verbose logs enabled, version: %s", version)
+			}
+
+			if cmd.Name() == "version" {
+				return nil
 			}
 
 			// check and load config after handlers are configured
 			err := config.CheckAndLoad()
 			if err != nil {
-				log.Fatalf("Error loading config file %v", err)
+				return fmt.Errorf("error loading config file: %w", err)
 			}
 
 			spinnerCmd := resolveSpinnerCommand(cmd, root.args)
-			if shouldShowSpinner(spinnerCmd) {
+			if shouldShowSpinner(spinnerCmd) && !root.verbose {
 				cmd.SetOut(spinner.Writer(cmd.OutOrStdout()))
 				cmd.SetErr(spinner.Writer(cmd.ErrOrStderr()))
-				log.Log = newSpinnerLogger()
+				log.Log = newSpinnerLogger(root.logWriter)
 				spinner.Start("")
+			} else if shouldShowSpinner(spinnerCmd) {
+				log.Debugf("Skipping spinner for %s because verbose logging is enabled", spinnerCmd.Name())
 			}
+
+			return nil
 		},
 	}
 
-	cmd.PersistentFlags().BoolVar(&root.debug, "debug", false, "Enable debug mode")
+	cmd.PersistentFlags().StringVar(&root.logFile, "log-file", "", "Write logs to the specified file")
+	cmd.PersistentFlags().BoolVar(&root.verbose, "verbose", false, "Enable verbose logging")
+	cmd.PersistentFlags().BoolVar(&root.verbose, "debug", false, "Enable verbose logging")
 	cmd.AddCommand(
 		newInstallCmd().cmd,
 		newRunCmd().cmd,
@@ -151,16 +172,56 @@ func newRootCmd(version string, exit func(int)) *rootCmd {
 	return root
 }
 
-func newSpinnerLogger() log.Interface {
-	logger := log.New(spinner.Writer(os.Stderr))
+func (cmd *rootCmd) configureLogger() error {
+	if cmd.logWriter != nil || strings.TrimSpace(cmd.logFile) == "" {
+		return nil
+	}
 
-	if previous, ok := log.Log.(*log.Logger); ok {
-		logger.Level = previous.Level
-		logger.Padding = previous.Padding
+	writer, err := cmd.openLogFile(cmd.logFile)
+	if err != nil {
+		return err
+	}
+
+	cmd.logWriter = writer
+	logger := log.New(writer)
+	copyLoggerSettings(logger, log.Log)
+	log.Log = logger
+	return nil
+}
+
+func openRootLogFile(path string) (io.WriteCloser, error) {
+	cleanPath := strings.TrimSpace(path)
+	if cleanPath == "" {
+		return nil, fmt.Errorf("--log-file requires a path")
+	}
+
+	return os.OpenFile(cleanPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+}
+
+func newSpinnerLogger(extra io.Writer) log.Interface {
+	var writer io.Writer = spinner.Writer(os.Stderr)
+	if extra != nil {
+		writer = io.MultiWriter(writer, extra)
+	}
+
+	logger := log.New(writer)
+
+	copyLoggerSettings(logger, log.Log)
+
+	if extra != nil {
+		logger.Writer = colorprofile.NewWriter(io.MultiWriter(spinner.Writer(os.Stderr), extra), os.Environ())
+		return logger
 	}
 
 	logger.Writer = colorprofile.NewWriter(spinner.Writer(os.Stderr), os.Environ())
 	return logger
+}
+
+func copyLoggerSettings(dst *log.Logger, src log.Interface) {
+	if previous, ok := src.(*log.Logger); ok {
+		dst.Level = previous.Level
+		dst.Padding = previous.Padding
+	}
 }
 
 func resolveSpinnerCommand(cmd *cobra.Command, args []string) *cobra.Command {

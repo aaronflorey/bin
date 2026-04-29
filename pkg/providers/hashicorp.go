@@ -102,6 +102,7 @@ func (g *hashiCorp) Fetch(opts *FetchOpts) (*File, error) {
 	if err != nil {
 		return nil, err
 	}
+	log.Debugf("Loaded HashiCorp release %q for %s with %d builds", release.Version, g.repo, len(release.Builds))
 
 	candidates := []*assets.Asset{}
 	checksumAssets := []checksumAsset{}
@@ -119,13 +120,17 @@ func (g *hashiCorp) Fetch(opts *FetchOpts) (*File, error) {
 		NonInteractive: opts.NonInteractive,
 	})
 	autoSelect := f.ParseAutoSelection(opts.AutoSelect)
+	log.Debugf("Filtering %d HashiCorp assets for %s (autoSelect=%q)", len(candidates), g.repo, autoSelect)
 	gf, err := f.FilterAssets(g.repo, candidates, autoSelect)
 	if err != nil {
+		log.WithError(err).Debugf("HashiCorp asset filtering failed for %s", g.repo)
 		return nil, err
 	}
+	log.Debugf("Selected HashiCorp asset %q for %s", gf.Name, g.repo)
 
 	outFile, err := f.ProcessURL(gf)
 	if err != nil {
+		log.WithError(err).Debugf("HashiCorp asset processing failed for %s asset %q", g.repo, gf.Name)
 		return nil, err
 	}
 
@@ -133,6 +138,7 @@ func (g *hashiCorp) Fetch(opts *FetchOpts) (*File, error) {
 	if outFile.Name == gf.Name {
 		expectedSHA, err = expectedSHA256ForAsset(outFile.Name, checksumAssets, gf.ExtraHeaders)
 		if err != nil {
+			log.WithError(err).Debugf("HashiCorp checksum lookup failed for %s asset %q", g.repo, outFile.Name)
 			return nil, err
 		}
 	}

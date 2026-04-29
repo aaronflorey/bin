@@ -93,10 +93,13 @@ type InstallResult struct {
 // installBinary fetches a binary from a provider, saves it to disk,
 // and updates the config.
 func installBinary(opts InstallOpts) (*InstallResult, error) {
+	log.Debugf("Installing %q with provider=%q path=%q resolvePath=%t", opts.URL, opts.Provider, opts.Path, opts.ResolvePath)
+
 	p, pResult, err := fetchBinary(installProviderFactory, opts.URL, opts.Provider, opts.FetchOpts, opts.AllowProviderFallback)
 	if err != nil {
 		return nil, err
 	}
+	log.Debugf("Fetched %s version %s from provider %q", pResult.Name, pResult.Version, p.GetID())
 
 	existing, _ := existingConfigBinary(opts)
 
@@ -119,6 +122,7 @@ func installBinary(opts InstallOpts) (*InstallResult, error) {
 			return nil, err
 		}
 	}
+	log.Debugf("Resolved final install path to %q (overwrite=%t)", resolvedPath, overwrite)
 
 	hash, err := saveToDisk(pResult, resolvedPath, overwrite)
 	if err != nil {
@@ -158,6 +162,7 @@ func installBinary(opts InstallOpts) (*InstallResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	log.Debugf("Saved installed binary config for %q at %s", pResult.Name, configPath)
 
 	warnDuplicateManagedHash(configPath, hashString)
 
@@ -174,11 +179,13 @@ func fetchBinary(newProvider providerFactory, url, forcedProvider string, fetchO
 		return nil, nil, err
 	}
 	log.Debugf("Using provider '%s' for '%s'", p.GetID(), url)
+	log.Debugf("Fetch options for %q: version=%q all=%t system-package=%t package-type=%q package-name=%q package-path=%q", url, fetchOpts.Version, fetchOpts.All, fetchOpts.SystemPackage, fetchOpts.PackageType, fetchOpts.PackageName, fetchOpts.PackagePath)
 
 	pResult, err := p.Fetch(&fetchOpts)
 	if err == nil {
 		return p, pResult, nil
 	}
+	log.WithError(err).Debugf("Provider '%s' fetch failed for '%s'", p.GetID(), url)
 
 	if !allowProviderFallback || strings.TrimSpace(forcedProvider) == "" || !shouldFallbackProviderFetch(err) {
 		return nil, nil, err
@@ -193,6 +200,7 @@ func fetchBinary(newProvider providerFactory, url, forcedProvider string, fetchO
 
 	fallbackResult, fallbackFetchErr := fallbackProvider.Fetch(&fetchOpts)
 	if fallbackFetchErr != nil {
+		log.WithError(fallbackFetchErr).Debugf("Fallback provider '%s' fetch failed for '%s'", fallbackProvider.GetID(), url)
 		return nil, nil, err
 	}
 
