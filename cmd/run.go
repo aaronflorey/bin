@@ -82,7 +82,7 @@ func newRunCmd() *runCmd {
 				}
 			}
 
-			_, file, err := fetchBinary(root.newProvider, resolved.url, root.opts.provider, resolved.fetchOpts)
+			_, file, err := fetchBinary(root.newProvider, resolved.url, root.opts.provider, resolved.fetchOpts, false)
 			if err != nil {
 				return err
 			}

@@ -2,14 +2,17 @@ package cmd
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/aaronflorey/bin/pkg/assets"
 	"github.com/aaronflorey/bin/pkg/config"
 	"github.com/aaronflorey/bin/pkg/providers"
+	"github.com/aaronflorey/bin/pkg/systempackage"
 )
 
 func TestAbsExpandedPath(t *testing.T) {
@@ -268,5 +271,17 @@ func TestResolveBinsToProcessUsesAcceptedSuggestion(t *testing.T) {
 	}
 	if _, ok := bins[path]; !ok {
 		t.Fatalf("expected resolved path %q", path)
+	}
+}
+
+func TestShouldFallbackProviderFetch(t *testing.T) {
+	if !shouldFallbackProviderFetch(fmt.Errorf("%w: nope", assets.ErrNoCompatibleFiles)) {
+		t.Fatal("expected no-compatible-files error to trigger provider fallback")
+	}
+	if !shouldFallbackProviderFetch(systempackage.NewCompatibilityError("wrong type")) {
+		t.Fatal("expected system package compatibility error to trigger provider fallback")
+	}
+	if shouldFallbackProviderFetch(errors.New("boom")) {
+		t.Fatal("did not expect generic error to trigger provider fallback")
 	}
 }

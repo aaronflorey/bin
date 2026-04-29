@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,15 +13,16 @@ import (
 	"strings"
 
 	"github.com/aaronflorey/bin/pkg/config"
-	"github.com/aaronflorey/bin/pkg/providers"
+	"github.com/aaronflorey/bin/pkg/systempackage"
 	"github.com/caarlos0/log"
 )
 
 var execCommand = exec.Command
 var lookPathCommand = exec.LookPath
+var applicationsDir = "/Applications"
 
 func installSystemPackage(opts InstallOpts) (*InstallResult, error) {
-	p, pResult, err := fetchBinary(providers.New, opts.URL, opts.Provider, opts.FetchOpts)
+	p, pResult, err := fetchBinary(installProviderFactory, opts.URL, opts.Provider, opts.FetchOpts, opts.AllowProviderFallback)
 	if err != nil {
 		return nil, err
 	}
@@ -37,18 +39,21 @@ func installSystemPackage(opts InstallOpts) (*InstallResult, error) {
 		return nil, err
 	}
 
-	pkgType, ok := detectSystemPackageType(pResult.Name)
+	pkgType, ok := systempackage.DetectType(pResult.Name)
 	if !ok {
-		return nil, fmt.Errorf("selected artifact %q is not a supported system package", pResult.Name)
+		return nil, systempackage.NewCompatibilityError("selected artifact %q is not a supported system package", pResult.Name)
 	}
-	requiredType := normalizePackageType(opts.FetchOpts.PackageType)
+	requiredType := systempackage.NormalizeType(opts.FetchOpts.PackageType)
 	if requiredType != "" && pkgType != requiredType {
-		return nil, fmt.Errorf("selected package type %q does not match required type %q", pkgType, requiredType)
+		return nil, systempackage.NewCompatibilityError("selected package type %q does not match required type %q", pkgType, requiredType)
 	}
 
-	before, err := snapshotPathCommands()
-	if err != nil {
-		return nil, err
+	var before map[string]string
+	if pkgType != "dmg" {
+		before, err = snapshotPathCommands()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	artifactPath, err := writePackageArtifactToTemp(pResult.Name, pResult.Data)
@@ -57,11 +62,17 @@ func installSystemPackage(opts InstallOpts) (*InstallResult, error) {
 	}
 	defer os.Remove(artifactPath)
 
-	if err := installPackageArtifact(pkgType, artifactPath); err != nil {
+	installedAppBundle := ""
+	if pkgType == "dmg" {
+		installedAppBundle, err = installDMGApp(artifactPath)
+		if err != nil {
+			return nil, err
+		}
+	} else if err := installPackageArtifact(pkgType, artifactPath); err != nil {
 		return nil, err
 	}
 
-	resolvedPath, trackedName, err := resolveTrackedSystemCommand(opts.FetchOpts.PackageName, before)
+	resolvedPath, trackedName, appBundle, err := resolveTrackedSystemInstall(pkgType, opts.FetchOpts.PackageName, installedAppBundle, before)
 	if err != nil {
 		return nil, err
 	}
@@ -90,6 +101,7 @@ func installSystemPackage(opts InstallOpts) (*InstallResult, error) {
 		Provider:    p.GetID(),
 		InstallMode: installModeSystemPackage,
 		PackageType: pkgType,
+		AppBundle:   appBundle,
 		PackagePath: pResult.PackagePath,
 		Pinned:      pinned,
 		MinAgeDays:  minAgeDays,
@@ -100,6 +112,27 @@ func installSystemPackage(opts InstallOpts) (*InstallResult, error) {
 	warnDuplicateManagedHash(configPath, hashString)
 
 	return &InstallResult{Name: trackedName, Version: pResult.Version, Path: configPath}, nil
+}
+
+func resolveTrackedSystemInstall(packageType, packageName, installedAppBundle string, before map[string]string) (string, string, string, error) {
+	if packageType == "dmg" {
+		bundleName, err := findInstalledAppBundleName(packageName, installedAppBundle)
+		if err != nil {
+			return "", "", "", err
+		}
+		bundlePath := filepath.Join(applicationsDir, bundleName)
+		resolvedPath, err := resolveAppBundleExecutable(bundlePath)
+		if err != nil {
+			return "", "", "", err
+		}
+		return resolvedPath, strings.TrimSuffix(bundleName, ".app"), bundleName, nil
+	}
+
+	resolvedPath, trackedName, err := resolveTrackedSystemCommand(packageName, before)
+	if err != nil {
+		return "", "", "", err
+	}
+	return resolvedPath, trackedName, "", nil
 }
 
 func writePackageArtifactToTemp(name string, src io.Reader) (string, error) {
@@ -148,6 +181,137 @@ func installPackageArtifact(packageType, packagePath string) error {
 		return fmt.Errorf("failed to install %s package: %v (%s)", packageType, err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+func installDMGApp(packagePath string) (string, error) {
+	mountPoint, err := os.MkdirTemp("", "bin-dmg-mount-*")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(mountPoint)
+
+	out, err := execCommand("hdiutil", "attach", "-nobrowse", "-readonly", "-mountpoint", mountPoint, packagePath).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("failed to mount dmg: %v (%s)", err, strings.TrimSpace(string(out)))
+	}
+	defer detachDMG(mountPoint)
+
+	bundlePath, err := findSingleAppBundle(mountPoint)
+	if err != nil {
+		return "", err
+	}
+
+	bundleName := filepath.Base(bundlePath)
+	targetPath := filepath.Join(applicationsDir, bundleName)
+	out, err = execCommand("ditto", bundlePath, targetPath).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("failed to install app bundle %s: %v (%s)", bundleName, err, strings.TrimSpace(string(out)))
+	}
+
+	if _, err := os.Stat(targetPath); err != nil {
+		return "", fmt.Errorf("app bundle %s was not installed to %s", bundleName, applicationsDir)
+	}
+
+	return bundleName, nil
+}
+
+func detachDMG(mountPoint string) {
+	out, err := execCommand("hdiutil", "detach", mountPoint).CombinedOutput()
+	if err != nil {
+		log.Warnf("failed to detach dmg at %s: %v (%s)", mountPoint, err, strings.TrimSpace(string(out)))
+	}
+}
+
+func findSingleAppBundle(root string) (string, error) {
+	var bundles []string
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
+			return nil
+		}
+		if strings.HasSuffix(strings.ToLower(d.Name()), ".app") {
+			bundles = append(bundles, path)
+			return filepath.SkipDir
+		}
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	if len(bundles) == 0 {
+		return "", fmt.Errorf("dmg did not contain an app bundle")
+	}
+	if len(bundles) > 1 {
+		return "", fmt.Errorf("dmg contained multiple app bundles (%s)", strings.Join(appBundleBaseNames(bundles), ", "))
+	}
+	return bundles[0], nil
+}
+
+func appBundleBaseNames(paths []string) []string {
+	names := make([]string, 0, len(paths))
+	for _, path := range paths {
+		names = append(names, filepath.Base(path))
+	}
+	sort.Strings(names)
+	return names
+}
+
+func findInstalledAppBundleName(expectedName, installedAppBundle string) (string, error) {
+	if installedAppBundle != "" {
+		if expectedName != "" && !strings.EqualFold(strings.TrimSuffix(installedAppBundle, ".app"), expectedName) {
+			return "", fmt.Errorf("installed app bundle %q did not match requested app name %q", strings.TrimSuffix(installedAppBundle, ".app"), expectedName)
+		}
+		return installedAppBundle, nil
+	}
+
+	if expectedName != "" {
+		bundleName := expectedName + ".app"
+		if _, err := os.Stat(filepath.Join(applicationsDir, bundleName)); err == nil {
+			return bundleName, nil
+		}
+		return "", fmt.Errorf("app bundle %q was not found in %s", expectedName+".app", applicationsDir)
+	}
+
+	return "", fmt.Errorf("missing installed app bundle metadata")
+}
+
+func resolveAppBundleExecutable(appPath string) (string, error) {
+	execDir := filepath.Join(appPath, "Contents", "MacOS")
+	entries, err := os.ReadDir(execDir)
+	if err != nil {
+		return "", fmt.Errorf("failed to inspect app executable directory %s: %w", execDir, err)
+	}
+
+	appName := strings.TrimSuffix(filepath.Base(appPath), ".app")
+	var executables []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		fullPath := filepath.Join(execDir, entry.Name())
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		if info.Mode()&0o111 == 0 {
+			continue
+		}
+		if strings.EqualFold(entry.Name(), appName) {
+			return fullPath, nil
+		}
+		executables = append(executables, fullPath)
+	}
+
+	if len(executables) == 1 {
+		return executables[0], nil
+	}
+	if len(executables) == 0 {
+		return "", fmt.Errorf("app bundle %s does not contain an executable in Contents/MacOS", filepath.Base(appPath))
+	}
+
+	return "", fmt.Errorf("app bundle %s contains multiple executables in Contents/MacOS", filepath.Base(appPath))
 }
 
 func resolveTrackedSystemCommand(commandName string, before map[string]string) (string, string, error) {
@@ -244,7 +408,7 @@ func hashExecutableFile(path string) (string, error) {
 }
 
 func uninstallSystemPackage(b *config.Binary) error {
-	packageType := normalizePackageType(b.PackageType)
+	packageType := systempackage.NormalizeType(b.PackageType)
 	if packageType == "" {
 		return fmt.Errorf("missing package type metadata for %s", b.Path)
 	}
@@ -256,6 +420,12 @@ func uninstallSystemPackage(b *config.Binary) error {
 
 	if packageID == "" {
 		return fmt.Errorf("could not determine installed package identifier for %s", b.Path)
+	}
+	if packageType == "dmg" {
+		if err := os.RemoveAll(packageID); err != nil {
+			return fmt.Errorf("failed to remove app bundle %q: %w", packageID, err)
+		}
+		return nil
 	}
 
 	var cmd *exec.Cmd
@@ -336,6 +506,11 @@ func resolveInstalledPackageID(b *config.Binary, packageType string) (string, er
 			}
 		}
 		return "", fmt.Errorf("failed to resolve flatpak app id for %s", b.Path)
+	case "dmg":
+		if b.AppBundle == "" {
+			return "", fmt.Errorf("missing app bundle metadata for %s", b.Path)
+		}
+		return filepath.Join(applicationsDir, b.AppBundle), nil
 	default:
 		return "", fmt.Errorf("unsupported package type %q", packageType)
 	}
@@ -349,32 +524,6 @@ func firstLine(value string) string {
 		}
 	}
 	return ""
-}
-
-func detectSystemPackageType(name string) (string, bool) {
-	lower := strings.ToLower(name)
-
-	switch {
-	case strings.HasSuffix(lower, ".flatpak"), strings.HasSuffix(lower, ".flatpack"):
-		return "flatpak", true
-	case strings.HasSuffix(lower, ".deb"):
-		return "deb", true
-	case strings.HasSuffix(lower, ".rpm"):
-		return "rpm", true
-	case strings.HasSuffix(lower, ".apk"):
-		return "apk", true
-	default:
-		return "", false
-	}
-}
-
-func normalizePackageType(packageType string) string {
-	switch strings.ToLower(strings.TrimSpace(packageType)) {
-	case "flatpack":
-		return "flatpak"
-	default:
-		return strings.ToLower(strings.TrimSpace(packageType))
-	}
 }
 
 func systemPackagePathLooksExplicit(path string) bool {

@@ -107,8 +107,11 @@ type Binary struct {
 	// downloaded executable ("binary") or a system package ("system-package").
 	InstallMode string `json:"install_mode,omitempty"`
 	// PackageType stores the selected package artifact type for system-package
-	// installs (deb, rpm, apk, flatpak).
+	// installs (deb, rpm, apk, flatpak, dmg).
 	PackageType string `json:"package_type,omitempty"`
+	// AppBundle stores the installed macOS app bundle name for dmg-backed app
+	// installs so lifecycle commands can verify and remove the app correctly.
+	AppBundle string `json:"app_bundle,omitempty"`
 	// if file is installed from a package format (zip, tar, etc) store
 	// the package path in config so we don't ask the user to select
 	// the path again when upgrading

@@ -2,10 +2,12 @@ package cmd
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/aaronflorey/bin/pkg/config"
 	"github.com/aaronflorey/bin/pkg/providers"
+	"github.com/aaronflorey/bin/pkg/systempackage"
 	"github.com/caarlos0/log"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
@@ -44,6 +46,12 @@ func runEnsure(args []string) error {
 	for _, binCfg := range binsToProcess {
 		ep := os.ExpandEnv(binCfg.Path)
 		installMode := effectiveInstallMode(binCfg.InstallMode)
+		strategy := lifecycleForMode(installMode)
+		if installMode == installModeSystemPackage && systempackage.NormalizeType(binCfg.PackageType) == "dmg" && binCfg.AppBundle != "" {
+			if resolvedPath, err := resolveAppBundleExecutable(filepath.Join(applicationsDir, binCfg.AppBundle)); err == nil {
+				ep = resolvedPath
+			}
+		}
 		_, statErr := os.Stat(ep)
 
 		if statErr == nil {
@@ -63,31 +71,27 @@ func runEnsure(args []string) error {
 		}
 
 		fetchOpts := providers.FetchOpts{
-			Version:     binCfg.Version,
-			PackagePath: binCfg.PackagePath,
-			PackageName: binCfg.RemoteName,
+			Version: binCfg.Version,
 		}
-		installer := installBinary
-		if installMode == installModeSystemPackage {
-			fetchOpts.SystemPackage = true
-			fetchOpts.PackageType = normalizePackageType(binCfg.PackageType)
-			installer = installSystemPackage
+		if err := strategy.applyStoredFetch(binCfg, &fetchOpts); err != nil {
+			return err
 		}
 
 		opts := InstallOpts{
-			URL:         binCfg.URL,
-			Provider:    binCfg.Provider,
-			Path:        ep,
-			Force:       true,
-			FetchOpts:   fetchOpts,
-			ResolvePath: installMode != installModeSystemPackage,
-			ConfigPath:  binCfg.Path,
+			URL:                   binCfg.URL,
+			Provider:              binCfg.Provider,
+			Path:                  ep,
+			Force:                 true,
+			FetchOpts:             fetchOpts,
+			ResolvePath:           strategy.resolvePath(binCfg),
+			ConfigPath:            binCfg.Path,
+			AllowProviderFallback: binCfg.Provider != "",
 		}
-		res, err := installer(opts)
+		res, err := strategy.install(opts)
 		if err != nil && installMode == installModeBinary && fetchOpts.PackagePath != "" && isPackagePathSelectionError(err) {
 			log.Warnf("%s package path %q did not match the latest archive; retrying without package path", ep, fetchOpts.PackagePath)
 			opts.FetchOpts.PackagePath = ""
-			res, err = installer(opts)
+			res, err = strategy.install(opts)
 		}
 		if err != nil {
 			return err

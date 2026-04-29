@@ -1,10 +1,14 @@
 package cmd
 
 import (
+	"errors"
+	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/aaronflorey/bin/pkg/assets"
 	"github.com/aaronflorey/bin/pkg/config"
 )
 
@@ -26,6 +30,156 @@ func TestInstallHasPinFlag(t *testing.T) {
 
 	if cmd.cmd.Flags().Lookup("pin") == nil {
 		t.Fatal("expected --pin flag to be registered")
+	}
+}
+
+func TestInstallHasPreferSystemPackageFlag(t *testing.T) {
+	cmd := newInstallCmd()
+
+	if cmd.cmd.Flags().Lookup("prefer-system-package") == nil {
+		t.Fatal("expected --prefer-system-package flag to be registered")
+	}
+}
+
+func TestInstallHasPackageTypeFlag(t *testing.T) {
+	cmd := newInstallCmd()
+
+	if cmd.cmd.Flags().Lookup("package-type") == nil {
+		t.Fatal("expected --package-type flag to be registered")
+	}
+}
+
+func TestInstallRejectsUnknownPackageType(t *testing.T) {
+	cmd := newInstallCmd()
+	cmd.cmd.SetArgs([]string{"--package-type=msi", "https://example.test/acme/tool"})
+
+	err := cmd.cmd.Execute()
+	if err == nil {
+		t.Fatal("expected install command to reject unknown package type")
+	}
+	if !strings.Contains(err.Error(), `unsupported --package-type "msi"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestInstallFallsBackFromBinaryToSystemPackageOnCompatibilityError(t *testing.T) {
+	setupTestConfig(t)
+	root := newInstallCmd()
+
+	originalRegistry := lifecycleRegistry
+	defer func() {
+		lifecycleRegistry = originalRegistry
+	}()
+
+	var attempts []string
+	lifecycleRegistry = map[string]lifecycleStrategy{
+		installModeBinary: {
+			install: func(opts InstallOpts) (*InstallResult, error) {
+				attempts = append(attempts, installModeBinary)
+				return nil, fmt.Errorf("%w: binary mismatch", assets.ErrNoCompatibleFiles)
+			},
+			applyStoredFetch:  originalRegistry[installModeBinary].applyStoredFetch,
+			applyRequestFetch: originalRegistry[installModeBinary].applyRequestFetch,
+			resolvePath:       originalRegistry[installModeBinary].resolvePath,
+		},
+		installModeSystemPackage: {
+			install: func(opts InstallOpts) (*InstallResult, error) {
+				attempts = append(attempts, installModeSystemPackage)
+				if !opts.FetchOpts.SystemPackage {
+					t.Fatal("expected system-package fetch flag")
+				}
+				return &InstallResult{Name: "tool", Version: "1.0.0", Path: "/Applications/Tool.app/Contents/MacOS/Tool"}, nil
+			},
+			uninstall:         originalRegistry[installModeSystemPackage].uninstall,
+			applyStoredFetch:  originalRegistry[installModeSystemPackage].applyStoredFetch,
+			applyRequestFetch: originalRegistry[installModeSystemPackage].applyRequestFetch,
+			resolvePath:       originalRegistry[installModeSystemPackage].resolvePath,
+		},
+	}
+
+	if err := root.installTarget(root.cmd, installTarget{url: "github.com/acme/tool", path: "Tool"}); err != nil {
+		t.Fatalf("unexpected install error: %v", err)
+	}
+	if !slices.Equal(attempts, []string{installModeBinary, installModeSystemPackage}) {
+		t.Fatalf("unexpected install attempts: %v", attempts)
+	}
+}
+
+func TestInstallPrefersSystemPackageWhenRequested(t *testing.T) {
+	setupTestConfig(t)
+	root := newInstallCmd()
+	root.opts.preferSystemPackage = true
+	root.opts.packageType = "DMG"
+
+	originalRegistry := lifecycleRegistry
+	defer func() {
+		lifecycleRegistry = originalRegistry
+	}()
+
+	var attempts []string
+	lifecycleRegistry = map[string]lifecycleStrategy{
+		installModeBinary: {
+			install: func(opts InstallOpts) (*InstallResult, error) {
+				attempts = append(attempts, installModeBinary)
+				return &InstallResult{Name: "tool", Version: "1.0.0", Path: opts.Path}, nil
+			},
+			applyStoredFetch:  originalRegistry[installModeBinary].applyStoredFetch,
+			applyRequestFetch: originalRegistry[installModeBinary].applyRequestFetch,
+			resolvePath:       originalRegistry[installModeBinary].resolvePath,
+		},
+		installModeSystemPackage: {
+			install: func(opts InstallOpts) (*InstallResult, error) {
+				attempts = append(attempts, installModeSystemPackage)
+				if opts.FetchOpts.PackageType != "dmg" {
+					t.Fatalf("expected normalized package type, got %q", opts.FetchOpts.PackageType)
+				}
+				return &InstallResult{Name: "Tool", Version: "1.0.0", Path: "/Applications/Tool.app/Contents/MacOS/Tool"}, nil
+			},
+			uninstall:         originalRegistry[installModeSystemPackage].uninstall,
+			applyStoredFetch:  originalRegistry[installModeSystemPackage].applyStoredFetch,
+			applyRequestFetch: originalRegistry[installModeSystemPackage].applyRequestFetch,
+			resolvePath:       originalRegistry[installModeSystemPackage].resolvePath,
+		},
+	}
+
+	if err := root.installTarget(root.cmd, installTarget{url: "github.com/acme/tool", path: "Tool"}); err != nil {
+		t.Fatalf("unexpected install error: %v", err)
+	}
+	if !slices.Equal(attempts, []string{installModeSystemPackage}) {
+		t.Fatalf("unexpected install attempts: %v", attempts)
+	}
+}
+
+func TestInstallDoesNotFallbackOnNonCompatibilityError(t *testing.T) {
+	setupTestConfig(t)
+	root := newInstallCmd()
+
+	originalRegistry := lifecycleRegistry
+	defer func() {
+		lifecycleRegistry = originalRegistry
+	}()
+
+	attempts := 0
+	fatalErr := errors.New("boom")
+	lifecycleRegistry = map[string]lifecycleStrategy{
+		installModeBinary: {
+			install: func(opts InstallOpts) (*InstallResult, error) {
+				attempts++
+				return nil, fatalErr
+			},
+			applyStoredFetch:  originalRegistry[installModeBinary].applyStoredFetch,
+			applyRequestFetch: originalRegistry[installModeBinary].applyRequestFetch,
+			resolvePath:       originalRegistry[installModeBinary].resolvePath,
+		},
+		installModeSystemPackage: originalRegistry[installModeSystemPackage],
+	}
+
+	err := root.installTarget(root.cmd, installTarget{url: "github.com/acme/tool", path: "Tool"})
+	if !errors.Is(err, fatalErr) {
+		t.Fatalf("expected fatal error, got %v", err)
+	}
+	if attempts != 1 {
+		t.Fatalf("expected one install attempt, got %d", attempts)
 	}
 }
 

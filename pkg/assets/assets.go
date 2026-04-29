@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/bzip2"
 	"compress/gzip"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,6 +20,7 @@ import (
 	"github.com/aaronflorey/bin/pkg/config"
 	"github.com/aaronflorey/bin/pkg/options"
 	bstrings "github.com/aaronflorey/bin/pkg/strings"
+	"github.com/aaronflorey/bin/pkg/systempackage"
 	"github.com/caarlos0/log"
 	"github.com/cheggaaa/pb"
 	"github.com/h2non/filetype"
@@ -27,6 +29,8 @@ import (
 	"github.com/krolaw/zipstream"
 	"github.com/xi2/xz"
 )
+
+var ErrNoCompatibleFiles = errors.New("no compatible files")
 
 var (
 	msiType = filetype.AddType("msi", "application/octet-stream")
@@ -49,7 +53,7 @@ var (
 	}
 
 	packageArtifactSuffixes = []string{
-		".apk", ".deb", ".flatpak", ".msi", ".pkg.tar", ".pkg.tar.xz", ".pkg.tar.zst", ".rpm",
+		".apk", ".deb", ".dmg", ".flatpak", ".msi", ".pkg.tar", ".pkg.tar.xz", ".pkg.tar.zst", ".rpm",
 	}
 
 	archiveJunkSuffixes = []string{
@@ -150,7 +154,7 @@ type FilterOpts struct {
 	SystemPackage bool
 
 	// PackageType restricts package-manager artifact selection to a specific
-	// type (deb, rpm, apk, flatpak).
+	// type (deb, rpm, apk, flatpak, dmg).
 	PackageType string
 
 	// NonInteractive disables all interactive prompts and auto-selects
@@ -299,7 +303,7 @@ func (f *Filter) FilterAssets(repoName string, as []*Asset, autoSelect string) (
 
 	var gf *FilteredAsset
 	if len(matches) == 0 {
-		return nil, fmt.Errorf("Could not find any compatible files")
+		return nil, fmt.Errorf("%w: Could not find any compatible files", ErrNoCompatibleFiles)
 	} else if len(matches) > 1 {
 		// If an auto-selection was provided, find the first match by name
 		if autoSelect != "" {
@@ -370,12 +374,12 @@ func (f *Filter) preferredMatchName(repoName string) string {
 
 func (f *Filter) supportsAssetExt(filename string) bool {
 	if f != nil && f.opts != nil && f.opts.SystemPackage {
-		ptype, ok := detectSystemPackageType(filename)
+		ptype, ok := systempackage.DetectType(filename)
 		if ok {
 			if f.opts.PackageType == "" {
 				return true
 			}
-			return normalizePackageType(f.opts.PackageType) == ptype
+			return systempackage.NormalizeType(f.opts.PackageType) == ptype
 		}
 	}
 
@@ -1213,11 +1217,11 @@ func filterInstallableAssets(opts *FilterOpts, as []*Asset) []*Asset {
 			if looksLikeMetadataAsset(a.Name) {
 				continue
 			}
-			ptype, ok := detectSystemPackageType(a.Name)
+			ptype, ok := systempackage.DetectType(a.Name)
 			if !ok {
 				continue
 			}
-			if opts.PackageType != "" && normalizePackageType(opts.PackageType) != ptype {
+			if opts.PackageType != "" && systempackage.NormalizeType(opts.PackageType) != ptype {
 				continue
 			}
 			if !isCompatibleSystemPackageAsset(a.Name, ptype) {
@@ -1254,6 +1258,8 @@ func isPackageManagerAvailable(packageType string) bool {
 		tool = "apk"
 	case "flatpak":
 		tool = "flatpak"
+	case "dmg":
+		tool = "hdiutil"
 	default:
 		return false
 	}
@@ -1262,10 +1268,13 @@ func isPackageManagerAvailable(packageType string) bool {
 	return err == nil
 }
 
-func isSystemPackageOSCompatible(_ string) bool {
+func isSystemPackageOSCompatible(packageType string) bool {
 	osValues := resolver.GetOS()
 	for _, osValue := range osValues {
-		if strings.EqualFold(osValue, "linux") {
+		if packageType == "dmg" && (strings.EqualFold(osValue, "darwin") || strings.EqualFold(osValue, "macos") || strings.EqualFold(osValue, "osx")) {
+			return true
+		}
+		if packageType != "dmg" && strings.EqualFold(osValue, "linux") {
 			return true
 		}
 	}
@@ -1313,32 +1322,6 @@ func looksLikePackageArtifact(name string) bool {
 	lower := strings.ToLower(name)
 
 	return bstrings.HasAnySuffix(lower, packageArtifactSuffixes)
-}
-
-func detectSystemPackageType(name string) (string, bool) {
-	lower := strings.ToLower(name)
-
-	switch {
-	case strings.HasSuffix(lower, ".flatpak"), strings.HasSuffix(lower, ".flatpack"):
-		return "flatpak", true
-	case strings.HasSuffix(lower, ".deb"):
-		return "deb", true
-	case strings.HasSuffix(lower, ".rpm"):
-		return "rpm", true
-	case strings.HasSuffix(lower, ".apk"):
-		return "apk", true
-	default:
-		return "", false
-	}
-}
-
-func normalizePackageType(packageType string) string {
-	switch strings.ToLower(strings.TrimSpace(packageType)) {
-	case "flatpack":
-		return "flatpak"
-	default:
-		return strings.ToLower(strings.TrimSpace(packageType))
-	}
 }
 
 func looksLikeArchiveJunk(name string) bool {

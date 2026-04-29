@@ -136,6 +136,7 @@ jobs:
 
 **Tips**: if `bin` is unable to found the right package, try `bin install -a` to show all possible download options (skip scoring & filtering).
 For commands that target managed binaries (for example `update`/`outdated`/`ensure`), you can use a unique prefix (like `uni`) and `bin` will suggest a matching managed name.
+`bin list` shows whether an entry is managed as a direct `binary` or a `system-package:<type>` install.
 
 When installing multiple repos in one command, custom paths are not supported. Use either `bin install <repo> [path]` for a single repo or `bin install <repo>...` for many repos.
 
@@ -151,6 +152,28 @@ Imported binaries are mapped to your local default path using the exported binar
 bin export > bins.json
 bin import < bins.json
 ```
+
+### System package installs
+
+`bin install` can prefer or require release assets that are meant for the local package manager or platform installer.
+
+```shell
+# Require a system package artifact
+bin install --system-package github.com/getpaseo/paseo Paseo
+
+# Prefer a system package first, then fall back to a direct binary
+bin install --prefer-system-package github.com/getpaseo/paseo Paseo
+
+# Restrict system package selection to a specific artifact type
+bin install --prefer-system-package --package-type dmg github.com/getpaseo/paseo Paseo
+```
+
+Supported system package types today are:
+
+- Linux: `deb`, `rpm`, `apk`, `flatpak`
+- macOS: `dmg`
+
+On macOS, `.dmg` installs are app-focused rather than binary-focused. `bin` mounts the image, copies the single `.app` bundle into `/Applications`, stores the installed app bundle name in config, and then uses that metadata so `update`, `ensure`, and `remove` continue to work.
 
 ## 🎯 Supported providers
 

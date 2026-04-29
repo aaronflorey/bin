@@ -62,7 +62,8 @@ func newRemoveCmd() *removeCmd {
 			}
 
 			for _, target := range targets {
-				if effectiveInstallMode(target.binary.InstallMode) == installModeSystemPackage {
+				strategy := lifecycleForMode(target.binary.InstallMode)
+				if strategy.uninstall != nil {
 					if !root.opts.yes {
 						if !root.isInteractive() {
 							return fmt.Errorf("system-package removal requires --yes in non-interactive mode")
@@ -72,7 +73,7 @@ func newRemoveCmd() *removeCmd {
 						}
 					}
 
-					if err := uninstallSystemPackage(target.binary); err != nil {
+					if err := strategy.uninstall(target.binary); err != nil {
 						return err
 					}
 					if err := config.RemoveBinaries([]string{target.configPath}); err != nil {
@@ -143,8 +144,13 @@ func (root *removeCmd) resolveTargets(cmd *cobra.Command, bins map[string]*confi
 			bp, err = getBinPath(p)
 
 			if errors.Is(err, exec.ErrNotFound) || errors.Is(err, os.ErrNotExist) {
-				fmt.Fprintf(cmd.ErrOrStderr(), "binary %s not found in PATH, skipping\n", p)
-				continue
+				if aliasPath := findManagedBinByAlias(bins, p); aliasPath != "" {
+					bp = aliasPath
+					err = nil
+				} else {
+					fmt.Fprintf(cmd.ErrOrStderr(), "binary %s not found in PATH, skipping\n", p)
+					continue
+				}
 			}
 			if err != nil {
 				return nil, err

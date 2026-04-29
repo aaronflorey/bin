@@ -1,14 +1,17 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"sort"
 	"strings"
 
+	"github.com/aaronflorey/bin/pkg/assets"
 	"github.com/aaronflorey/bin/pkg/config"
 	"github.com/aaronflorey/bin/pkg/prompt"
 	"github.com/aaronflorey/bin/pkg/providers"
+	"github.com/aaronflorey/bin/pkg/systempackage"
 	"github.com/caarlos0/log"
 	"github.com/fatih/color"
 	"github.com/hashicorp/go-version"
@@ -115,41 +118,32 @@ func newUpdateCmd() *updateCmd {
 			for _, update := range updates {
 				b := update.binary
 				ui := update.info
+				strategy := lifecycleForMode(b.InstallMode)
 				fetchOpts := providers.FetchOpts{
 					All:            root.opts.all,
-					PackagePath:    b.PackagePath,
 					SkipPatchCheck: root.opts.skipPathCheck,
-					PackageName:    b.RemoteName,
 					Version:        ui.version,
 				}
-
-				installer := installBinary
-				if effectiveInstallMode(b.InstallMode) == installModeSystemPackage {
-					packageType := normalizePackageType(b.PackageType)
-					if packageType == "" {
-						err = fmt.Errorf("binary %s is in system-package mode but has no package_type metadata", b.Path)
-						if root.opts.continueOnError {
-							updateFailures[b] = err
-							continue
-						}
-						return err
+				if err := strategy.applyStoredFetch(b, &fetchOpts); err != nil {
+					if root.opts.continueOnError {
+						updateFailures[b] = err
+						continue
 					}
-					fetchOpts.SystemPackage = true
-					fetchOpts.PackageType = packageType
-					installer = installSystemPackage
+					return err
 				}
 
-				res, err := installer(InstallOpts{
-					URL:         ui.url,
-					Provider:    b.Provider,
-					Path:        b.Path,
-					Force:       true,
-					FetchOpts:   fetchOpts,
-					ResolvePath: effectiveInstallMode(b.InstallMode) != installModeSystemPackage,
-					ConfigPath:  b.Path,
+				res, err := strategy.install(InstallOpts{
+					URL:                   ui.url,
+					Provider:              b.Provider,
+					Path:                  b.Path,
+					Force:                 true,
+					FetchOpts:             fetchOpts,
+					ResolvePath:           strategy.resolvePath(b),
+					ConfigPath:            b.Path,
+					AllowProviderFallback: b.Provider != "",
 				})
 				if err != nil {
-					if effectiveInstallMode(b.InstallMode) == installModeSystemPackage && strings.Contains(strings.ToLower(err.Error()), "compatible") {
+					if effectiveInstallMode(b.InstallMode) == installModeSystemPackage && (errors.Is(err, assets.ErrNoCompatibleFiles) || errors.Is(err, systempackage.ErrIncompatible)) {
 						err = fmt.Errorf("update failed for %s: latest release no longer exposes a compatible %s package", b.Path, b.PackageType)
 					}
 					if root.opts.continueOnError {
