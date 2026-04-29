@@ -597,6 +597,35 @@ func TestFilterAssetsFailsWhenRequiredSystemPackageUnavailable(t *testing.T) {
 	}
 }
 
+func TestFilterAssetsSelectsCompatibleDMGOnMacOS(t *testing.T) {
+	originalResolver := resolver
+	originalLookPath := lookPath
+	defer func() {
+		resolver = originalResolver
+		lookPath = originalLookPath
+	}()
+
+	resolver = testDarwinARMResolver
+	lookPath = func(name string) (string, error) {
+		if name == "hdiutil" {
+			return "/usr/bin/hdiutil", nil
+		}
+		return "", exec.ErrNotFound
+	}
+
+	f := NewFilter(&FilterOpts{SystemPackage: true, PackageType: "dmg", NonInteractive: true})
+	result, err := f.FilterAssets("paseo", []*Asset{
+		{Name: "Paseo-0.1.64-arm64.dmg", URL: "https://example.test/Paseo-0.1.64-arm64.dmg"},
+		{Name: "paseo-darwin-arm64.tar.gz", URL: "https://example.test/paseo-darwin-arm64.tar.gz"},
+	}, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Name != "Paseo-0.1.64-arm64.dmg" {
+		t.Fatalf("expected dmg package artifact, got %s", result.Name)
+	}
+}
+
 func TestLooksLikeArchiveJunk(t *testing.T) {
 	cases := []struct {
 		name string

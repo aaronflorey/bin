@@ -306,6 +306,7 @@ func TestExportImportRoundTripsInstallMetadata(t *testing.T) {
 		Provider:    "github",
 		InstallMode: installModeSystemPackage,
 		PackageType: "flatpak",
+		AppBundle:   "Flatpak Tool.app",
 	}); err != nil {
 		t.Fatalf("failed to seed binary: %v", err)
 	}
@@ -330,6 +331,9 @@ func TestExportImportRoundTripsInstallMetadata(t *testing.T) {
 	}
 	if exported[0].PackageType != "flatpak" {
 		t.Fatalf("unexpected package type: %s", exported[0].PackageType)
+	}
+	if exported[0].AppBundle != "Flatpak Tool.app" {
+		t.Fatalf("unexpected app bundle: %s", exported[0].AppBundle)
 	}
 
 	setupTestConfig(t)
@@ -356,6 +360,9 @@ func TestExportImportRoundTripsInstallMetadata(t *testing.T) {
 	}
 	if binCfg.PackageType != "flatpak" {
 		t.Fatalf("unexpected imported package type: %s", binCfg.PackageType)
+	}
+	if binCfg.AppBundle != "Flatpak Tool.app" {
+		t.Fatalf("unexpected imported app bundle: %s", binCfg.AppBundle)
 	}
 }
 

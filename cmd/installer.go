@@ -16,11 +16,13 @@ import (
 	"github.com/aaronflorey/bin/pkg/config"
 	"github.com/aaronflorey/bin/pkg/prompt"
 	"github.com/aaronflorey/bin/pkg/providers"
+	"github.com/aaronflorey/bin/pkg/systempackage"
 	"github.com/caarlos0/log"
 )
 
 var isPromptInteractive = prompt.IsInteractive
 var confirmPrompt = prompt.Confirm
+var installProviderFactory = providers.New
 
 // applyChmod applies the DefaultChmod setting from config, if set.
 // This is a no-op on non-Linux platforms where DefaultChmod is not set by default.
@@ -75,6 +77,10 @@ type InstallOpts struct {
 	// MinAgeDays, when set, persists the minimum allowed release age
 	// for this binary in config.
 	MinAgeDays *int
+
+	// AllowProviderFallback retries with provider auto-detection when a stored
+	// provider no longer yields a compatible release asset.
+	AllowProviderFallback bool
 }
 
 // InstallResult holds the outcome of a successful installation.
@@ -87,7 +93,7 @@ type InstallResult struct {
 // installBinary fetches a binary from a provider, saves it to disk,
 // and updates the config.
 func installBinary(opts InstallOpts) (*InstallResult, error) {
-	p, pResult, err := fetchBinary(providers.New, opts.URL, opts.Provider, opts.FetchOpts)
+	p, pResult, err := fetchBinary(installProviderFactory, opts.URL, opts.Provider, opts.FetchOpts, opts.AllowProviderFallback)
 	if err != nil {
 		return nil, err
 	}
@@ -144,6 +150,7 @@ func installBinary(opts InstallOpts) (*InstallResult, error) {
 		Provider:    p.GetID(),
 		InstallMode: installModeBinary,
 		PackageType: "",
+		AppBundle:   "",
 		PackagePath: pResult.PackagePath,
 		Pinned:      pinned,
 		MinAgeDays:  minAgeDays,
@@ -161,7 +168,7 @@ func installBinary(opts InstallOpts) (*InstallResult, error) {
 	}, nil
 }
 
-func fetchBinary(newProvider providerFactory, url, forcedProvider string, fetchOpts providers.FetchOpts) (providers.Provider, *providers.File, error) {
+func fetchBinary(newProvider providerFactory, url, forcedProvider string, fetchOpts providers.FetchOpts, allowProviderFallback bool) (providers.Provider, *providers.File, error) {
 	p, err := newProvider(url, forcedProvider)
 	if err != nil {
 		return nil, nil, err
@@ -169,11 +176,35 @@ func fetchBinary(newProvider providerFactory, url, forcedProvider string, fetchO
 	log.Debugf("Using provider '%s' for '%s'", p.GetID(), url)
 
 	pResult, err := p.Fetch(&fetchOpts)
-	if err != nil {
+	if err == nil {
+		return p, pResult, nil
+	}
+
+	if !allowProviderFallback || strings.TrimSpace(forcedProvider) == "" || !shouldFallbackProviderFetch(err) {
 		return nil, nil, err
 	}
 
-	return p, pResult, nil
+	log.Warnf("Provider %q did not yield a compatible asset for %s, retrying with auto-detection", forcedProvider, url)
+	fallbackProvider, fallbackErr := newProvider(url, "")
+	if fallbackErr != nil {
+		return nil, nil, err
+	}
+	log.Debugf("Using fallback provider '%s' for '%s'", fallbackProvider.GetID(), url)
+
+	fallbackResult, fallbackFetchErr := fallbackProvider.Fetch(&fetchOpts)
+	if fallbackFetchErr != nil {
+		return nil, nil, err
+	}
+
+	return fallbackProvider, fallbackResult, nil
+}
+
+func shouldFallbackProviderFetch(err error) bool {
+	return isCompatibilityError(err)
+}
+
+func isCompatibilityError(err error) bool {
+	return err != nil && (errors.Is(err, assets.ErrNoCompatibleFiles) || errors.Is(err, systempackage.ErrIncompatible))
 }
 
 func existingConfigBinary(opts InstallOpts) (*config.Binary, bool) {
@@ -348,11 +379,38 @@ func resolveBinsToProcess(allBins map[string]*config.Binary, args []string) (map
 		}
 		binCfg, ok := allBins[bin]
 		if !ok {
+			bin = findManagedBinByAlias(allBins, a)
+			if bin != "" {
+				binCfg, ok = allBins[bin]
+			}
+		}
+		if !ok {
 			return nil, fmt.Errorf("binary %q not found in configuration", a)
 		}
 		bins[bin] = binCfg
 	}
 	return bins, nil
+}
+
+func findManagedBinByAlias(allBins map[string]*config.Binary, input string) string {
+	target := strings.ToLower(strings.TrimSpace(input))
+	if target == "" {
+		return ""
+	}
+
+	for path, bin := range allBins {
+		if bin == nil {
+			continue
+		}
+		if strings.EqualFold(bin.RemoteName, input) {
+			return path
+		}
+		if strings.EqualFold(strings.TrimSuffix(bin.AppBundle, ".app"), input) {
+			return path
+		}
+	}
+
+	return ""
 }
 
 func resolveManagedBinSuggestion(allBins map[string]*config.Binary, input string) (string, error) {
@@ -371,6 +429,14 @@ func resolveManagedBinSuggestion(allBins map[string]*config.Binary, input string
 		name := filepath.Base(path)
 		if bin != nil && bin.Path != "" {
 			name = filepath.Base(bin.Path)
+		}
+		if bin != nil && strings.EqualFold(strings.TrimSuffix(bin.AppBundle, ".app"), input) {
+			candidates = append(candidates, candidate{name: strings.TrimSuffix(bin.AppBundle, ".app"), path: path})
+			continue
+		}
+		if bin != nil && strings.HasPrefix(strings.ToLower(bin.RemoteName), target) {
+			candidates = append(candidates, candidate{name: bin.RemoteName, path: path})
+			continue
 		}
 
 		if !strings.HasPrefix(strings.ToLower(name), target) {
