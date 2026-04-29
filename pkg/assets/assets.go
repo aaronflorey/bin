@@ -1039,7 +1039,9 @@ func writeReaderToTempFile(r io.Reader) (string, error) {
 }
 
 func matchDownloadedFileType(file *os.File) (types.Type, error) {
-	header := make([]byte, 261)
+	// Tar signatures live near offset 257, so keep enough header bytes to
+	// detect nested .tar payloads after decompressing .gz/.xz layers.
+	header := make([]byte, 512)
 	n, err := io.ReadFull(file, header)
 	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
 		return types.Unknown, err

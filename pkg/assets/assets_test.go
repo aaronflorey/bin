@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"archive/zip"
 	"bytes"
+	"compress/gzip"
 	"crypto/sha256"
 	"fmt"
 	"io"
@@ -126,6 +127,46 @@ func TestProcessURLRejectsArchiveChecksumMismatch(t *testing.T) {
 	}
 }
 
+func TestProcessURLPreservesNameForTarGzArchives(t *testing.T) {
+	archiveData := buildTestTarGzArchive(t, map[string]string{
+		"ripgrep-13.0.0-x86_64-unknown-linux-musl/rg": "rg binary",
+	})
+	expectedHash := sha256.Sum256(archiveData)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(archiveData)
+	}))
+	defer server.Close()
+
+	f := NewFilter(&FilterOpts{NonInteractive: true})
+	f.repoName = "ripgrep"
+
+	result, err := f.ProcessURL(&FilteredAsset{Name: "ripgrep-13.0.0-x86_64-unknown-linux-musl.tar.gz", URL: server.URL}, fmt.Sprintf("%x", expectedHash[:]))
+	if err != nil {
+		t.Fatalf("ProcessURL returned error: %v", err)
+	}
+
+	if result.Name != "rg" {
+		t.Fatalf("unexpected extracted file name: %s", result.Name)
+	}
+	if result.PackagePath != "ripgrep-13.0.0-x86_64-unknown-linux-musl/rg" {
+		t.Fatalf("unexpected package path: %s", result.PackagePath)
+	}
+
+	data, err := io.ReadAll(result.Source)
+	if err != nil {
+		t.Fatalf("failed to read processed tar.gz entry: %v", err)
+	}
+	if closer, ok := result.Source.(io.Closer); ok {
+		if err := closer.Close(); err != nil {
+			t.Fatalf("failed to close processed tar.gz entry: %v", err)
+		}
+	}
+	if string(data) != "rg binary" {
+		t.Fatalf("unexpected tar.gz contents: %q", string(data))
+	}
+}
+
 func buildTestZipArchive(t *testing.T, files map[string]string) []byte {
 	t.Helper()
 
@@ -142,6 +183,31 @@ func buildTestZipArchive(t *testing.T, files map[string]string) []byte {
 	}
 	if err := zw.Close(); err != nil {
 		t.Fatalf("failed to close zip archive: %v", err)
+	}
+
+	return buf.Bytes()
+}
+
+func buildTestTarGzArchive(t *testing.T, files map[string]string) []byte {
+	t.Helper()
+
+	var buf bytes.Buffer
+	gzw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gzw)
+	for name, contents := range files {
+		hdr := &tar.Header{Name: name, Mode: 0o755, Size: int64(len(contents))}
+		if err := tw.WriteHeader(hdr); err != nil {
+			t.Fatalf("failed to write tar header %s: %v", name, err)
+		}
+		if _, err := tw.Write([]byte(contents)); err != nil {
+			t.Fatalf("failed to write tar entry %s: %v", name, err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("failed to close tar archive: %v", err)
+	}
+	if err := gzw.Close(); err != nil {
+		t.Fatalf("failed to close gzip stream: %v", err)
 	}
 
 	return buf.Bytes()
