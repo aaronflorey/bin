@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -90,7 +91,64 @@ func writeList(out io.Writer, bins map[string]*config.Binary) error {
 }
 
 type listCmd struct {
-	cmd *cobra.Command
+	cmd  *cobra.Command
+	opts struct {
+		format string
+	}
+}
+
+type listedBinary struct {
+	Path        string `json:"path"`
+	Version     string `json:"version"`
+	URL         string `json:"url"`
+	Status      string `json:"status"`
+	Pinned      bool   `json:"pinned"`
+	InstallMode string `json:"install_mode"`
+	PackageType string `json:"package_type,omitempty"`
+	AppBundle   string `json:"app_bundle,omitempty"`
+	Provider    string `json:"provider,omitempty"`
+	RemoteName  string `json:"remote_name,omitempty"`
+}
+
+func listStatus(path string) string {
+	if _, err := os.Stat(path); err != nil {
+		return "missing"
+	}
+	return "ok"
+}
+
+func listEntries(bins map[string]*config.Binary) []listedBinary {
+	binPaths := make([]string, 0, len(bins))
+	for path := range bins {
+		binPaths = append(binPaths, path)
+	}
+	sort.Strings(binPaths)
+
+	entries := make([]listedBinary, 0, len(binPaths))
+	for _, path := range binPaths {
+		bin := bins[path]
+		expandedPath := os.ExpandEnv(bin.Path)
+		entries = append(entries, listedBinary{
+			Path:        expandedPath,
+			Version:     bin.Version,
+			URL:         bin.URL,
+			Status:      listStatus(expandedPath),
+			Pinned:      bin.Pinned,
+			InstallMode: effectiveInstallMode(bin.InstallMode),
+			PackageType: bin.PackageType,
+			AppBundle:   bin.AppBundle,
+			Provider:    bin.Provider,
+			RemoteName:  bin.RemoteName,
+		})
+	}
+
+	return entries
+}
+
+func writeListJSON(out io.Writer, bins map[string]*config.Binary) error {
+	encoder := json.NewEncoder(out)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(listEntries(bins))
 }
 
 func newListCmd() *listCmd {
@@ -103,10 +161,18 @@ func newListCmd() *listCmd {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return writeList(cmd.OutOrStdout(), config.Get().Bins)
+			switch strings.ToLower(strings.TrimSpace(root.opts.format)) {
+			case "", "table":
+				return writeList(cmd.OutOrStdout(), config.Get().Bins)
+			case "json":
+				return writeListJSON(cmd.OutOrStdout(), config.Get().Bins)
+			default:
+				return fmt.Errorf("unsupported --format %q", root.opts.format)
+			}
 		},
 	}
 
 	root.cmd = cmd
+	root.cmd.Flags().StringVar(&root.opts.format, "format", "table", "Output format: table or json")
 	return root
 }
