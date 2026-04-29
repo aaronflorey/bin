@@ -1,5 +1,30 @@
 # Changelog
 
+## [2.4.0](https://github.com/aaronflorey/bin/compare/v2.3.0...v2.4.0) (2026-04-29)
+
+
+### Features
+
+* **cmd:** suggest managed names for partial targets ([ba4fa82](https://github.com/aaronflorey/bin/commit/ba4fa82e72fde7e176e9ae34ea112bc92b6030e2))
+* **cmd:** suggest managed names for partial targets ([716e845](https://github.com/aaronflorey/bin/commit/716e84534f0a8d132de30e5346525ae7b2818209))
+* **install:** support tracked dmg app installs ([d0653d2](https://github.com/aaronflorey/bin/commit/d0653d2bad6b5a878c0f6878db345ef394e6ad14))
+* **list:** add json output format ([5a4a0a0](https://github.com/aaronflorey/bin/commit/5a4a0a0bd84e466eb48cd03e835a25f27132de8b))
+* **remove:** add interactive multi-select removal flow ([deb3fb4](https://github.com/aaronflorey/bin/commit/deb3fb4ba855ac2af2a66c6f461b0296b87a242c))
+* **remove:** add interactive multi-select removal flow ([5f3d47d](https://github.com/aaronflorey/bin/commit/5f3d47db8c86d7a5381f35173dc921fba6d27488))
+* **tui:** add interactive changelog browser ([7729ae4](https://github.com/aaronflorey/bin/commit/7729ae476524aca57331d300f8d026d21a5d9362))
+* **update:** Add interactive multi-select for no-arg updates ([2effacb](https://github.com/aaronflorey/bin/commit/2effacb9fff8c8b22025d1cfb050ce3025abe965))
+* **update:** interactive multi-select for no-arg updates ([e4236f4](https://github.com/aaronflorey/bin/commit/e4236f48dac22bb3f5ec28a57b8bbc51366e9d73))
+
+
+### Bug Fixes
+
+* **assets:** prefer native Linux binaries over AppImages ([97f00f9](https://github.com/aaronflorey/bin/commit/97f00f9c34d900d88eec657d0d745d22dab56a09))
+* chown config dir and file to sudo user when installing globally ([636b0b9](https://github.com/aaronflorey/bin/commit/636b0b9ad0c9230c28bf2343b0730860053faeae))
+* chown config dir/file to real user when installing via sudo ([d8a15ff](https://github.com/aaronflorey/bin/commit/d8a15ff6e6481a7be50bd166c912854e737d9a7d))
+* **ci:** resolve lint findings ([3c3a52d](https://github.com/aaronflorey/bin/commit/3c3a52d5b7810162a63f97a865fcf98ff158861e))
+* **install:** capture verbose logs and improve archive selection ([c7f7c2a](https://github.com/aaronflorey/bin/commit/c7f7c2a81ac2325a2b7322359f62ff2334b96498))
+* **update:** skip interactive selector with --yes and --dry-run flags ([8d41741](https://github.com/aaronflorey/bin/commit/8d417419e29dff7b3c7e552b60ead6b2b3e61da5))
+
 ## [2.3.0](https://github.com/aaronflorey/bin/compare/v2.2.0...v2.3.0) (2026-04-12)
 
 
