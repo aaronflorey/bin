@@ -338,14 +338,6 @@ func RemoveBinaries(paths []string) error {
 
 	return writeLocked()
 }
-
-func write() error {
-	cfgMu.Lock()
-	defer cfgMu.Unlock()
-
-	return writeLocked()
-}
-
 func writeLocked() error {
 	configPath, err := getConfigPath()
 	if err != nil {
