@@ -24,6 +24,37 @@ func getDefaultPath() (string, error) {
 	return selectWritablePathFromEnv(os.Getenv("PATH"), ":")
 }
 
+// getConfigPath returns the config path using the XDG base directory strategy.
+func getConfigPath() (string, error) {
+	if configPath, ok, err := configPathOverride(); ok {
+		return configPath, err
+	}
+
+	home, homeErr := os.UserHomeDir()
+	if homeErr == nil {
+		legacyPath := filepath.Join(home, ".bin", "config.json")
+		if _, err := os.Stat(legacyPath); !os.IsNotExist(err) {
+			return legacyPath, nil
+		}
+	}
+
+	xdgConfigHome := os.Getenv("XDG_CONFIG_HOME")
+	if _, err := os.Stat(xdgConfigHome); !os.IsNotExist(err) {
+		return filepath.Join(xdgConfigHome, "bin", "config.json"), nil
+	}
+
+	if homeErr != nil {
+		return "", homeErr
+	}
+
+	xdgDefault := filepath.Join(home, ".config")
+	if _, err := os.Stat(xdgDefault); !os.IsNotExist(err) {
+		return filepath.Join(xdgDefault, "bin", "config.json"), nil
+	}
+
+	return filepath.Join(home, ".bin", "config.json"), nil
+}
+
 func ensureUserLocalBinDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {

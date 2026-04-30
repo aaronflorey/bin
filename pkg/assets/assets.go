@@ -2,9 +2,9 @@ package assets
 
 import (
 	"archive/tar"
-	"bytes"
 	"compress/bzip2"
 	"compress/gzip"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -879,9 +879,8 @@ func appendUnique(values []string, additions ...string) []string {
 }
 
 // ProcessURL processes a FilteredAsset by uncompressing/unarchiving the URL of the asset.
-func (f *Filter) ProcessURL(gf *FilteredAsset) (*finalFile, error) {
+func (f *Filter) ProcessURL(gf *FilteredAsset, expectedSHA string) (*finalFile, error) {
 	f.name = gf.Name
-	// We're not closing the body here since the caller is in charge of that
 	req, err := http.NewRequest(http.MethodGet, gf.URL, nil)
 	if err != nil {
 		return nil, err
@@ -894,37 +893,65 @@ func (f *Filter) ProcessURL(gf *FilteredAsset) (*finalFile, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer res.Body.Close()
 
 	if res.StatusCode > 299 || res.StatusCode < 200 {
 		return nil, fmt.Errorf("%d response when checking binary from %s", res.StatusCode, gf.URL)
 	}
 
-	// We're caching the whole file into memory so we can prompt
-	// the user which file they want to download
-
 	log.Infof("Starting download of %s", gf.URL)
 	bar := pb.Full.Start64(res.ContentLength)
-	barReader := bar.NewProxyReader(res.Body)
 	defer bar.Finish()
-	buf := new(bytes.Buffer)
-	_, err = io.Copy(buf, barReader)
+
+	tempFile, err := os.CreateTemp("", "bin-download-*")
 	if err != nil {
 		return nil, err
 	}
-	bar.Finish()
-	return f.processReader(buf)
+	tempPath := tempFile.Name()
+	cleanupTempFile := true
+	defer func() {
+		_ = tempFile.Close()
+		if cleanupTempFile {
+			_ = os.Remove(tempPath)
+		}
+	}()
+
+	barReader := bar.NewProxyReader(res.Body)
+	h := sha256.New()
+	_, err = io.Copy(io.MultiWriter(tempFile, h), barReader)
+	if err != nil {
+		return nil, err
+	}
+
+	actualSHA := fmt.Sprintf("%x", h.Sum(nil))
+	if expectedSHA != "" && !strings.EqualFold(actualSHA, expectedSHA) {
+		return nil, fmt.Errorf("sha256 mismatch for %s: expected %s, got %s", gf.Name, expectedSHA, actualSHA)
+	}
+
+	if err := tempFile.Close(); err != nil {
+		return nil, err
+	}
+
+	final, err := f.processDownloadedFile(tempPath)
+	if err != nil {
+		return nil, err
+	}
+	cleanupTempFile = false
+
+	return final, nil
 }
 
-func (f *Filter) processReader(r io.Reader) (*finalFile, error) {
-	var buf bytes.Buffer
-	tee := io.TeeReader(r, &buf)
-
-	t, err := filetype.MatchReader(tee)
+func (f *Filter) processDownloadedFile(tempPath string) (*finalFile, error) {
+	inputFile, err := os.Open(tempPath)
 	if err != nil {
 		return nil, err
 	}
 
-	outputFile := io.MultiReader(&buf, r)
+	t, err := matchDownloadedFileType(inputFile)
+	if err != nil {
+		_ = inputFile.Close()
+		return nil, err
+	}
 
 	type processorFunc func(repoName string, r io.Reader, autoSelect string) (*finalFile, error)
 	var processor processorFunc
@@ -941,23 +968,95 @@ func (f *Filter) processReader(r io.Reader) (*finalFile, error) {
 		processor = f.processZip
 	}
 
-	if processor != nil {
-		// log.Debugf("Processing %s file %s with %s", repoName, name, runtime.FuncForPC(reflect.ValueOf(processor).Pointer()).Name())
-		outFile, err := processor(f.repoName, outputFile, f.containedFile)
-		if err != nil {
-			return nil, err
-		}
-
-		outputFile = outFile.Source
-
-		f.name = outFile.Name
-		f.packagePath = outFile.PackagePath
-
-		// In case of e.g. a .tar.gz, process the uncompressed archive by calling recursively
-		return f.processReader(outputFile)
+	if processor == nil {
+		return &finalFile{
+			Source: &cleanupReadCloser{
+				ReadCloser: inputFile,
+				cleanup: func() error {
+					return os.Remove(tempPath)
+				},
+			},
+			Name:        f.name,
+			PackagePath: f.packagePath,
+		}, nil
 	}
 
-	return &finalFile{Source: outputFile, Name: f.name, PackagePath: f.packagePath}, err
+	outFile, err := processor(f.repoName, inputFile, f.containedFile)
+	if err != nil {
+		_ = inputFile.Close()
+		return nil, err
+	}
+
+	nextPath, err := writeReaderToTempFile(outFile.Source)
+	closeErr := closeReader(outFile.Source)
+	inputCloseErr := inputFile.Close()
+	removeErr := os.Remove(tempPath)
+	if err != nil {
+		return nil, err
+	}
+	if closeErr != nil {
+		_ = os.Remove(nextPath)
+		return nil, closeErr
+	}
+	if inputCloseErr != nil {
+		_ = os.Remove(nextPath)
+		return nil, inputCloseErr
+	}
+	if removeErr != nil {
+		_ = os.Remove(nextPath)
+		return nil, removeErr
+	}
+
+	f.name = outFile.Name
+	f.packagePath = outFile.PackagePath
+
+	return f.processDownloadedFile(nextPath)
+}
+
+func writeReaderToTempFile(r io.Reader) (string, error) {
+	tempFile, err := os.CreateTemp("", "bin-processed-*")
+	if err != nil {
+		return "", err
+	}
+	tempPath := tempFile.Name()
+	cleanupTempFile := true
+	defer func() {
+		_ = tempFile.Close()
+		if cleanupTempFile {
+			_ = os.Remove(tempPath)
+		}
+	}()
+
+	if _, err := io.Copy(tempFile, r); err != nil {
+		return "", err
+	}
+	if err := tempFile.Close(); err != nil {
+		return "", err
+	}
+
+	cleanupTempFile = false
+	return tempPath, nil
+}
+
+func matchDownloadedFileType(file *os.File) (types.Type, error) {
+	header := make([]byte, 261)
+	n, err := io.ReadFull(file, header)
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		return types.Unknown, err
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return types.Unknown, err
+	}
+
+	return filetype.Match(header[:n])
+}
+
+func closeReader(r io.Reader) error {
+	closer, ok := r.(io.Closer)
+	if !ok {
+		return nil
+	}
+	return closer.Close()
 }
 
 // processGz receives a tar.gz file and returns the

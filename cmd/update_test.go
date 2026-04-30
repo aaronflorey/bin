@@ -342,6 +342,50 @@ func TestUpdateDryRunNoArgsSkipsInteractiveSelector(t *testing.T) {
 	}
 }
 
+func TestUpdateRequiresYesInNonInteractiveMode(t *testing.T) {
+	setupTestConfig(t)
+
+	outdatedPath := filepath.Join(t.TempDir(), "generic-update-noninteractive-tool")
+	writeTestBinary(t, outdatedPath)
+	if err := config.UpsertBinary(&config.Binary{
+		Path:     outdatedPath,
+		Version:  "1.0.0",
+		URL:      "https://example.com/generic-update-noninteractive-tool",
+		Provider: "github",
+	}); err != nil {
+		t.Fatalf("failed to seed binary: %v", err)
+	}
+
+	cmd := newUpdateCmd()
+	cmd.newProvider = func(u, _ string) (providers.Provider, error) {
+		if u != "https://example.com/generic-update-noninteractive-tool" {
+			return nil, fmt.Errorf("unexpected provider request for %s", u)
+		}
+		return mockProvider{latestVersion: "1.1.0", latestVersionURL: "https://example.com/generic-update-noninteractive-tool/releases/tag/v1.1.0"}, nil
+	}
+
+	confirmCalled := false
+	cmd.confirm = func(string) error {
+		confirmCalled = true
+		return nil
+	}
+	cmd.isInteractive = func() bool {
+		return false
+	}
+
+	cmd.cmd.SetArgs([]string{outdatedPath})
+	err := cmd.cmd.Execute()
+	if err == nil {
+		t.Fatal("expected update to require --yes in non-interactive mode")
+	}
+	if !strings.Contains(err.Error(), "requires --yes or --dry-run") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if confirmCalled {
+		t.Fatal("did not expect confirmation prompt in non-interactive mode")
+	}
+}
+
 func TestUpdateYesFlagNoArgsSkipsInteractiveSelector(t *testing.T) {
 	setupTestConfig(t)
 
