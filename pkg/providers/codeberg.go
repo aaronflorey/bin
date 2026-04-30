@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"strings"
 	"time"
 
 	"code.gitea.io/sdk/gitea"
@@ -78,19 +77,21 @@ func (c *codeberg) Fetch(opts *FetchOpts) (*File, error) {
 		gf.ExtraHeaders["Authorization"] = fmt.Sprintf("token %s", c.token)
 	}
 
-	outFile, err := f.ProcessURL(gf)
+	expectedSHA, err := expectedSHA256ForAsset(gf.Name, checksumAssets, gf.ExtraHeaders)
+	if err != nil {
+		log.WithError(err).Debugf("Codeberg checksum lookup failed for %s/%s asset %q", c.owner, c.repo, gf.Name)
+		return nil, err
+	}
+
+	outFile, err := f.ProcessURL(gf, expectedSHA)
 	if err != nil {
 		log.WithError(err).Debugf("Codeberg asset processing failed for %s/%s asset %q", c.owner, c.repo, gf.Name)
 		return nil, err
 	}
 
-	expectedSHA := ""
+	finalExpectedSHA := ""
 	if outFile.Name == gf.Name {
-		expectedSHA, err = expectedSHA256ForAsset(outFile.Name, checksumAssets, gf.ExtraHeaders)
-		if err != nil {
-			log.WithError(err).Debugf("Codeberg checksum lookup failed for %s/%s asset %q", c.owner, c.repo, outFile.Name)
-			return nil, err
-		}
+		finalExpectedSHA = expectedSHA
 	}
 
 	version := release.TagName
@@ -99,7 +100,7 @@ func (c *codeberg) Fetch(opts *FetchOpts) (*File, error) {
 		Data:        outFile.Source,
 		Name:        outFile.Name,
 		Version:     version,
-		ExpectedSHA: expectedSHA,
+		ExpectedSHA: finalExpectedSHA,
 		PackagePath: outFile.PackagePath,
 		PublishedAt: codebergPublishedAt(release),
 	}
@@ -168,25 +169,12 @@ func codebergReleaseInfo(release *gitea.Release) *ReleaseInfo {
 }
 
 func newCodeberg(u *url.URL) (Provider, error) {
-	s := strings.Split(u.Path, "/")
-	if len(s) < 3 {
+	segments := providerPathSegments(u)
+	if len(segments) < 2 {
 		return nil, fmt.Errorf("error parsing Codeberg URL %s, can't find owner and repo", u.String())
 	}
 
-	// it's a specific releases URL
-	var tag string
-	if strings.Contains(u.Path, "/releases/") {
-		// For release and download URL's, the
-		// path is usually /releases/tag/v0.1
-		// or /releases/download/v0.1.
-		ps := strings.Split(u.Path, "/")
-		for i, p := range ps {
-			if p == "releases" {
-				tag = strings.Join(ps[i+2:], "/")
-			}
-		}
-
-	}
+	tag := releaseTagFromSegments(segments)
 
 	token := os.Getenv("CODEBERG_TOKEN")
 
@@ -197,14 +185,14 @@ func newCodeberg(u *url.URL) (Provider, error) {
 	var err error
 
 	if token != "" {
-		client, err = gitea.NewClient(baseURL, gitea.SetToken(token))
+		client, err = gitea.NewClient(baseURL, gitea.SetToken(token), gitea.SetHTTPClient(newProviderHTTPClient()))
 	} else {
-		client, err = gitea.NewClient(baseURL)
+		client, err = gitea.NewClient(baseURL, gitea.SetHTTPClient(newProviderHTTPClient()))
 	}
 
 	if err != nil {
 		return nil, fmt.Errorf("error initializing Codeberg client %v", err)
 	}
 
-	return &codeberg{url: u, client: client, owner: s[1], repo: s[2], tag: tag, token: token}, nil
+	return &codeberg{url: u, client: client, owner: segments[0], repo: segments[1], tag: tag, token: token}, nil
 }

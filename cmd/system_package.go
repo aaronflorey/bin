@@ -27,14 +27,7 @@ func installSystemPackage(opts InstallOpts) (*InstallResult, error) {
 		return nil, err
 	}
 
-	existing, _ := existingConfigBinary(opts)
-	minAgeDays := 0
-	if existing != nil {
-		minAgeDays = existing.MinAgeDays
-	}
-	if opts.MinAgeDays != nil {
-		minAgeDays = *opts.MinAgeDays
-	}
+	_, minAgeDays, pinned := resolveInstallState(opts)
 	if err := ensureReleaseAge(p.GetID(), pResult.Version, pResult.PublishedAt, minAgeDays); err != nil {
 		return nil, err
 	}
@@ -82,17 +75,12 @@ func installSystemPackage(opts InstallOpts) (*InstallResult, error) {
 		return nil, err
 	}
 
-	pinned := opts.Pinned
-	if existing != nil {
-		pinned = pinned || existing.Pinned
-	}
-
-	configPath, err := absExpandedPath(resolvedPath)
+	configPath, err := resolveTrackedConfigPath(opts, resolvedPath)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := config.UpsertBinary(&config.Binary{
+	if err := persistInstalledBinary(&config.Binary{
 		RemoteName:  trackedName,
 		Path:        configPath,
 		Version:     pResult.Version,
@@ -108,8 +96,6 @@ func installSystemPackage(opts InstallOpts) (*InstallResult, error) {
 	}); err != nil {
 		return nil, err
 	}
-
-	warnDuplicateManagedHash(configPath, hashString)
 
 	return &InstallResult{Name: trackedName, Version: pResult.Version, Path: configPath}, nil
 }

@@ -2,8 +2,13 @@ package assets
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
+	"crypto/sha256"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os/exec"
 	"strings"
 	"testing"
@@ -64,6 +69,82 @@ func TestSanitizeName(t *testing.T) {
 		}
 	}
 
+}
+
+func TestProcessURLValidatesArchiveChecksum(t *testing.T) {
+	archiveData := buildTestZipArchive(t, map[string]string{"tool": "hello from archive"})
+	expectedHash := sha256.Sum256(archiveData)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(archiveData)
+	}))
+	defer server.Close()
+
+	f := NewFilter(&FilterOpts{NonInteractive: true})
+	f.repoName = "tool"
+
+	result, err := f.ProcessURL(&FilteredAsset{Name: "tool-linux-amd64.zip", URL: server.URL}, fmt.Sprintf("%x", expectedHash[:]))
+	if err != nil {
+		t.Fatalf("ProcessURL returned error: %v", err)
+	}
+
+	data, err := io.ReadAll(result.Source)
+	if err != nil {
+		t.Fatalf("failed to read processed archive entry: %v", err)
+	}
+	if closer, ok := result.Source.(io.Closer); ok {
+		if err := closer.Close(); err != nil {
+			t.Fatalf("failed to close processed archive entry: %v", err)
+		}
+	}
+
+	if string(data) != "hello from archive" {
+		t.Fatalf("unexpected archive contents: %q", string(data))
+	}
+	if result.Name != "tool" {
+		t.Fatalf("unexpected extracted file name: %s", result.Name)
+	}
+}
+
+func TestProcessURLRejectsArchiveChecksumMismatch(t *testing.T) {
+	archiveData := buildTestZipArchive(t, map[string]string{"tool": "hello from archive"})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(archiveData)
+	}))
+	defer server.Close()
+
+	f := NewFilter(&FilterOpts{NonInteractive: true})
+	f.repoName = "tool"
+
+	_, err := f.ProcessURL(&FilteredAsset{Name: "tool-linux-amd64.zip", URL: server.URL}, strings.Repeat("0", 64))
+	if err == nil {
+		t.Fatal("expected checksum mismatch error")
+	}
+	if !strings.Contains(err.Error(), "sha256 mismatch") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func buildTestZipArchive(t *testing.T, files map[string]string) []byte {
+	t.Helper()
+
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for name, contents := range files {
+		writer, err := zw.Create(name)
+		if err != nil {
+			t.Fatalf("failed to create zip entry %s: %v", name, err)
+		}
+		if _, err := writer.Write([]byte(contents)); err != nil {
+			t.Fatalf("failed to write zip entry %s: %v", name, err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("failed to close zip archive: %v", err)
+	}
+
+	return buf.Bytes()
 }
 
 type args struct {

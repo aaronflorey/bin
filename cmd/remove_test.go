@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"slices"
@@ -154,5 +155,28 @@ func TestRemoveSystemPackageWithYesRemovesConfigEntry(t *testing.T) {
 
 	if _, ok := config.Get().Bins[trackedPath]; ok {
 		t.Fatalf("expected config entry %s to be removed", trackedPath)
+	}
+}
+
+func TestRemoveWarnsForUnmanagedBinary(t *testing.T) {
+	setupTestConfig(t)
+
+	toolDir := t.TempDir()
+	toolPath := filepath.Join(toolDir, "external-tool")
+	if err := os.WriteFile(toolPath, []byte("binary"), 0o755); err != nil {
+		t.Fatalf("failed creating executable: %v", err)
+	}
+	t.Setenv("PATH", toolDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	root := newRemoveCmd()
+	var stderr bytes.Buffer
+	root.cmd.SetErr(&stderr)
+	root.cmd.SetArgs([]string{"external-tool"})
+
+	if err := root.cmd.Execute(); err != nil {
+		t.Fatalf("unexpected remove error: %v", err)
+	}
+	if !strings.Contains(stderr.String(), "is not managed by bin") {
+		t.Fatalf("expected unmanaged warning, got: %s", stderr.String())
 	}
 }
