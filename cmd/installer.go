@@ -101,15 +101,7 @@ func installBinary(opts InstallOpts) (*InstallResult, error) {
 	}
 	log.Debugf("Fetched %s version %s from provider %q", pResult.Name, pResult.Version, p.GetID())
 
-	existing, _ := existingConfigBinary(opts)
-
-	minAgeDays := 0
-	if existing != nil {
-		minAgeDays = existing.MinAgeDays
-	}
-	if opts.MinAgeDays != nil {
-		minAgeDays = *opts.MinAgeDays
-	}
+	_, minAgeDays, pinned := resolveInstallState(opts)
 	if err := ensureReleaseAge(p.GetID(), pResult.Version, pResult.PublishedAt, minAgeDays); err != nil {
 		return nil, err
 	}
@@ -130,22 +122,12 @@ func installBinary(opts InstallOpts) (*InstallResult, error) {
 	}
 	hashString := fmt.Sprintf("%x", hash)
 
-	var configPath string
-	if len(opts.ConfigPath) > 0 {
-		configPath = opts.ConfigPath
-	} else {
-		configPath, err = absExpandedPath(resolvedPath)
-		if err != nil {
-			return nil, fmt.Errorf("error converting to absolute path: %w", err)
-		}
+	configPath, err := resolveTrackedConfigPath(opts, resolvedPath)
+	if err != nil {
+		return nil, err
 	}
 
-	pinned := opts.Pinned
-	if existing != nil {
-		pinned = pinned || existing.Pinned
-	}
-
-	err = config.UpsertBinary(&config.Binary{
+	err = persistInstalledBinary(&config.Binary{
 		RemoteName:  pResult.Name,
 		Path:        configPath,
 		Version:     pResult.Version,
@@ -163,8 +145,6 @@ func installBinary(opts InstallOpts) (*InstallResult, error) {
 		return nil, err
 	}
 	log.Debugf("Saved installed binary config for %q at %s", pResult.Name, configPath)
-
-	warnDuplicateManagedHash(configPath, hashString)
 
 	return &InstallResult{
 		Name:    pResult.Name,
@@ -228,6 +208,43 @@ func existingConfigBinary(opts InstallOpts) (*config.Binary, bool) {
 
 	b, ok := config.Get().Bins[absPath]
 	return b, ok
+}
+
+func resolveInstallState(opts InstallOpts) (*config.Binary, int, bool) {
+	existing, _ := existingConfigBinary(opts)
+
+	minAgeDays := 0
+	pinned := opts.Pinned
+	if existing != nil {
+		minAgeDays = existing.MinAgeDays
+		pinned = pinned || existing.Pinned
+	}
+	if opts.MinAgeDays != nil {
+		minAgeDays = *opts.MinAgeDays
+	}
+
+	return existing, minAgeDays, pinned
+}
+
+func resolveTrackedConfigPath(opts InstallOpts, resolvedPath string) (string, error) {
+	if len(opts.ConfigPath) > 0 {
+		return opts.ConfigPath, nil
+	}
+
+	configPath, err := absExpandedPath(resolvedPath)
+	if err != nil {
+		return "", fmt.Errorf("error converting to absolute path: %w", err)
+	}
+	return configPath, nil
+}
+
+func persistInstalledBinary(bin *config.Binary) error {
+	if err := config.UpsertBinary(bin); err != nil {
+		return err
+	}
+
+	warnDuplicateManagedHash(bin.Path, bin.Hash)
+	return nil
 }
 
 func absExpandedPath(path string) (string, error) {

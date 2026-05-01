@@ -7,7 +7,6 @@ import (
 	"net/url"
 	"path"
 	"sort"
-	"strings"
 
 	"github.com/aaronflorey/bin/pkg/assets"
 	"github.com/aaronflorey/bin/pkg/options"
@@ -128,24 +127,26 @@ func (g *hashiCorp) Fetch(opts *FetchOpts) (*File, error) {
 	}
 	log.Debugf("Selected HashiCorp asset %q for %s", gf.Name, g.repo)
 
-	outFile, err := f.ProcessURL(gf)
+	expectedSHA, err := expectedSHA256ForAsset(gf.Name, checksumAssets, gf.ExtraHeaders)
+	if err != nil {
+		log.WithError(err).Debugf("HashiCorp checksum lookup failed for %s asset %q", g.repo, gf.Name)
+		return nil, err
+	}
+
+	outFile, err := f.ProcessURL(gf, expectedSHA)
 	if err != nil {
 		log.WithError(err).Debugf("HashiCorp asset processing failed for %s asset %q", g.repo, gf.Name)
 		return nil, err
 	}
 
-	expectedSHA := ""
+	finalExpectedSHA := ""
 	if outFile.Name == gf.Name {
-		expectedSHA, err = expectedSHA256ForAsset(outFile.Name, checksumAssets, gf.ExtraHeaders)
-		if err != nil {
-			log.WithError(err).Debugf("HashiCorp checksum lookup failed for %s asset %q", g.repo, outFile.Name)
-			return nil, err
-		}
+		finalExpectedSHA = expectedSHA
 	}
 
 	version := release.Version
 
-	file := &File{Data: outFile.Source, Name: outFile.Name, Version: version, ExpectedSHA: expectedSHA}
+	file := &File{Data: outFile.Source, Name: outFile.Name, Version: version, ExpectedSHA: finalExpectedSHA}
 
 	return file, nil
 }
@@ -213,18 +214,17 @@ func (g *hashiCorp) GetLatestVersion() (*ReleaseInfo, error) {
 }
 
 func newHashiCorp(u *url.URL) (Provider, error) {
-	s := strings.Split(u.Path, "/")
-	if len(s) < 1 {
+	segments := providerPathSegments(u)
+	if len(segments) == 0 {
 		return nil, fmt.Errorf("Error parsing HashiCorp releases URL %s, can't find repo", u.String())
 	}
 
-	// it's a specific releases URL
 	var tag string
-	if len(s) >= 3 {
-		tag = s[2]
+	if len(segments) > 1 {
+		tag = segments[1]
 	}
 
 	baseURL, _ := url.Parse(releasesURLBase)
 
-	return &hashiCorp{url: u, client: http.DefaultClient, owner: "", repo: s[1], tag: tag, baseURL: baseURL}, nil
+	return &hashiCorp{url: u, client: newProviderHTTPClient(), owner: "", repo: segments[0], tag: tag, baseURL: baseURL}, nil
 }

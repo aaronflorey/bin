@@ -1,7 +1,6 @@
 package providers
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -38,7 +37,9 @@ func (g *gitLab) Fetch(opts *FetchOpts) (*File, error) {
 			g.tag = opts.Version
 		}
 		log.Infof("Getting %s release for %s/%s", g.tag, g.owner, g.repo)
-		release, _, err = g.client.Releases.GetRelease(projectPath, g.tag)
+		ctx, cancel := newProviderRequestContext()
+		release, _, err = g.client.Releases.GetRelease(projectPath, g.tag, gitlab.WithContext(ctx))
+		cancel()
 	} else {
 		log.Infof("Getting latest release for %s/%s", g.owner, g.repo)
 		var name string
@@ -47,7 +48,9 @@ func (g *gitLab) Fetch(opts *FetchOpts) (*File, error) {
 			return nil, releaseErr
 		}
 		name = releaseInfo.Version
-		release, _, err = g.client.Releases.GetRelease(projectPath, name, gitlab.WithContext(context.Background()))
+		ctx, cancel := newProviderRequestContext()
+		release, _, err = g.client.Releases.GetRelease(projectPath, name, gitlab.WithContext(ctx))
+		cancel()
 	}
 
 	if err != nil {
@@ -59,7 +62,9 @@ func (g *gitLab) Fetch(opts *FetchOpts) (*File, error) {
 	checksumAssets := []checksumAsset{}
 	candidateURLs := map[string]struct{}{}
 
-	project, _, err := g.client.Projects.GetProject(projectPath, &gitlab.GetProjectOptions{})
+	projectCtx, cancel := newProviderRequestContext()
+	project, _, err := g.client.Projects.GetProject(projectPath, &gitlab.GetProjectOptions{}, gitlab.WithContext(projectCtx))
+	cancel()
 	if err != nil {
 		return nil, err
 	}
@@ -67,10 +72,12 @@ func (g *gitLab) Fetch(opts *FetchOpts) (*File, error) {
 	log.Debugf("Project is public: %v", projectIsPublic)
 	tryPackages := projectIsPublic || project.PackagesEnabled
 	if tryPackages {
+		packagesCtx, cancel := newProviderRequestContext()
 		packages, resp, err := g.client.Packages.ListProjectPackages(projectPath, &gitlab.ListProjectPackagesOptions{
 			OrderBy: gitlab.Ptr("version"),
 			Sort:    gitlab.Ptr("desc"),
-		})
+		}, gitlab.WithContext(packagesCtx))
+		cancel()
 		if err != nil && (resp == nil || resp.StatusCode != http.StatusForbidden) {
 			return nil, err
 		}
@@ -79,9 +86,11 @@ func (g *gitLab) Fetch(opts *FetchOpts) (*File, error) {
 			if strings.TrimPrefix(v.Version, "v") == tagVersion {
 				totalPages := -1
 				for page := 0; page != totalPages; page++ {
+					filesCtx, cancel := newProviderRequestContext()
 					packageFiles, resp, err := g.client.Packages.ListPackageFiles(projectPath, v.ID, &gitlab.ListPackageFilesOptions{
 						Page: page + 1,
-					})
+					}, gitlab.WithContext(filesCtx))
+					cancel()
 					if err != nil {
 						return nil, err
 					}
@@ -184,19 +193,21 @@ func (g *gitLab) Fetch(opts *FetchOpts) (*File, error) {
 		gf.ExtraHeaders["PRIVATE-TOKEN"] = g.token
 	}
 
-	outFile, err := f.ProcessURL(gf)
+	expectedSHA, err := expectedSHA256ForAsset(gf.Name, checksumAssets, gf.ExtraHeaders)
+	if err != nil {
+		log.WithError(err).Debugf("GitLab checksum lookup failed for %s/%s asset %q", g.owner, g.repo, gf.Name)
+		return nil, err
+	}
+
+	outFile, err := f.ProcessURL(gf, expectedSHA)
 	if err != nil {
 		log.WithError(err).Debugf("GitLab asset processing failed for %s/%s asset %q", g.owner, g.repo, gf.Name)
 		return nil, err
 	}
 
-	expectedSHA := ""
+	finalExpectedSHA := ""
 	if outFile.Name == gf.Name {
-		expectedSHA, err = expectedSHA256ForAsset(outFile.Name, checksumAssets, gf.ExtraHeaders)
-		if err != nil {
-			log.WithError(err).Debugf("GitLab checksum lookup failed for %s/%s asset %q", g.owner, g.repo, outFile.Name)
-			return nil, err
-		}
+		finalExpectedSHA = expectedSHA
 	}
 
 	version := release.TagName
@@ -205,7 +216,7 @@ func (g *gitLab) Fetch(opts *FetchOpts) (*File, error) {
 		Data:        outFile.Source,
 		Name:        outFile.Name,
 		Version:     version,
-		ExpectedSHA: expectedSHA,
+		ExpectedSHA: finalExpectedSHA,
 		PublishedAt: gitLabPublishedAt(release),
 	}
 
@@ -226,7 +237,10 @@ func (g *gitLab) GetLatestVersion() (*ReleaseInfo, error) {
 	log.Debugf("Getting latest release for %s/%s", g.owner, g.repo)
 	projectPath := fmt.Sprintf("%s/%s", g.owner, g.repo)
 
-	release, resp, err := g.client.Releases.GetLatestRelease(projectPath, gitlab.WithContext(context.Background()))
+	ctx, cancel := newProviderRequestContext()
+	defer cancel()
+
+	release, resp, err := g.client.Releases.GetLatestRelease(projectPath, gitlab.WithContext(ctx))
 	if resp != nil && resp.StatusCode == http.StatusNotFound {
 		return nil, fmt.Errorf("repository %s/%s does not have releases", g.owner, g.repo)
 	}
@@ -246,10 +260,13 @@ func (g *gitLab) ListReleases(limit int) ([]*ReleaseInfo, error) {
 	}
 
 	projectPath := fmt.Sprintf("%s/%s", g.owner, g.repo)
+	ctx, cancel := newProviderRequestContext()
+	defer cancel()
+
 	releases, resp, err := g.client.Releases.ListReleases(projectPath, &gitlab.ListReleasesOptions{
 		ListOptions: gitlab.ListOptions{PerPage: limit},
 		Sort:        gitlab.Ptr("desc"),
-	})
+	}, gitlab.WithContext(ctx))
 	if resp != nil && resp.StatusCode == http.StatusNotFound {
 		return nil, fmt.Errorf("repository %s/%s does not have releases", g.owner, g.repo)
 	}
@@ -294,24 +311,12 @@ func gitLabReleaseInfo(release *gitlab.Release) *ReleaseInfo {
 }
 
 func newGitLab(u *url.URL) (Provider, error) {
-	s := strings.Split(u.Path, "/")
-	if len(s) < 3 {
+	segments := providerPathSegments(u)
+	if len(segments) < 2 {
 		return nil, fmt.Errorf("Error parsing GitLab URL %s, can't find owner and repo", u.String())
 	}
 
-	// it's a specific releases URL
-	var tag string
-	if strings.Contains(u.Path, "/releases/") {
-		// For release URL's, the
-		// path is usually /releases/v0.1.
-		ps := strings.Split(u.Path, "/")
-		for i, p := range ps {
-			if p == "releases" {
-				tag = strings.Join(ps[i+1:], "/")
-			}
-		}
-
-	}
+	tag := gitLabReleaseTagFromSegments(segments)
 
 	token := os.Getenv("GITLAB_TOKEN")
 	hostnameSpecificEnvVarName := fmt.Sprintf("GITLAB_TOKEN_%s", strings.ReplaceAll(u.Hostname(), `.`, "_"))
@@ -319,9 +324,12 @@ func newGitLab(u *url.URL) (Provider, error) {
 	if hostnameSpecificToken != "" {
 		token = hostnameSpecificToken
 	}
-	client, err := gitlab.NewClient(token, gitlab.WithBaseURL(fmt.Sprintf("https://%s/api/v4", u.Hostname())))
+	client, err := gitlab.NewClient(token,
+		gitlab.WithBaseURL(fmt.Sprintf("https://%s/api/v4", u.Hostname())),
+		gitlab.WithHTTPClient(newProviderHTTPClient()),
+	)
 	if err != nil {
 		return nil, err
 	}
-	return &gitLab{url: u, client: client, token: token, owner: s[1], repo: s[2], tag: tag}, nil
+	return &gitLab{url: u, client: client, token: token, owner: segments[0], repo: segments[1], tag: tag}, nil
 }

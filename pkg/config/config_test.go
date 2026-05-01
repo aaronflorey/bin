@@ -1,9 +1,14 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
+	"os"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -99,4 +104,158 @@ func TestDetectLinuxLibC(t *testing.T) {
 			t.Fatalf("expected glibc aliases, got %v", libc)
 		}
 	})
+}
+
+func TestCheckAndLoadAllowsFreshBINCONFIGPath(t *testing.T) {
+	t.Cleanup(func() {
+		cfg = config{}
+	})
+
+	configPath := filepath.Join(t.TempDir(), "nested", "config.json")
+	defaultPath := filepath.Join(t.TempDir(), "bin")
+	t.Setenv("BIN_CONFIG", configPath)
+	t.Setenv("BIN_EXE_DIR", defaultPath)
+
+	if err := CheckAndLoad(); err != nil {
+		t.Fatalf("CheckAndLoad returned error: %v", err)
+	}
+
+	if cfg.DefaultPath != defaultPath {
+		t.Fatalf("expected default path %q, got %q", defaultPath, cfg.DefaultPath)
+	}
+	if cfg.Bins == nil {
+		t.Fatal("expected bins map to be initialized")
+	}
+	if _, err := os.Stat(configPath); err != nil {
+		t.Fatalf("expected config file to be created: %v", err)
+	}
+
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("failed to read config file: %v", err)
+	}
+
+	var persisted config
+	if err := json.Unmarshal(raw, &persisted); err != nil {
+		t.Fatalf("expected valid config json, got error: %v", err)
+	}
+	if persisted.DefaultPath != defaultPath {
+		t.Fatalf("expected persisted default path %q, got %q", defaultPath, persisted.DefaultPath)
+	}
+}
+
+func TestUpsertBinaryPersistsValidConfig(t *testing.T) {
+	t.Cleanup(func() {
+		cfg = config{}
+	})
+
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	defaultPath := filepath.Join(t.TempDir(), "bin")
+	t.Setenv("BIN_CONFIG", configPath)
+	t.Setenv("BIN_EXE_DIR", defaultPath)
+
+	if err := CheckAndLoad(); err != nil {
+		t.Fatalf("CheckAndLoad returned error: %v", err)
+	}
+
+	binary := &Binary{
+		Path:    filepath.Join(defaultPath, "tool"),
+		Version: "1.2.3",
+		URL:     "https://example.test/tool",
+	}
+	if err := UpsertBinary(binary); err != nil {
+		t.Fatalf("UpsertBinary returned error: %v", err)
+	}
+
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("failed to read config file: %v", err)
+	}
+
+	var persisted config
+	if err := json.Unmarshal(raw, &persisted); err != nil {
+		t.Fatalf("expected valid config json, got error: %v", err)
+	}
+	if got := persisted.Bins[binary.Path]; got == nil || got.Version != binary.Version {
+		t.Fatalf("expected persisted binary %+v, got %+v", binary, got)
+	}
+}
+
+func TestCheckAndLoadUsesXDGConfigHome(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("XDG config path is Unix-specific")
+	}
+
+	t.Cleanup(func() {
+		cfg = config{}
+	})
+
+	homeDir := t.TempDir()
+	xdgDir := filepath.Join(t.TempDir(), "xdg")
+	defaultPath := filepath.Join(t.TempDir(), "bin")
+	if err := os.MkdirAll(xdgDir, 0o755); err != nil {
+		t.Fatalf("failed to create XDG config dir: %v", err)
+	}
+
+	t.Setenv("HOME", homeDir)
+	t.Setenv("XDG_CONFIG_HOME", xdgDir)
+	t.Setenv("BIN_EXE_DIR", defaultPath)
+	t.Setenv("BIN_CONFIG", "")
+
+	if err := CheckAndLoad(); err != nil {
+		t.Fatalf("CheckAndLoad returned error: %v", err)
+	}
+
+	configPath := filepath.Join(xdgDir, "bin", "config.json")
+	if _, err := os.Stat(configPath); err != nil {
+		t.Fatalf("expected config file at XDG path: %v", err)
+	}
+}
+
+func TestGetHooksFiltersByType(t *testing.T) {
+	t.Cleanup(func() {
+		cfg = config{}
+	})
+
+	cfg.Hooks = []RunHook{
+		{Type: PreInstall, Command: "pre"},
+		{Type: PostInstall, Command: "post"},
+	}
+
+	hooks := GetHooks(PreInstall)
+	if len(hooks) != 1 {
+		t.Fatalf("expected 1 pre-install hook, got %d", len(hooks))
+	}
+	if hooks[0].Command != "pre" {
+		t.Fatalf("unexpected hook command: %q", hooks[0].Command)
+	}
+}
+
+func TestExecuteHooksReturnsCommandOutputOnFailure(t *testing.T) {
+	hooks := []RunHook{{
+		Type:    PreInstall,
+		Command: os.Args[0],
+		Args:    []string{"-test.run=TestConfigHookHelperProcess", "--", "fail"},
+	}}
+
+	err := ExecuteHooks(hooks)
+	if err == nil {
+		t.Fatal("expected ExecuteHooks to fail")
+	}
+	if !strings.Contains(err.Error(), "hook failure output") {
+		t.Fatalf("expected hook output in error, got: %v", err)
+	}
+}
+
+func TestConfigHookHelperProcess(t *testing.T) {
+	args := os.Args
+	for i, arg := range args {
+		if arg == "--" && i+1 < len(args) {
+			if args[i+1] == "fail" {
+				fmt.Fprint(os.Stderr, "hook failure output")
+				os.Exit(7)
+			}
+			break
+		}
+	}
 }
