@@ -110,19 +110,19 @@ func New(u, provider string) (Provider, error) {
 		return newGenericURL(purl)
 	}
 
-	if strings.Contains(purl.Host, "github") || provider == "github" {
+	if provider == "github" || hostIsOrSubdomain(purl.Hostname(), "github.com") {
 		return newGitHub(purl)
 	}
 
-	if strings.Contains(purl.Host, "gitlab") || provider == "gitlab" {
+	if provider == "gitlab" || hostIsOrSubdomain(purl.Hostname(), "gitlab.com") {
 		return newGitLab(purl)
 	}
 
-	if strings.Contains(purl.Host, "codeberg") || provider == "codeberg" {
+	if provider == "codeberg" || hostIsOrSubdomain(purl.Hostname(), "codeberg.org") {
 		return newCodeberg(purl)
 	}
 
-	if strings.Contains(purl.Host, "releases.hashicorp.com") || provider == "hashicorp" {
+	if provider == "hashicorp" || hostIsOrSubdomain(purl.Hostname(), "releases.hashicorp.com") {
 		return newHashiCorp(purl)
 	}
 

@@ -31,7 +31,7 @@ type metadataResult struct {
 func newGenericURL(u *url.URL) (Provider, error) {
 	return &genericURL{
 		url:    u,
-		client: http.DefaultClient,
+		client: newProviderHTTPClient(),
 	}, nil
 }
 

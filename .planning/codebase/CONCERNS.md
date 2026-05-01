@@ -18,7 +18,7 @@
 
 **Asset-selection logic is concentrated in one large heuristic-heavy module:**
 - Issue: Archive inspection, asset scoring, metadata filtering, package filtering, recursive decompression, and HTTP download handling all live in `pkg/assets/assets.go`.
-- Files: `pkg/assets/assets.go`, `pkg/assets/assets_test.go`, `TODO.md`
+- Files: `pkg/assets/assets.go`, `pkg/assets/assets_test.go`
 - Impact: Small selection changes can affect install, update, ensure, and provider flows at once. The file is large enough that regression risk is high, especially around edge-case asset names and nested archives.
 - Fix approach: Split `pkg/assets/assets.go` into smaller units for scoring, metadata filtering, archive extraction, and transport; keep behavior pinned with focused tests for real-world asset naming edge cases.
 
@@ -52,11 +52,11 @@
 
 ## Performance Bottlenecks
 
-**Downloads are buffered fully in memory before processing:**
-- Problem: `ProcessURL` copies the full HTTP response into a `bytes.Buffer` before archive detection and extraction.
+**Archive processing duplicates data through temporary files:**
+- Problem: `ProcessURL` now streams remote assets to temp files and recursive archive handling can materialize additional temp files for decompression and entry selection.
 - Files: `pkg/assets/assets.go`
-- Cause: Archive selection needs random access-like behavior for inspection, but the current implementation loads the whole asset first.
-- Improvement path: Stream to a temp file instead of memory, then inspect/extract from disk so large releases do not scale memory usage linearly.
+- Cause: Archive inspection needs seekable inputs and nested formats are normalized into file-backed stages for selection and cleanup.
+- Improvement path: Reduce intermediate copies where possible, especially for single-file archives and straightforward decompression chains.
 
 **Go-install provider duplicates binary content in memory:**
 - Problem: `pkg/providers/goinstall.go` runs `go install`, opens the resulting binary, then reads the whole file with `io.ReadAll` into memory before returning it as a `bytes.Reader`.
@@ -73,7 +73,7 @@
 ## Fragile Areas
 
 **Archive and asset heuristics:**
-- Files: `pkg/assets/assets.go`, `pkg/assets/assets_test.go`, `TODO.md`
+- Files: `pkg/assets/assets.go`, `pkg/assets/assets_test.go`
 - Why fragile: Selection depends on filename heuristics, metadata suffix/token filtering, archive recursion, and archive-entry filtering. Repositories with unusual release names are easy to mis-rank.
 - Safe modification: Add or update tests in `pkg/assets/assets_test.go` for every new asset naming rule before changing heuristics in `pkg/assets/assets.go`.
 - Test coverage: Good unit coverage exists for many selectors, but there are no end-to-end command tests proving install/update against representative real release pages.

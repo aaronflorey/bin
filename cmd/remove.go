@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/aaronflorey/bin/pkg/config"
 	"github.com/aaronflorey/bin/pkg/prompt"
@@ -152,6 +153,10 @@ func (root *removeCmd) resolveTargets(cmd *cobra.Command, bins map[string]*confi
 					continue
 				}
 			}
+			if err != nil && strings.Contains(err.Error(), "not managed by bin") {
+				fmt.Fprintf(cmd.ErrOrStderr(), "binary %s is not managed by bin, skipping\n", p)
+				continue
+			}
 			if err != nil {
 				return nil, err
 			}
@@ -159,17 +164,22 @@ func (root *removeCmd) resolveTargets(cmd *cobra.Command, bins map[string]*confi
 			resolvedPaths[p] = bp
 		}
 
-		ebp := os.ExpandEnv(bp)
-		bin, ok := bins[ebp]
+		configPath := bp
+		bin, ok := bins[configPath]
 		if !ok {
+			configPath = os.ExpandEnv(bp)
+			bin, ok = bins[configPath]
+		}
+		if !ok {
+			fmt.Fprintf(cmd.ErrOrStderr(), "binary %s is not managed by bin, skipping\n", p)
 			continue
 		}
-		if _, duplicate := seen[ebp]; duplicate {
+		if _, duplicate := seen[configPath]; duplicate {
 			continue
 		}
 
-		seen[ebp] = struct{}{}
-		targets = append(targets, removeTarget{configPath: ebp, deletePath: ebp, binary: bin})
+		seen[configPath] = struct{}{}
+		targets = append(targets, removeTarget{configPath: configPath, deletePath: os.ExpandEnv(bin.Path), binary: bin})
 	}
 
 	return targets, nil

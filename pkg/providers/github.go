@@ -1,7 +1,6 @@
 package providers
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -14,7 +13,6 @@ import (
 	"github.com/aaronflorey/bin/pkg/config"
 	"github.com/caarlos0/log"
 	"github.com/google/go-github/v73/github"
-	"golang.org/x/oauth2"
 )
 
 var runGHAuthToken = func() ([]byte, error) {
@@ -42,10 +40,14 @@ func (g *gitHub) Fetch(opts *FetchOpts) (*File, error) {
 			g.tag = opts.Version
 		}
 		log.Infof("Getting %s release for %s/%s", g.tag, g.owner, g.repo)
-		release, _, err = g.client.Repositories.GetReleaseByTag(context.Background(), g.owner, g.repo, g.tag)
+		ctx, cancel := newProviderRequestContext()
+		release, _, err = g.client.Repositories.GetReleaseByTag(ctx, g.owner, g.repo, g.tag)
+		cancel()
 	} else {
 		log.Infof("Getting latest release for %s/%s", g.owner, g.repo)
-		release, resp, err = g.client.Repositories.GetLatestRelease(context.Background(), g.owner, g.repo)
+		ctx, cancel := newProviderRequestContext()
+		release, resp, err = g.client.Repositories.GetLatestRelease(ctx, g.owner, g.repo)
+		cancel()
 		if resp != nil && resp.StatusCode == http.StatusNotFound {
 			err = fmt.Errorf("repository %s/%s does not have releases", g.owner, g.repo)
 		}
@@ -88,19 +90,21 @@ func (g *gitHub) Fetch(opts *FetchOpts) (*File, error) {
 		gf.ExtraHeaders["Authorization"] = fmt.Sprintf("token %s", g.token)
 	}
 
-	outFile, err := f.ProcessURL(gf)
+	expectedSHA, err := expectedSHA256ForAsset(gf.Name, checksumAssets, gf.ExtraHeaders)
+	if err != nil {
+		log.WithError(err).Debugf("GitHub checksum lookup failed for %s/%s asset %q", g.owner, g.repo, gf.Name)
+		return nil, err
+	}
+
+	outFile, err := f.ProcessURL(gf, expectedSHA)
 	if err != nil {
 		log.WithError(err).Debugf("GitHub asset processing failed for %s/%s asset %q", g.owner, g.repo, gf.Name)
 		return nil, err
 	}
 
-	expectedSHA := ""
+	finalExpectedSHA := ""
 	if outFile.Name == gf.Name {
-		expectedSHA, err = expectedSHA256ForAsset(outFile.Name, checksumAssets, gf.ExtraHeaders)
-		if err != nil {
-			log.WithError(err).Debugf("GitHub checksum lookup failed for %s/%s asset %q", g.owner, g.repo, outFile.Name)
-			return nil, err
-		}
+		finalExpectedSHA = expectedSHA
 	}
 
 	version := release.GetTagName()
@@ -109,7 +113,7 @@ func (g *gitHub) Fetch(opts *FetchOpts) (*File, error) {
 		Data:        outFile.Source,
 		Name:        outFile.Name,
 		Version:     version,
-		ExpectedSHA: expectedSHA,
+		ExpectedSHA: finalExpectedSHA,
 		PackagePath: outFile.PackagePath,
 		PublishedAt: githubPublishedAt(release),
 	}
@@ -121,7 +125,10 @@ func (g *gitHub) Fetch(opts *FetchOpts) (*File, error) {
 // returns the corresponding name and url to fetch the version
 func (g *gitHub) GetLatestVersion() (*ReleaseInfo, error) {
 	log.Debugf("Getting latest release for %s/%s", g.owner, g.repo)
-	release, _, err := g.client.Repositories.GetLatestRelease(context.Background(), g.owner, g.repo)
+	ctx, cancel := newProviderRequestContext()
+	defer cancel()
+
+	release, _, err := g.client.Repositories.GetLatestRelease(ctx, g.owner, g.repo)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +141,10 @@ func (g *gitHub) ListReleases(limit int) ([]*ReleaseInfo, error) {
 		limit = 100
 	}
 
-	releases, _, err := g.client.Repositories.ListReleases(context.Background(), g.owner, g.repo, &github.ListOptions{PerPage: limit})
+	ctx, cancel := newProviderRequestContext()
+	defer cancel()
+
+	releases, _, err := g.client.Repositories.ListReleases(ctx, g.owner, g.repo, &github.ListOptions{PerPage: limit})
 	if err != nil {
 		return nil, err
 	}
@@ -176,25 +186,12 @@ func githubReleaseInfo(release *github.RepositoryRelease) *ReleaseInfo {
 }
 
 func newGitHub(u *url.URL) (Provider, error) {
-	s := strings.Split(u.Path, "/")
-	if len(s) < 3 {
+	segments := providerPathSegments(u)
+	if len(segments) < 2 {
 		return nil, fmt.Errorf("error parsing Github URL %s, can't find owner and repo", u.String())
 	}
 
-	// it's a specific releases URL
-	var tag string
-	if strings.Contains(u.Path, "/releases/") {
-		// For release and download URL's, the
-		// path is usually /releases/tag/v0.1
-		// or /releases/download/v0.1.
-		ps := strings.Split(u.Path, "/")
-		for i, p := range ps {
-			if p == "releases" {
-				tag = strings.Join(ps[i+2:], "/")
-			}
-		}
-
-	}
+	tag := releaseTagFromSegments(segments)
 
 	token := os.Getenv("GITHUB_AUTH_TOKEN")
 	if len(token) == 0 {
@@ -214,16 +211,12 @@ func newGitHub(u *url.URL) (Provider, error) {
 		}
 	}
 
-	var tc *http.Client
+	tc := newProviderHTTPClient()
 
 	if len(gbu) > 0 && len(guu) > 0 && len(gau) > 0 {
-		tc = oauth2.NewClient(context.Background(), oauth2.StaticTokenSource(
-			&oauth2.Token{AccessToken: gau},
-		))
+		tc = newProviderOAuthHTTPClient(gau)
 	} else if token != "" {
-		tc = oauth2.NewClient(context.Background(), oauth2.StaticTokenSource(
-			&oauth2.Token{AccessToken: token},
-		))
+		tc = newProviderOAuthHTTPClient(token)
 	}
 
 	var client *github.Client
@@ -237,5 +230,5 @@ func newGitHub(u *url.URL) (Provider, error) {
 		client = github.NewClient(tc)
 	}
 
-	return &gitHub{url: u, client: client, owner: s[1], repo: s[2], tag: tag, token: token}, nil
+	return &gitHub{url: u, client: client, owner: segments[0], repo: segments[1], tag: tag, token: token}, nil
 }

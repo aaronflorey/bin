@@ -1,7 +1,6 @@
 package providers
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -39,7 +38,10 @@ func (d *docker) Fetch(opts *FetchOpts) (*File, error) {
 		d.tag = opts.Version
 	}
 	log.Infof("Pulling docker image %s:%s", d.repo, d.tag)
-	out, err := d.client.ImageCreate(context.Background(), fmt.Sprintf("%s:%s", d.repo, d.tag), image.CreateOptions{})
+	ctx, cancel := newProviderRequestContext()
+	defer cancel()
+
+	out, err := d.client.ImageCreate(ctx, fmt.Sprintf("%s:%s", d.repo, d.tag), image.CreateOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +93,10 @@ func (d *docker) Cleanup(opts *CleanupOpts) error {
 	}
 
 	ref := fmt.Sprintf("%s:%s", d.repo, d.tag)
-	_, err := d.client.ImageRemove(context.Background(), ref, image.RemoveOptions{PruneChildren: true})
+	ctx, cancel := newProviderRequestContext()
+	defer cancel()
+
+	_, err := d.client.ImageRemove(ctx, ref, image.RemoveOptions{PruneChildren: true})
 	return err
 }
 
@@ -121,7 +126,7 @@ func newDocker(imageURL string) (Provider, error) {
 		repo:    repo,
 		tag:     tag,
 		client:  c,
-		http:    &http.Client{Timeout: 10 * time.Second},
+		http:    newProviderHTTPClient(),
 		tagsURL: "https://registry.hub.docker.com/v2/repositories/%s/tags?page_size=100",
 	}, nil
 }

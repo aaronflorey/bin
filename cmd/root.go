@@ -298,5 +298,5 @@ func getBinPath(name string) (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("binary path %s not found", f)
+	return "", fmt.Errorf("binary path %s is not managed by bin", f)
 }
