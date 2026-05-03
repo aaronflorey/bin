@@ -1083,6 +1083,38 @@ func (f *Filter) matchesPackagePath(entryName string) bool {
 	return filepath.Base(entryName) == filepath.Base(f.opts.PackagePath)
 }
 
+func isSingleAppBundleArchive(entries map[string]string) (string, bool) {
+	if len(entries) == 0 {
+		return "", false
+	}
+	var bundlePrefix string
+	for name := range entries {
+		normalized := strings.Trim(strings.ReplaceAll(name, "\\", "/"), "/")
+		if normalized == "" {
+			return "", false
+		}
+		idx := strings.Index(normalized, "/")
+		var root string
+		if idx < 0 {
+			root = normalized
+		} else {
+			root = normalized[:idx]
+		}
+		if !strings.HasSuffix(strings.ToLower(root), ".app") {
+			return "", false
+		}
+		if bundlePrefix == "" {
+			bundlePrefix = root + "/"
+		} else if root+"/" != bundlePrefix {
+			return "", false
+		}
+	}
+	if bundlePrefix == "" {
+		return "", false
+	}
+	return strings.TrimSuffix(bundlePrefix, "/"), true
+}
+
 func (f *Filter) processTar(name string, r io.Reader, autoSelect string) (*finalFile, error) {
 	tr := tar.NewReader(r)
 	tarFiles := map[string]string{}
@@ -1134,6 +1166,10 @@ func (f *Filter) processTar(name string, r io.Reader, autoSelect string) (*final
 	}
 	if len(tarFiles) == 0 {
 		return nil, fmt.Errorf("no files found in tar archive, use -p flag to manually select . PackagePath [%s]", f.opts.PackagePath)
+	}
+
+	if bundleName, ok := isSingleAppBundleArchive(tarFiles); ok {
+		return nil, fmt.Errorf("tar archive contains a macOS app bundle (%s) instead of a standalone binary: %w", bundleName, ErrNoCompatibleFiles)
 	}
 
 	as := make([]*Asset, 0)
@@ -1234,6 +1270,10 @@ func (f *Filter) processZip(name string, r io.Reader, autoSelect string) (*final
 	}
 	if len(zipFiles) == 0 {
 		return nil, fmt.Errorf("No files found in zip archive. PackagePath [%s]", f.opts.PackagePath)
+	}
+
+	if bundleName, ok := isSingleAppBundleArchive(zipFiles); ok {
+		return nil, fmt.Errorf("zip archive contains a macOS app bundle (%s) instead of a standalone binary: %w", bundleName, ErrNoCompatibleFiles)
 	}
 
 	as := make([]*Asset, 0)
