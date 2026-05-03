@@ -43,6 +43,7 @@ var (
 		".sbom.json", ".spdx.json", ".cyclonedx.json",
 		".provenance.json", ".attestation.json", ".attest.json",
 		".sig", ".minisig", ".pem", ".crt", ".cer", ".asc",
+		".blockmap",
 	}
 
 	metadataTokens = []string{
