@@ -138,6 +138,13 @@ jobs:
 For commands that target managed binaries (for example `update`/`outdated`/`ensure`), you can use a unique prefix (like `uni`) and `bin` will suggest a matching managed name.
 `bin list` shows whether an entry is managed as a direct `binary` or a `system-package:<type>` install.
 
+When a release publishes multiple installable tools, `bin install` now selects by logical tool name (not raw archive filename):
+- Interactive mode prompts you to choose when your requested name maps to multiple tool candidates.
+- `--non-interactive` fails fast with an ambiguity error so CI does not silently pick the wrong tool.
+- `--select <token>` still bypasses the prompt by choosing an exact selection token.
+- The selected logical tool is persisted and reused by `bin update` and `bin ensure`, so later runs keep fetching the same sibling tool.
+- Alias behavior is supported for repos that publish `*-cli` assets: requesting `weave` can resolve to `weave-cli` when no exact `weave` tool exists, while distinct tools like `weave-driver` remain separate.
+
 When installing multiple repos in one command, custom paths are not supported. Use either `bin install <repo> [path]` for a single repo or `bin install <repo>...` for many repos.
 
 `bin export` writes JSON to stdout by default and can write to a file when `[file]` is provided.  
