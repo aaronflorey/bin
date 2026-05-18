@@ -30,7 +30,6 @@ func TestRootVerboseSkipsSpinner(t *testing.T) {
 	setupTestConfig(t)
 
 	root := newRootCmd("test", func(int) {})
-	root.shouldLaunchTUI = func([]string) bool { return false }
 
 	var stdout bytes.Buffer
 	root.cmd.SetOut(&stdout)
@@ -86,7 +85,6 @@ func TestRootLogFileCapturesVerboseLogs(t *testing.T) {
 	setupTestConfig(t)
 
 	root := newRootCmd("test", func(int) {})
-	root.shouldLaunchTUI = func([]string) bool { return false }
 
 	var stdout bytes.Buffer
 	root.cmd.SetOut(&stdout)
