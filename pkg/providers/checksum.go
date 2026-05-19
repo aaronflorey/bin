@@ -21,9 +21,21 @@ type checksumAsset struct {
 	URL  string
 }
 
+type checksumScope int
+
+const (
+	checksumScopeArchive checksumScope = iota
+	checksumScopeFinal
+)
+
+type expectedChecksum struct {
+	Hash  string
+	Scope checksumScope
+}
+
 var checksumHTTPClient = &http.Client{Timeout: 30 * time.Second}
 
-func expectedSHA256ForAsset(name string, assets []checksumAsset, headers map[string]string) (string, error) {
+func expectedSHA256ForAsset(name string, assets []checksumAsset, headers map[string]string) (*expectedChecksum, error) {
 	hashOrder := fetchChecksumHashOrder(assets, headers)
 	checksumCandidates := rankedChecksumAssets(name, assets)
 	for _, candidate := range checksumCandidates {
@@ -33,13 +45,13 @@ func expectedSHA256ForAsset(name string, assets []checksumAsset, headers map[str
 			continue
 		}
 
-		hash := parseSHA256Checksum(content, name, hashOrder)
-		if hash != "" {
-			return hash, nil
+		expected := parseSHA256Checksum(content, name, candidate.Name, hashOrder)
+		if expected != nil {
+			return expected, nil
 		}
 	}
 
-	return "", nil
+	return nil, nil
 }
 
 func rankedChecksumAssets(name string, assets []checksumAsset) []checksumAsset {
@@ -62,6 +74,8 @@ func rankedChecksumAssets(name string, assets []checksumAsset) []checksumAsset {
 		switch {
 		case lower == target+".sha256" || lower == target+".sha256sum":
 			score = 100
+		case checksumAssetMatchesTarget(lower, target):
+			score = 95
 		case strings.HasPrefix(lower, targetDot) && strings.Contains(lower, "sha256"):
 			score = 90
 		case strings.Contains(lower, "sha256"):
@@ -143,9 +157,10 @@ func fetchChecksumFile(url string, headers map[string]string) (string, error) {
 	return string(body), nil
 }
 
-func parseSHA256Checksum(content, fileName string, hashOrder []string) string {
+func parseSHA256Checksum(content, fileName, checksumFileName string, hashOrder []string) *expectedChecksum {
 	targetName := strings.ToLower(fileName)
 	targetBase := strings.ToLower(filepath.Base(fileName))
+	exactChecksumTarget := checksumFileDirectlyTargetsAsset(checksumFileName, fileName)
 
 	unmatched := []string{}
 	scanner := bufio.NewScanner(strings.NewReader(content))
@@ -159,12 +174,12 @@ func parseSHA256Checksum(content, fileName string, hashOrder []string) string {
 		lowerLine := strings.ToLower(line)
 		if strings.Contains(lowerLine, targetName) || strings.Contains(lowerLine, targetBase) {
 			if hash := selectSHA256FromOrderedFields(fields, hashOrder); hash != "" {
-				return hash
+				return &expectedChecksum{Hash: hash, Scope: checksumScopeArchive}
 			}
 
 			hashes := extractSHA256Hashes(line)
 			if len(hashes) == 1 {
-				return hashes[0]
+				return &expectedChecksum{Hash: hashes[0], Scope: checksumScopeArchive}
 			}
 			continue
 		}
@@ -175,11 +190,74 @@ func parseSHA256Checksum(content, fileName string, hashOrder []string) string {
 		}
 	}
 
-	if len(unmatched) == 1 {
-		return unmatched[0]
+	if len(unmatched) == 1 && checksumAssetMatchesTarget(checksumFileName, fileName) {
+		scope := checksumScopeFinal
+		if exactChecksumTarget {
+			scope = checksumScopeArchive
+		}
+		return &expectedChecksum{Hash: unmatched[0], Scope: scope}
 	}
 
-	return ""
+	return nil
+}
+
+func checksumAssetMatchesTarget(checksumFileName, targetName string) bool {
+	return normalizeChecksumTargetName(checksumFileName) == normalizeChecksumTargetName(targetName)
+}
+
+func checksumFileDirectlyTargetsAsset(checksumFileName, targetName string) bool {
+	lowerChecksum := strings.ToLower(filepath.Base(checksumFileName))
+	lowerTarget := strings.ToLower(filepath.Base(targetName))
+	return lowerChecksum == lowerTarget+".sha256" || lowerChecksum == lowerTarget+".sha256sum"
+}
+
+func normalizeChecksumTargetName(name string) string {
+	lower := strings.ToLower(filepath.Base(name))
+
+	for _, suffix := range []string{
+		".sha256sum",
+		".sha256",
+		".sha512sum",
+		".sha512",
+		".sha1sum",
+		".sha1",
+		".md5sum",
+		".md5",
+	} {
+		if strings.HasSuffix(lower, suffix) {
+			lower = strings.TrimSuffix(lower, suffix)
+			break
+		}
+	}
+
+	for _, suffix := range []string{
+		".tar.gz",
+		".tar.xz",
+		".tar.bz2",
+		".tar.zst",
+		".tgz",
+		".tbz2",
+		".txz",
+		".zip",
+		".gz",
+		".xz",
+		".bz2",
+		".zst",
+		".msi",
+		".pkg",
+		".deb",
+		".rpm",
+		".apk",
+		".dmg",
+		".appimage",
+	} {
+		if strings.HasSuffix(lower, suffix) {
+			lower = strings.TrimSuffix(lower, suffix)
+			break
+		}
+	}
+
+	return lower
 }
 
 func parseChecksumHashOrder(content string) []string {

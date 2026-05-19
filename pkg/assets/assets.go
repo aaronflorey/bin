@@ -880,7 +880,7 @@ func appendUnique(values []string, additions ...string) []string {
 }
 
 // ProcessURL processes a FilteredAsset by uncompressing/unarchiving the URL of the asset.
-func (f *Filter) ProcessURL(gf *FilteredAsset, expectedSHA string) (*finalFile, error) {
+func (f *Filter) ProcessURL(gf *FilteredAsset, expectedSHA string, verifyArchiveChecksum bool) (*finalFile, error) {
 	f.name = gf.Name
 	req, err := http.NewRequest(http.MethodGet, gf.URL, nil)
 	if err != nil {
@@ -925,7 +925,7 @@ func (f *Filter) ProcessURL(gf *FilteredAsset, expectedSHA string) (*finalFile, 
 	}
 
 	actualSHA := fmt.Sprintf("%x", h.Sum(nil))
-	if expectedSHA != "" && !strings.EqualFold(actualSHA, expectedSHA) {
+	if verifyArchiveChecksum && expectedSHA != "" && !strings.EqualFold(actualSHA, expectedSHA) {
 		return nil, fmt.Errorf("sha256 mismatch for %s: expected %s, got %s", gf.Name, expectedSHA, actualSHA)
 	}
 
