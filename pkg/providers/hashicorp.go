@@ -127,21 +127,29 @@ func (g *hashiCorp) Fetch(opts *FetchOpts) (*File, error) {
 	}
 	log.Debugf("Selected HashiCorp asset %q for %s", gf.Name, g.repo)
 
-	expectedSHA, err := expectedSHA256ForAsset(gf.Name, checksumAssets, gf.ExtraHeaders)
+	expectedChecksum, err := expectedSHA256ForAsset(gf.Name, checksumAssets, gf.ExtraHeaders)
 	if err != nil {
 		log.WithError(err).Debugf("HashiCorp checksum lookup failed for %s asset %q", g.repo, gf.Name)
 		return nil, err
 	}
 
-	outFile, err := f.ProcessURL(gf, expectedSHA)
+	verifyArchiveChecksum := expectedChecksum != nil && expectedChecksum.Scope == checksumScopeArchive
+	expectedSHA := ""
+	if expectedChecksum != nil {
+		expectedSHA = expectedChecksum.Hash
+	}
+
+	outFile, err := f.ProcessURL(gf, expectedSHA, verifyArchiveChecksum)
 	if err != nil {
 		log.WithError(err).Debugf("HashiCorp asset processing failed for %s asset %q", g.repo, gf.Name)
 		return nil, err
 	}
 
 	finalExpectedSHA := ""
-	if outFile.Name == gf.Name {
-		finalExpectedSHA = expectedSHA
+	if expectedChecksum != nil {
+		if expectedChecksum.Scope == checksumScopeFinal || outFile.Name == gf.Name {
+			finalExpectedSHA = expectedChecksum.Hash
+		}
 	}
 
 	version := release.Version

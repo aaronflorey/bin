@@ -193,21 +193,29 @@ func (g *gitLab) Fetch(opts *FetchOpts) (*File, error) {
 		gf.ExtraHeaders["PRIVATE-TOKEN"] = g.token
 	}
 
-	expectedSHA, err := expectedSHA256ForAsset(gf.Name, checksumAssets, gf.ExtraHeaders)
+	expectedChecksum, err := expectedSHA256ForAsset(gf.Name, checksumAssets, gf.ExtraHeaders)
 	if err != nil {
 		log.WithError(err).Debugf("GitLab checksum lookup failed for %s/%s asset %q", g.owner, g.repo, gf.Name)
 		return nil, err
 	}
 
-	outFile, err := f.ProcessURL(gf, expectedSHA)
+	verifyArchiveChecksum := expectedChecksum != nil && expectedChecksum.Scope == checksumScopeArchive
+	expectedSHA := ""
+	if expectedChecksum != nil {
+		expectedSHA = expectedChecksum.Hash
+	}
+
+	outFile, err := f.ProcessURL(gf, expectedSHA, verifyArchiveChecksum)
 	if err != nil {
 		log.WithError(err).Debugf("GitLab asset processing failed for %s/%s asset %q", g.owner, g.repo, gf.Name)
 		return nil, err
 	}
 
 	finalExpectedSHA := ""
-	if outFile.Name == gf.Name {
-		finalExpectedSHA = expectedSHA
+	if expectedChecksum != nil {
+		if expectedChecksum.Scope == checksumScopeFinal || outFile.Name == gf.Name {
+			finalExpectedSHA = expectedChecksum.Hash
+		}
 	}
 
 	version := release.TagName

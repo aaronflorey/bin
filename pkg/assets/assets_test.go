@@ -84,7 +84,7 @@ func TestProcessURLValidatesArchiveChecksum(t *testing.T) {
 	f := NewFilter(&FilterOpts{NonInteractive: true})
 	f.repoName = "tool"
 
-	result, err := f.ProcessURL(&FilteredAsset{Name: "tool-linux-amd64.zip", URL: server.URL}, fmt.Sprintf("%x", expectedHash[:]))
+	result, err := f.ProcessURL(&FilteredAsset{Name: "tool-linux-amd64.zip", URL: server.URL}, fmt.Sprintf("%x", expectedHash[:]), true)
 	if err != nil {
 		t.Fatalf("ProcessURL returned error: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestProcessURLRejectsArchiveChecksumMismatch(t *testing.T) {
 	f := NewFilter(&FilterOpts{NonInteractive: true})
 	f.repoName = "tool"
 
-	_, err := f.ProcessURL(&FilteredAsset{Name: "tool-linux-amd64.zip", URL: server.URL}, strings.Repeat("0", 64))
+	_, err := f.ProcessURL(&FilteredAsset{Name: "tool-linux-amd64.zip", URL: server.URL}, strings.Repeat("0", 64), true)
 	if err == nil {
 		t.Fatal("expected checksum mismatch error")
 	}
@@ -141,7 +141,7 @@ func TestProcessURLPreservesNameForTarGzArchives(t *testing.T) {
 	f := NewFilter(&FilterOpts{NonInteractive: true})
 	f.repoName = "ripgrep"
 
-	result, err := f.ProcessURL(&FilteredAsset{Name: "ripgrep-13.0.0-x86_64-unknown-linux-musl.tar.gz", URL: server.URL}, fmt.Sprintf("%x", expectedHash[:]))
+	result, err := f.ProcessURL(&FilteredAsset{Name: "ripgrep-13.0.0-x86_64-unknown-linux-musl.tar.gz", URL: server.URL}, fmt.Sprintf("%x", expectedHash[:]), true)
 	if err != nil {
 		t.Fatalf("ProcessURL returned error: %v", err)
 	}
