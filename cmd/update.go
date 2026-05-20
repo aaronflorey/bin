@@ -42,7 +42,7 @@ type updateInfo struct{ version, url string }
 
 func newUpdateCmd() *updateCmd {
 	root := &updateCmd{
-		newProvider:   providers.New,
+		newProvider:   newProviderWithPolicy,
 		selectItems:   selectUpdatesForInteractiveSession,
 		confirm:       prompt.Confirm,
 		isInteractive: prompt.IsInteractive,

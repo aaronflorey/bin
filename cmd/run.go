@@ -38,7 +38,7 @@ type runTarget struct {
 
 func newRunCmd() *runCmd {
 	root := &runCmd{
-		newProvider:  providers.New,
+		newProvider:  newProviderWithPolicy,
 		userCacheDir: os.UserCacheDir,
 		execCommand:  exec.Command,
 	}

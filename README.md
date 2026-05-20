@@ -416,16 +416,18 @@ git clone https://github.com/aaronflorey/bin.git
 cd bin
 
 # Clean and init
-make clean download
+just clean
+just download
 
 # Run syntax check
-make lint verify
+just lint
+just verify
 
 # Run tests
-make test
+just test
 
 # Build from source
-make build
+just build
 ```
 
 ## 📄 License

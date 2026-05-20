@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -10,7 +11,15 @@ import (
 
 	"github.com/aaronflorey/bin/pkg/config"
 	"github.com/aaronflorey/bin/pkg/prompt"
+	"github.com/aaronflorey/bin/pkg/providers"
 )
+
+type removeTestProvider struct{ cleanupErr error }
+
+func (p removeTestProvider) Fetch(*providers.FetchOpts) (*providers.File, error) { return nil, nil }
+func (p removeTestProvider) GetLatestVersion() (*providers.ReleaseInfo, error)   { return nil, nil }
+func (p removeTestProvider) Cleanup(*providers.CleanupOpts) error                { return p.cleanupErr }
+func (p removeTestProvider) GetID() string                                       { return "test" }
 
 func TestRemoveAliases(t *testing.T) {
 	cmd := newRemoveCmd().cmd
@@ -178,5 +187,44 @@ func TestRemoveWarnsForUnmanagedBinary(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "is not managed by bin") {
 		t.Fatalf("expected unmanaged warning, got: %s", stderr.String())
+	}
+}
+
+func TestRemoveCleanupFailurePreservesBinaryAndConfig(t *testing.T) {
+	defaultPath := setupTestConfig(t)
+
+	trackedPath := filepath.Join(defaultPath, "tool")
+	if err := os.WriteFile(trackedPath, []byte("binary"), 0o755); err != nil {
+		t.Fatalf("failed creating binary file: %v", err)
+	}
+	if err := config.UpsertBinary(&config.Binary{
+		Path:       trackedPath,
+		RemoteName: "tool",
+		Version:    "1.0.0",
+		Hash:       "hash",
+		URL:        "https://example.test/acme/tool",
+		Provider:   "generic",
+	}); err != nil {
+		t.Fatalf("failed to seed test config: %v", err)
+	}
+
+	root := newRemoveCmd()
+	root.newProvider = func(_, _ string) (providers.Provider, error) {
+		return removeTestProvider{cleanupErr: errors.New("cleanup boom")}, nil
+	}
+	root.cmd.SetArgs([]string{filepath.Base(trackedPath)})
+
+	err := root.cmd.Execute()
+	if err == nil {
+		t.Fatal("expected cleanup failure")
+	}
+	if !strings.Contains(err.Error(), "cleanup failed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, statErr := os.Stat(trackedPath); statErr != nil {
+		t.Fatalf("expected binary to remain on disk: %v", statErr)
+	}
+	if _, ok := config.Get().Bins[trackedPath]; !ok {
+		t.Fatalf("expected config entry %s to remain", trackedPath)
 	}
 }

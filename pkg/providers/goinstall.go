@@ -1,7 +1,6 @@
 package providers
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -160,24 +159,18 @@ func (g *goinstall) Fetch(opts *FetchOpts) (*File, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to open path '%s': %w", goBinPath, err)
 	}
-	defer file.Close()
-
-	// Read file content into memory to avoid leaking file handle
-	content, err := io.ReadAll(file)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read binary '%s': %w", goBinPath, err)
-	}
 
 	versionInfo := g.cachedVersionInfo
 	if versionInfo == nil {
 		versionInfo, err = g.getVersionInfo(versionInfoURL(g.repo, g.tag))
 		if err != nil {
+			_ = file.Close()
 			return nil, err
 		}
 	}
 
 	return &File{
-		Data:        bytes.NewReader(content),
+		Data:        file,
 		Name:        g.name,
 		Version:     g.tag,
 		PublishedAt: PtrTime(versionInfo.Time),

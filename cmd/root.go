@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/aaronflorey/bin/pkg/config"
+	"github.com/aaronflorey/bin/pkg/providers"
 	"github.com/aaronflorey/bin/pkg/spinner"
 	"github.com/caarlos0/log"
 	"github.com/charmbracelet/colorprofile"
@@ -69,11 +70,12 @@ func (cmd *rootCmd) Execute(args []string) {
 }
 
 type rootCmd struct {
-	cmd     *cobra.Command
-	logFile string
-	verbose bool
-	exit    func(int)
-	args    []string
+	cmd               *cobra.Command
+	logFile           string
+	verbose           bool
+	allowInsecureHTTP bool
+	exit              func(int)
+	args              []string
 
 	logWriter   io.WriteCloser
 	openLogFile func(string) (io.WriteCloser, error)
@@ -91,6 +93,8 @@ func newRootCmd(version string, exit func(int)) *rootCmd {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			allowInsecureHTTP = root.allowInsecureHTTP
+
 			if err := root.configureLogger(); err != nil {
 				return err
 			}
@@ -127,6 +131,7 @@ func newRootCmd(version string, exit func(int)) *rootCmd {
 	cmd.PersistentFlags().StringVar(&root.logFile, "log-file", "", "Write logs to the specified file")
 	cmd.PersistentFlags().BoolVar(&root.verbose, "verbose", false, "Enable verbose logging")
 	cmd.PersistentFlags().BoolVar(&root.verbose, "debug", false, "Enable verbose logging")
+	cmd.PersistentFlags().BoolVar(&root.allowInsecureHTTP, "allow-insecure-http", false, "Allow generic http:// downloads")
 	cmd.AddCommand(
 		newInstallCmd().cmd,
 		newRunCmd().cmd,
@@ -146,6 +151,15 @@ func newRootCmd(version string, exit func(int)) *rootCmd {
 
 	root.cmd = cmd
 	return root
+}
+
+var allowInsecureHTTP bool
+
+func newProviderWithPolicy(u, provider string) (providers.Provider, error) {
+	if err := providers.ValidateURL(u, provider, allowInsecureHTTP); err != nil {
+		return nil, err
+	}
+	return providers.New(u, provider)
 }
 
 func (cmd *rootCmd) configureLogger() error {
