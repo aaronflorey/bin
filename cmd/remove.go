@@ -18,6 +18,7 @@ import (
 type removeCmd struct {
 	cmd           *cobra.Command
 	opts          removeOpts
+	newProvider   providerFactory
 	selectTargets func(string, []prompt.MultiSelectOption) ([]string, error)
 	isInteractive func() bool
 }
@@ -34,6 +35,7 @@ type removeTarget struct {
 
 func newRemoveCmd() *removeCmd {
 	root := &removeCmd{
+		newProvider:   providers.New,
 		selectTargets: prompt.MultiSelect,
 		isInteractive: prompt.IsInteractive,
 	}
@@ -83,13 +85,13 @@ func newRemoveCmd() *removeCmd {
 					continue
 				}
 
-				p, err := providers.New(target.binary.URL, target.binary.Provider)
+				p, err := root.newProvider(target.binary.URL, target.binary.Provider)
 				if err != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not initialize provider cleanup for %s: %v\n", target.binary.Path, err)
 				} else {
 					err = p.Cleanup(&providers.CleanupOpts{Version: target.binary.Version, Path: target.deletePath})
 					if err != nil {
-						fmt.Fprintf(cmd.ErrOrStderr(), "warning: cleanup failed for %s: %v\n", target.binary.Path, err)
+						return fmt.Errorf("cleanup failed for %s: %w", target.binary.Path, err)
 					}
 				}
 

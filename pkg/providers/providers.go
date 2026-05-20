@@ -15,6 +15,8 @@ var ErrInvalidProvider = errors.New("invalid provider")
 
 var ErrReleaseHistoryUnsupported = errors.New("release history unsupported")
 
+var ErrInsecureHTTP = errors.New("insecure http downloads are disabled")
+
 type File struct {
 	Data        io.Reader
 	Name        string
@@ -131,4 +133,26 @@ func New(u, provider string) (Provider, error) {
 	}
 
 	return nil, fmt.Errorf("can't find provider for url %s", u)
+}
+
+func ValidateURL(u, provider string, allowInsecureHTTP bool) error {
+	if allowInsecureHTTP || !strings.HasPrefix(strings.ToLower(strings.TrimSpace(u)), "http://") {
+		return nil
+	}
+
+	if provider != "" && provider != "generic" {
+		return nil
+	}
+
+	purl, err := url.Parse(u)
+	if err != nil {
+		return err
+	}
+
+	host := purl.Hostname()
+	if hostIsOrSubdomain(host, "github.com") || hostIsOrSubdomain(host, "gitlab.com") || hostIsOrSubdomain(host, "codeberg.org") || hostIsOrSubdomain(host, "releases.hashicorp.com") {
+		return nil
+	}
+
+	return fmt.Errorf("%w for %s; rerun with --allow-insecure-http to opt in", ErrInsecureHTTP, u)
 }

@@ -22,7 +22,7 @@ import (
 
 var isPromptInteractive = prompt.IsInteractive
 var confirmPrompt = prompt.Confirm
-var installProviderFactory = providers.New
+var installProviderFactory = newProviderWithPolicy
 
 // applyChmod applies the DefaultChmod setting from config, if set.
 // This is a no-op on non-Linux platforms where DefaultChmod is not set by default.
@@ -317,23 +317,20 @@ func saveToDisk(f *providers.File, path string, overwrite bool) ([]byte, error) 
 		defer closer.Close()
 	}
 
-	extraFlags := os.O_EXCL
-
-	if overwrite {
-		extraFlags = 0
-		err := os.Remove(epath)
-		log.Debugf("Overwrite flag set, removing file %s\n", epath)
-		if err != nil && !os.IsNotExist(err) {
-			return nil, err
-		}
-	}
-
-	file, err := os.OpenFile(epath, os.O_RDWR|os.O_CREATE|extraFlags, 0o755)
-	if err != nil {
+	if err := os.MkdirAll(filepath.Dir(epath), 0o755); err != nil {
 		return nil, err
 	}
 
-	defer file.Close()
+	file, err := os.CreateTemp(filepath.Dir(epath), filepath.Base(epath)+".tmp-*")
+	if err != nil {
+		return nil, err
+	}
+	tempPath := file.Name()
+
+	defer func() {
+		_ = file.Close()
+		_ = os.Remove(tempPath)
+	}()
 
 	h := sha256.New()
 
@@ -352,6 +349,27 @@ func saveToDisk(f *providers.File, path string, overwrite bool) ([]byte, error) 
 	actualHash := fmt.Sprintf("%x", h.Sum(nil))
 	if f.ExpectedSHA != "" && !strings.EqualFold(actualHash, f.ExpectedSHA) {
 		return nil, fmt.Errorf("sha256 mismatch for %s: expected %s, got %s", f.Name, f.ExpectedSHA, actualHash)
+	}
+
+	if err := file.Close(); err != nil {
+		return nil, err
+	}
+
+	if !overwrite {
+		if _, err := os.Stat(epath); err == nil {
+			return nil, fmt.Errorf("path %s already exists, use --force to overwrite", path)
+		} else if err != nil && !os.IsNotExist(err) {
+			return nil, err
+		}
+	} else {
+		log.Debugf("Overwrite flag set, removing file %s", epath)
+		if err := os.Remove(epath); err != nil && !os.IsNotExist(err) {
+			return nil, err
+		}
+	}
+
+	if err := os.Rename(tempPath, epath); err != nil {
+		return nil, err
 	}
 
 	return h.Sum(nil), nil

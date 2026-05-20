@@ -8,14 +8,22 @@ go test ./...
 
 This is also the command used by CI (`.github/workflows/build.yml`).
 
+Additional CI verification runs:
+
+```bash
+go test -race ./...
+go test -coverprofile=coverage.out ./...
+```
+
 ## Related checks
 
 ```bash
-make lint
-make verify
+just lint
+just verify
+just coverage
 ```
 
-`make lint` runs `go fmt ./...` and `go vet ./...`. `make verify` adds dependency download, `gofmt -w -s`, and `golangci-lint run` (`Makefile`).
+`just lint` runs `go fmt ./...` and `go vet ./...`. `just verify` adds dependency download, `gofmt -w -s`, and `golangci-lint run`. `just coverage` writes `coverage.out` in the repo root.
 
 ## What the test suite covers
 

@@ -23,11 +23,11 @@ curl -fsSL https://raw.githubusercontent.com/aaronflorey/bin/master/install.sh |
 ### Build from source
 
 ```bash
-make download
-make build
+just download
+just build
 ```
 
-The binary is built from the repository root (`Makefile`, `main.go`).
+The binary is built from the repository root (`justfile`, `main.go`).
 
 ## First run
 
@@ -49,7 +49,7 @@ bin install github.com/cli/cli
 ```bash
 bin version
 bin list
-make test
+just test
 ```
 
 If you built from source, `go test ./...` should also pass.

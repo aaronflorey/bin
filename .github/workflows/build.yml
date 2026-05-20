@@ -28,6 +28,10 @@ jobs:
         check-latest: true
     - name: Test
       run: go test ./...
+    - name: Race test
+      run: go test -race ./...
+    - name: Coverage
+      run: go test -coverprofile=coverage.out ./...
   installer-script-smoke:
     name: "installer script smoke (jq: ${{ matrix.jq_mode }})"
     runs-on: ubuntu-latest

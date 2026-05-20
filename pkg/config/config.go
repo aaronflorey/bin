@@ -132,76 +132,49 @@ func CheckAndLoad() error {
 		return err
 	}
 
-	confDir := filepath.Dir(configPath)
-
-	if err := os.MkdirAll(confDir, 0755); err != nil && !os.IsExist(err) {
-		return fmt.Errorf("Error creating config directory [%v]", err)
-	}
-
-	log.Debugf("Config directory is: %s", confDir)
-	f, err := os.OpenFile(configPath, os.O_RDWR|os.O_CREATE, 0664)
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-
-	defer f.Close()
-
-	cfg = config{}
-
-	if err := json.NewDecoder(f).Decode(&cfg); err != nil {
-		if err == io.EOF {
-			// Empty file and/or was just created, initialize cfg.Bins
-			cfg.Bins = map[string]*Binary{}
-		} else {
+	return withConfigLock(configPath, func() error {
+		loaded, err := loadConfigLocked(configPath)
+		if err != nil {
 			return err
 		}
-	}
 
-	if len(cfg.DefaultPath) == 0 {
-		if exeDir := ForceInstallationDir(); len(exeDir) > 0 {
-			cfg.DefaultPath = exeDir
-		} else {
-			cfg.DefaultPath, err = getDefaultPath()
-			if err != nil {
-				for {
-					log.Info("Could not find a PATH directory automatically, falling back to manual selection")
-					reader := bufio.NewReader(os.Stdin)
-					var response string
-					fmt.Printf("\nPlease specify a download directory: ")
-					response, err := reader.ReadString('\n')
-					if err != nil {
-						return fmt.Errorf("Invalid input")
+		if len(loaded.DefaultPath) == 0 {
+			if exeDir := ForceInstallationDir(); len(exeDir) > 0 {
+				loaded.DefaultPath = exeDir
+			} else {
+				loaded.DefaultPath, err = getDefaultPath()
+				if err != nil {
+					for {
+						log.Info("Could not find a PATH directory automatically, falling back to manual selection")
+						reader := bufio.NewReader(os.Stdin)
+						var response string
+						fmt.Printf("\nPlease specify a download directory: ")
+						response, err = reader.ReadString('\n')
+						if err != nil {
+							return fmt.Errorf("Invalid input")
+						}
+						response = strings.TrimSpace(response)
+
+						if err = checkDirExistsAndWritable(response); err != nil {
+							log.Debugf("Could not set download directory [%s]: [%v]", response, err)
+							continue
+						}
+
+						loaded.DefaultPath = response
+						break
 					}
-					response = strings.TrimSpace(response)
-
-					if err = checkDirExistsAndWritable(response); err != nil {
-						log.Debugf("Could not set download directory [%s]: [%v]", response, err)
-						// Keep looping until writable and existing dir is selected
-						continue
-					}
-
-					cfg.DefaultPath = response
-					break
 				}
+			}
+
+			if err := writeConfigLocked(configPath, loaded); err != nil {
+				return err
 			}
 		}
 
-		if err := writeLocked(); err != nil {
-			return err
-		}
-
-	}
-
-	if cfg.Bins == nil {
-		cfg.Bins = map[string]*Binary{}
-	}
-
-	if runtime.GOOS == "linux" && len(cfg.DefaultChmod) == 0 {
-		cfg.DefaultChmod = "0755"
-	}
-
-	log.Debugf("Download path set to %s", cfg.DefaultPath)
-	return nil
+		cfg = loaded
+		log.Debugf("Download path set to %s", cfg.DefaultPath)
+		return nil
+	})
 }
 
 func Get() *config {
@@ -218,20 +191,70 @@ func Set(key, value string) error {
 	cfgMu.Lock()
 	defer cfgMu.Unlock()
 
-	switch key {
-	case "default_path":
-		cfg.DefaultPath = value
-	case "use_gh_for_github_token":
-		parsed, err := strconv.ParseBool(value)
-		if err != nil {
-			return fmt.Errorf("invalid boolean value %q for %s", value, key)
+	return mutateConfigLocked(func(current *config) error {
+		switch key {
+		case "default_path":
+			current.DefaultPath = value
+		case "use_gh_for_github_token":
+			parsed, err := strconv.ParseBool(value)
+			if err != nil {
+				return fmt.Errorf("invalid boolean value %q for %s", value, key)
+			}
+			current.UseGHAuth = parsed
+		default:
+			return fmt.Errorf("%w: %s", ErrInvalidConfigKey, key)
 		}
-		cfg.UseGHAuth = parsed
-	default:
-		return fmt.Errorf("%w: %s", ErrInvalidConfigKey, key)
+
+		return nil
+	})
+}
+
+func loadConfigLocked(configPath string) (config, error) {
+	log.Debugf("Config directory is: %s", filepath.Dir(configPath))
+
+	f, err := os.OpenFile(configPath, os.O_RDWR|os.O_CREATE, 0o664)
+	if err != nil && !os.IsNotExist(err) {
+		return config{}, err
+	}
+	defer f.Close()
+
+	loaded := config{}
+	if err := json.NewDecoder(f).Decode(&loaded); err != nil {
+		if err != io.EOF {
+			return config{}, err
+		}
 	}
 
-	return writeLocked()
+	if loaded.Bins == nil {
+		loaded.Bins = map[string]*Binary{}
+	}
+	if runtime.GOOS == "linux" && len(loaded.DefaultChmod) == 0 {
+		loaded.DefaultChmod = "0755"
+	}
+
+	return loaded, nil
+}
+
+func mutateConfigLocked(mutate func(*config) error) error {
+	configPath, err := getConfigPath()
+	if err != nil {
+		return err
+	}
+
+	return withConfigLock(configPath, func() error {
+		loaded, err := loadConfigLocked(configPath)
+		if err != nil {
+			return err
+		}
+		if err := mutate(&loaded); err != nil {
+			return err
+		}
+		if err := writeConfigLocked(configPath, loaded); err != nil {
+			return err
+		}
+		cfg = loaded
+		return nil
+	})
 }
 
 // ForceInstallationDir returns the directory specified by the BIN_EXE_DIR
@@ -300,15 +323,14 @@ func UpsertBinary(c *Binary) error {
 	cfgMu.Lock()
 	defer cfgMu.Unlock()
 
-	if c != nil {
-		cfg.Bins[c.Path] = c
-		err := writeLocked()
-		if err != nil {
-			return err
-		}
+	if c == nil {
+		return nil
 	}
 
-	return nil
+	return mutateConfigLocked(func(current *config) error {
+		current.Bins[c.Path] = c
+		return nil
+	})
 }
 
 // UpsertBinaries adds or updates multiple binary resources
@@ -317,12 +339,14 @@ func UpsertBinaries(binaries []*Binary) error {
 	cfgMu.Lock()
 	defer cfgMu.Unlock()
 
-	for _, c := range binaries {
-		if c != nil {
-			cfg.Bins[c.Path] = c
+	return mutateConfigLocked(func(current *config) error {
+		for _, c := range binaries {
+			if c != nil {
+				current.Bins[c.Path] = c
+			}
 		}
-	}
-	return writeLocked()
+		return nil
+	})
 }
 
 // RemoveBinaries removes the specified paths
@@ -331,11 +355,12 @@ func RemoveBinaries(paths []string) error {
 	cfgMu.Lock()
 	defer cfgMu.Unlock()
 
-	for _, p := range paths {
-		delete(cfg.Bins, p)
-	}
-
-	return writeLocked()
+	return mutateConfigLocked(func(current *config) error {
+		for _, p := range paths {
+			delete(current.Bins, p)
+		}
+		return nil
+	})
 }
 
 func writeLocked() error {
@@ -343,9 +368,12 @@ func writeLocked() error {
 	if err != nil {
 		return err
 	}
+	return writeConfigLocked(configPath, cfg)
+}
 
+func writeConfigLocked(configPath string, current config) error {
 	configDir := filepath.Dir(configPath)
-	if err := os.MkdirAll(configDir, 0755); err != nil {
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		return err
 	}
 
@@ -360,14 +388,14 @@ func writeLocked() error {
 		_ = os.Remove(tempPath)
 	}()
 
-	decoder := json.NewEncoder(f)
-	decoder.SetIndent("", "    ")
-	err = decoder.Encode(cfg)
+	encoder := json.NewEncoder(f)
+	encoder.SetIndent("", "    ")
+	err = encoder.Encode(current)
 	if err != nil {
 		return err
 	}
 
-	if err := f.Chmod(0664); err != nil {
+	if err := f.Chmod(0o664); err != nil {
 		return err
 	}
 

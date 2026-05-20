@@ -120,9 +120,7 @@ func (root *installCmd) installTarget(cmd *cobra.Command, target installTarget) 
 	pinVersion := root.opts.pin
 	if resolved.hasExplicitVersion && !pinVersion {
 		if root.opts.nonInteractive {
-			// Auto-pin in non-interactive mode when explicit version is detected
-			log.Debugf("Auto-pinning version %s in non-interactive mode", resolved.requestedVersion)
-			pinVersion = true
+			log.Debugf("Skipping pin prompt for %s in non-interactive mode", resolved.requestedVersion)
 		} else if prompt.IsInteractive() {
 			err := prompt.Confirm(fmt.Sprintf("Detected release URL for version %s. Do you want to pin this version?", resolved.requestedVersion))
 			if err == nil {
@@ -130,8 +128,6 @@ func (root *installCmd) installTarget(cmd *cobra.Command, target installTarget) 
 			} else if err.Error() != "command aborted" {
 				return err
 			}
-		} else {
-			log.Debugf("Skipping pin prompt for %s in non-interactive mode", resolved.requestedVersion)
 		}
 	}
 

@@ -103,6 +103,34 @@ func TestSaveToDiskValidatesExpectedSHA(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected saveToDisk to fail on sha mismatch")
 	}
+	if _, statErr := os.Stat(filepath.Join(dir, "tool2")); !os.IsNotExist(statErr) {
+		t.Fatalf("expected failed install target to be absent, got err=%v", statErr)
+	}
+}
+
+func TestSaveToDiskChecksumMismatchPreservesExistingFile(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "tool")
+	if err := os.WriteFile(target, []byte("existing"), 0o755); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	_, err := saveToDisk(&providers.File{
+		Data:        strings.NewReader("world"),
+		Name:        "tool",
+		ExpectedSHA: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+	}, target, true)
+	if err == nil {
+		t.Fatal("expected saveToDisk to fail on sha mismatch")
+	}
+
+	raw, readErr := os.ReadFile(target)
+	if readErr != nil {
+		t.Fatalf("read file: %v", readErr)
+	}
+	if string(raw) != "existing" {
+		t.Fatalf("expected original file to remain untouched, got %q", string(raw))
+	}
 }
 
 func TestCheckFinalPathErrorsWhenExistingWithoutForce(t *testing.T) {

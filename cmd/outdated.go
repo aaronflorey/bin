@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/aaronflorey/bin/pkg/config"
-	"github.com/aaronflorey/bin/pkg/providers"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
@@ -28,7 +27,7 @@ type outdatedBin struct {
 }
 
 func newOutdatedCmd() *outdatedCmd {
-	root := &outdatedCmd{newProvider: providers.New}
+	root := &outdatedCmd{newProvider: newProviderWithPolicy}
 	cmd := &cobra.Command{
 		Use:           "outdated [binary_path]",
 		Short:         "Lists binaries that have updates available",

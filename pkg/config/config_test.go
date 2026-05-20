@@ -181,6 +181,64 @@ func TestUpsertBinaryPersistsValidConfig(t *testing.T) {
 	}
 }
 
+func TestUpsertBinaryReloadsLatestOnDiskState(t *testing.T) {
+	t.Cleanup(func() {
+		cfg = config{}
+	})
+
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	defaultPath := filepath.Join(t.TempDir(), "bin")
+	t.Setenv("BIN_CONFIG", configPath)
+	t.Setenv("BIN_EXE_DIR", defaultPath)
+
+	if err := CheckAndLoad(); err != nil {
+		t.Fatalf("CheckAndLoad returned error: %v", err)
+	}
+
+	stale := config{
+		DefaultPath: defaultPath,
+		Bins: map[string]*Binary{
+			filepath.Join(defaultPath, "from-disk"): {
+				Path:    filepath.Join(defaultPath, "from-disk"),
+				Version: "1.0.0",
+				URL:     "https://example.test/from-disk",
+			},
+		},
+	}
+	raw, err := json.Marshal(stale)
+	if err != nil {
+		t.Fatalf("failed to marshal stale config: %v", err)
+	}
+	if err := os.WriteFile(configPath, raw, 0o644); err != nil {
+		t.Fatalf("failed to overwrite config: %v", err)
+	}
+
+	newBinary := &Binary{
+		Path:    filepath.Join(defaultPath, "new-binary"),
+		Version: "2.0.0",
+		URL:     "https://example.test/new-binary",
+	}
+	if err := UpsertBinary(newBinary); err != nil {
+		t.Fatalf("UpsertBinary returned error: %v", err)
+	}
+
+	persistedRaw, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("failed to read config file: %v", err)
+	}
+
+	var persisted config
+	if err := json.Unmarshal(persistedRaw, &persisted); err != nil {
+		t.Fatalf("expected valid config json, got error: %v", err)
+	}
+	if persisted.Bins[filepath.Join(defaultPath, "from-disk")] == nil {
+		t.Fatal("expected on-disk binary to be preserved")
+	}
+	if persisted.Bins[newBinary.Path] == nil {
+		t.Fatal("expected new binary to be persisted")
+	}
+}
+
 func TestCheckAndLoadUsesXDGConfigHome(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("XDG config path is Unix-specific")

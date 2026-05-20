@@ -32,7 +32,7 @@ function error(msg) {
 
 /**
  * Parses a single entry from the install list.
- * Returns { url, label, versioned } or null if the entry is invalid.
+ * Returns { url, label } or null if the entry is invalid.
  */
 function parseEntry(raw) {
   const entry = raw.trim();
@@ -57,28 +57,22 @@ function parseEntry(raw) {
     return {
       url: `github.com/${repo}/releases/tag/${ver}`,
       label: `${repo}@${ver}`,
-      versioned: true,
     };
   }
 
   return {
     url: `github.com/${entry}`,
     label: entry,
-    versioned: false,
   };
 }
 
 /**
- * Runs `bin install --force <url>` and returns true on success.
- *
- * For versioned installs, pipes "n\n" to stdin so that the interactive
- * version-pin confirmation prompt is gracefully declined in CI.
+ * Runs `bin install --force --non-interactive <url>` and returns true on success.
  */
-function installBinary({ url, label, versioned }) {
+function installBinary({ url, label }) {
   console.log(`Installing ${label}...`);
 
-  const result = spawnSync('bin', ['install', '--force', url], {
-    input: versioned ? 'n\n' : undefined,
+  const result = spawnSync('bin', ['install', '--force', '--non-interactive', url], {
     env: { ...process.env, BIN_EXE_DIR, GITHUB_TOKEN: token },
     encoding: 'utf8',
     stdio: ['pipe', 'inherit', 'inherit'],
