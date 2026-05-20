@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.5.0](https://github.com/aaronflorey/bin/compare/v2.4.0...v2.5.0) (2026-05-20)
+
+
+### Features
+
+* **FN-002:** document multi-tool selection persistence ([ce05d96](https://github.com/aaronflorey/bin/commit/ce05d96e030c734e90772a9092223acf2c4e33bf))
+
+
+### Bug Fixes
+
+* **assets:** detect macOS .app bundles in zip/tar archives ([0c0d4f0](https://github.com/aaronflorey/bin/commit/0c0d4f076acff59b7d7ffb1e80d8dcb64b7c7825))
+* **assets:** filter out .blockmap metadata files from release assets ([71c0f26](https://github.com/aaronflorey/bin/commit/71c0f26f4ee9445e20aa744bf41dca95d864f3c8))
+* **cmd,config:** harden install and config flows ([55a13b0](https://github.com/aaronflorey/bin/commit/55a13b02688b29db6d872cc624cec87a34dda153))
+* **cmd:** remove tui changelog browser ([fd9447a](https://github.com/aaronflorey/bin/commit/fd9447a1d75120c7ab10bf2150bc532e73784b24))
+* **providers,assets:** handle final binary checksums ([b583a07](https://github.com/aaronflorey/bin/commit/b583a07e320aa4ac8ba8d17867b78da89f984545))
+
 ## [2.4.0](https://github.com/aaronflorey/bin/compare/v2.3.0...v2.4.0) (2026-05-01)
 
 
