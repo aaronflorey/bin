@@ -10,6 +10,7 @@ import (
 
 	"github.com/aaronflorey/bin/pkg/assets"
 	"github.com/aaronflorey/bin/pkg/config"
+	"github.com/aaronflorey/bin/pkg/providers"
 )
 
 func TestInstallRejectsNonPositiveMinAgeDays(t *testing.T) {
@@ -183,6 +184,44 @@ func TestInstallDoesNotFallbackOnNonCompatibilityError(t *testing.T) {
 	}
 }
 
+func TestInstallIgnoresReleaseLaneDiscoveryWhenHistoryUnsupported(t *testing.T) {
+	setupTestConfig(t)
+	root := newInstallCmd()
+
+	originalRegistry := lifecycleRegistry
+	originalProviderFactory := installProviderFactory
+	defer func() {
+		lifecycleRegistry = originalRegistry
+		installProviderFactory = originalProviderFactory
+	}()
+
+	installProviderFactory = func(string, string) (providers.Provider, error) {
+		return testFetchProvider{}, nil
+	}
+
+	attempts := 0
+	lifecycleRegistry = map[string]lifecycleStrategy{
+		installModeBinary: {
+			install: func(opts InstallOpts) (*InstallResult, error) {
+				attempts++
+				return &InstallResult{Name: "tool", Version: "1.0.0", Path: opts.Path}, nil
+			},
+			applyStoredFetch:  originalRegistry[installModeBinary].applyStoredFetch,
+			applyRequestFetch: originalRegistry[installModeBinary].applyRequestFetch,
+			resolvePath:       originalRegistry[installModeBinary].resolvePath,
+		},
+		installModeSystemPackage: originalRegistry[installModeSystemPackage],
+	}
+
+	err := root.installTarget(root.cmd, installTarget{url: "github.com/acme/tool", path: "Tool"})
+	if err != nil {
+		t.Fatalf("unexpected install error: %v", err)
+	}
+	if attempts != 1 {
+		t.Fatalf("expected one install attempt, got %d", attempts)
+	}
+}
+
 func TestExistingBinaryForInstallByURL(t *testing.T) {
 	bins := map[string]*config.Binary{
 		"/tmp/tool": {
@@ -192,7 +231,7 @@ func TestExistingBinaryForInstallByURL(t *testing.T) {
 		},
 	}
 
-	existing := existingBinaryForInstall(bins, "https://example.test/acme/tool", "", "")
+	existing := existingBinaryForInstall(bins, "https://example.test/acme/tool", "", "", "")
 	if existing == nil {
 		t.Fatal("expected existing binary to be found by URL")
 	}
@@ -213,7 +252,7 @@ func TestExistingBinaryForInstallMatchesRequestedPath(t *testing.T) {
 		config.Get().Bins = prevBins
 	}()
 
-	existing := existingBinaryForInstall(config.Get().Bins, "https://example.test/other", "", path)
+	existing := existingBinaryForInstall(config.Get().Bins, "https://example.test/other", "", path, "")
 	if existing == nil {
 		t.Fatal("expected existing binary to be found by requested path")
 	}

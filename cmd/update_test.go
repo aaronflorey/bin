@@ -143,6 +143,34 @@ func TestGetLatestVersion(t *testing.T) {
 	}
 }
 
+func TestGetLatestVersionUsesStoredReleaseTagPrefix(t *testing.T) {
+	b := &config.Binary{
+		Path:             "/home/user/bin/tool",
+		Version:          "v1.0.0",
+		URL:              "github.com/acme/tool",
+		Provider:         "github",
+		ReleaseTagPrefix: "pi-v",
+	}
+
+	p := mockProvider{
+		history: []*providers.ReleaseInfo{
+			{Version: "v2.0.0", URL: "https://example.test/core"},
+			{Version: "pi-v1.1.0", URL: "https://example.test/pi"},
+		},
+	}
+
+	got, err := getLatestVersion(b, p)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected update info")
+	}
+	if got.version != "pi-v1.1.0" {
+		t.Fatalf("unexpected version: %s", got.version)
+	}
+}
+
 func TestResolveUpdateTargetsWithURL(t *testing.T) {
 	bins := map[string]*config.Binary{
 		"/tmp/tool": {

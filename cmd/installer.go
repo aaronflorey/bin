@@ -128,18 +128,19 @@ func installBinary(opts InstallOpts) (*InstallResult, error) {
 	}
 
 	err = persistInstalledBinary(&config.Binary{
-		RemoteName:  pResult.Name,
-		Path:        configPath,
-		Version:     pResult.Version,
-		Hash:        hashString,
-		URL:         opts.URL,
-		Provider:    p.GetID(),
-		InstallMode: installModeBinary,
-		PackageType: "",
-		AppBundle:   "",
-		PackagePath: pResult.PackagePath,
-		Pinned:      pinned,
-		MinAgeDays:  minAgeDays,
+		RemoteName:       pResult.Name,
+		Path:             configPath,
+		Version:          pResult.Version,
+		Hash:             hashString,
+		URL:              opts.URL,
+		Provider:         p.GetID(),
+		InstallMode:      installModeBinary,
+		PackageType:      "",
+		AppBundle:        "",
+		PackagePath:      pResult.PackagePath,
+		ReleaseTagPrefix: pResult.ReleaseTagPrefix,
+		Pinned:           pinned,
+		MinAgeDays:       minAgeDays,
 	})
 	if err != nil {
 		return nil, err

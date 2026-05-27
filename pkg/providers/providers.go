@@ -18,18 +18,20 @@ var ErrReleaseHistoryUnsupported = errors.New("release history unsupported")
 var ErrInsecureHTTP = errors.New("insecure http downloads are disabled")
 
 type File struct {
-	Data        io.Reader
-	Name        string
-	Version     string
-	ExpectedSHA string
-	Length      int64
-	PackagePath string
-	PublishedAt *time.Time
+	Data             io.Reader
+	Name             string
+	Version          string
+	ReleaseTagPrefix string
+	ExpectedSHA      string
+	Length           int64
+	PackagePath      string
+	PublishedAt      *time.Time
 }
 
 type ReleaseInfo struct {
 	Version     string
 	URL         string
+	Assets      []string
 	PublishedAt *time.Time
 	Body        string
 }
@@ -43,15 +45,16 @@ func (f *File) Hash() ([]byte, error) {
 }
 
 type FetchOpts struct {
-	All            bool
-	AutoSelect     string
-	PackageName    string
-	PackagePath    string
-	SystemPackage  bool
-	PackageType    string
-	SkipPatchCheck bool
-	Version        string
-	NonInteractive bool
+	All              bool
+	AutoSelect       string
+	PackageName      string
+	PackagePath      string
+	SystemPackage    bool
+	PackageType      string
+	SkipPatchCheck   bool
+	Version          string
+	ReleaseTagPrefix string
+	NonInteractive   bool
 }
 
 type CleanupOpts struct {

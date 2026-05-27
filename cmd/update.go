@@ -195,7 +195,19 @@ func newUpdateCmd() *updateCmd {
 
 func getLatestVersion(b *config.Binary, p providers.Provider) (*updateInfo, error) {
 	log.Debugf("Checking updates for %s", b.Path)
-	releaseInfo, err := p.GetLatestVersion()
+	var (
+		releaseInfo *providers.ReleaseInfo
+		err         error
+	)
+	if b.ReleaseTagPrefix != "" {
+		history, historyErr := providers.GetReleaseHistory(p, releaseHistoryPrefixLimit)
+		if historyErr != nil {
+			return nil, fmt.Errorf("Error checking updates for %s, %w", b.Path, historyErr)
+		}
+		releaseInfo = providers.SelectReleaseByPrefix(history, b.ReleaseTagPrefix)
+	} else {
+		releaseInfo, err = p.GetLatestVersion()
+	}
 	if err != nil {
 		return nil, fmt.Errorf("Error checking updates for %s, %w", b.Path, err)
 	}

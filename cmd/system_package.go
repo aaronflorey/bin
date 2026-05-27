@@ -81,18 +81,19 @@ func installSystemPackage(opts InstallOpts) (*InstallResult, error) {
 	}
 
 	if err := persistInstalledBinary(&config.Binary{
-		RemoteName:  trackedName,
-		Path:        configPath,
-		Version:     pResult.Version,
-		Hash:        hashString,
-		URL:         opts.URL,
-		Provider:    p.GetID(),
-		InstallMode: installModeSystemPackage,
-		PackageType: pkgType,
-		AppBundle:   appBundle,
-		PackagePath: pResult.PackagePath,
-		Pinned:      pinned,
-		MinAgeDays:  minAgeDays,
+		RemoteName:       trackedName,
+		Path:             configPath,
+		Version:          pResult.Version,
+		Hash:             hashString,
+		URL:              opts.URL,
+		Provider:         p.GetID(),
+		InstallMode:      installModeSystemPackage,
+		PackageType:      pkgType,
+		AppBundle:        appBundle,
+		PackagePath:      pResult.PackagePath,
+		ReleaseTagPrefix: pResult.ReleaseTagPrefix,
+		Pinned:           pinned,
+		MinAgeDays:       minAgeDays,
 	}); err != nil {
 		return nil, err
 	}

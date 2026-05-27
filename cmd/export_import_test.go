@@ -298,15 +298,16 @@ func TestExportImportRoundTripsInstallMetadata(t *testing.T) {
 	}
 
 	if err := config.UpsertBinary(&config.Binary{
-		Path:        installedPath,
-		RemoteName:  "flatpak-tool",
-		Version:     "1.2.3",
-		Hash:        "old-hash",
-		URL:         "https://example.com/tools/flatpak-tool/releases/tag/v1.2.3",
-		Provider:    "github",
-		InstallMode: installModeSystemPackage,
-		PackageType: "flatpak",
-		AppBundle:   "Flatpak Tool.app",
+		Path:             installedPath,
+		RemoteName:       "flatpak-tool",
+		Version:          "1.2.3",
+		Hash:             "old-hash",
+		URL:              "https://example.com/tools/flatpak-tool/releases/tag/v1.2.3",
+		Provider:         "github",
+		InstallMode:      installModeSystemPackage,
+		PackageType:      "flatpak",
+		AppBundle:        "Flatpak Tool.app",
+		ReleaseTagPrefix: "pi-v",
 	}); err != nil {
 		t.Fatalf("failed to seed binary: %v", err)
 	}
@@ -334,6 +335,9 @@ func TestExportImportRoundTripsInstallMetadata(t *testing.T) {
 	}
 	if exported[0].AppBundle != "Flatpak Tool.app" {
 		t.Fatalf("unexpected app bundle: %s", exported[0].AppBundle)
+	}
+	if exported[0].ReleaseTagPrefix != "pi-v" {
+		t.Fatalf("unexpected release tag prefix: %s", exported[0].ReleaseTagPrefix)
 	}
 
 	setupTestConfig(t)
@@ -363,6 +367,9 @@ func TestExportImportRoundTripsInstallMetadata(t *testing.T) {
 	}
 	if binCfg.AppBundle != "Flatpak Tool.app" {
 		t.Fatalf("unexpected imported app bundle: %s", binCfg.AppBundle)
+	}
+	if binCfg.ReleaseTagPrefix != "pi-v" {
+		t.Fatalf("unexpected imported release tag prefix: %s", binCfg.ReleaseTagPrefix)
 	}
 }
 

@@ -119,8 +119,10 @@ type Binary struct {
 	// the package path in config so we don't ask the user to select
 	// the path again when upgrading
 	PackagePath string `json:"package_path"`
-	Pinned      bool   `json:"pinned"`
-	MinAgeDays  int    `json:"min_age_days,omitempty"`
+	// ReleaseTagPrefix keeps the exact tag lane prefix for multi-track repos.
+	ReleaseTagPrefix string `json:"release_tag_prefix,omitempty"`
+	Pinned           bool   `json:"pinned"`
+	MinAgeDays       int    `json:"min_age_days,omitempty"`
 }
 
 func CheckAndLoad() error {

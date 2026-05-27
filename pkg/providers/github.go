@@ -43,6 +43,19 @@ func (g *gitHub) Fetch(opts *FetchOpts) (*File, error) {
 		ctx, cancel := newProviderRequestContext()
 		release, _, err = g.client.Repositories.GetReleaseByTag(ctx, g.owner, g.repo, g.tag)
 		cancel()
+	} else if opts.ReleaseTagPrefix != "" {
+		log.Infof("Getting latest %q release for %s/%s", opts.ReleaseTagPrefix, g.owner, g.repo)
+		history, historyErr := g.ListReleases(100)
+		if historyErr != nil {
+			return nil, historyErr
+		}
+		selected := SelectReleaseByPrefix(history, opts.ReleaseTagPrefix)
+		if selected == nil {
+			return nil, fmt.Errorf("repository %s/%s does not have a release with prefix %q", g.owner, g.repo, opts.ReleaseTagPrefix)
+		}
+		ctx, cancel := newProviderRequestContext()
+		release, _, err = g.client.Repositories.GetReleaseByTag(ctx, g.owner, g.repo, selected.Version)
+		cancel()
 	} else {
 		log.Infof("Getting latest release for %s/%s", g.owner, g.repo)
 		ctx, cancel := newProviderRequestContext()
@@ -118,12 +131,13 @@ func (g *gitHub) Fetch(opts *FetchOpts) (*File, error) {
 	version := release.GetTagName()
 
 	file := &File{
-		Data:        outFile.Source,
-		Name:        outFile.Name,
-		Version:     version,
-		ExpectedSHA: finalExpectedSHA,
-		PackagePath: outFile.PackagePath,
-		PublishedAt: githubPublishedAt(release),
+		Data:             outFile.Source,
+		Name:             outFile.Name,
+		Version:          version,
+		ReleaseTagPrefix: ReleaseTagPrefix(version),
+		ExpectedSHA:      finalExpectedSHA,
+		PackagePath:      outFile.PackagePath,
+		PublishedAt:      githubPublishedAt(release),
 	}
 
 	return file, nil
@@ -188,9 +202,27 @@ func githubReleaseInfo(release *github.RepositoryRelease) *ReleaseInfo {
 	return &ReleaseInfo{
 		Version:     release.GetTagName(),
 		URL:         release.GetHTMLURL(),
+		Assets:      githubReleaseAssets(release),
 		PublishedAt: githubPublishedAt(release),
 		Body:        release.GetBody(),
 	}
+}
+
+func githubReleaseAssets(release *github.RepositoryRelease) []string {
+	if release == nil {
+		return nil
+	}
+	assets := make([]string, 0, len(release.Assets))
+	for _, asset := range release.Assets {
+		if asset == nil {
+			continue
+		}
+		name := strings.TrimSpace(asset.GetName())
+		if name != "" {
+			assets = append(assets, name)
+		}
+	}
+	return assets
 }
 
 func newGitHub(u *url.URL) (Provider, error) {

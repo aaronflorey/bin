@@ -148,92 +148,122 @@ func (root *installCmd) installTarget(cmd *cobra.Command, target installTarget) 
 	}
 	log.Debugf("Install target %q resolved to path %q (system-package=%t)", resolved.url, resolvedPath, root.opts.systemPackage)
 
+	prefixes := []string{resolved.fetchOpts.ReleaseTagPrefix}
+	if !resolved.hasExplicitVersion {
+		options, err := discoverInstallableReleasePrefixes(installProviderFactory, resolved.url, root.opts.provider, resolved.fetchOpts)
+		if err != nil {
+			log.WithError(err).Debugf("Skipping release lane discovery for %q", resolved.url)
+		} else if len(options) > 1 {
+			if target.path != "" {
+				return fmt.Errorf("multiple release lanes detected for %s; omit the custom install path and install lanes separately or choose the default derived names", resolved.url)
+			}
+			prefixes, err = selectReleaseTagPrefixesInteractively(options)
+			if err != nil {
+				return err
+			}
+			if len(prefixes) == 0 {
+				return fmt.Errorf("no release lanes selected")
+			}
+		} else if len(options) == 1 {
+			prefixes = []string{options[0].Prefix}
+		}
+	}
+
 	var minAgeDays *int
 	if cmd.Flags().Changed("min-age-days") {
 		minAgeDays = &root.opts.minAgeDays
 	}
 
-	existing := existingBinaryForInstall(cfg.Bins, resolved.url, root.opts.provider, resolvedPath)
-	if existing != nil {
-		log.Debugf("Found existing managed binary for %q at %s", resolved.url, existing.Path)
-		log.Infof("Binary already exists in config (%s). Updating it instead", existing.Path)
-		strategy := lifecycleForMode(existing.InstallMode)
-		if err := strategy.applyStoredFetch(existing, &resolved.fetchOpts); err != nil {
-			return err
+	for _, prefix := range prefixes {
+		resolved.fetchOpts.ReleaseTagPrefix = prefix
+		existing := existingBinaryForInstall(cfg.Bins, resolved.url, root.opts.provider, resolvedPath, prefix)
+		if existing != nil {
+			log.Debugf("Found existing managed binary for %q at %s", resolved.url, existing.Path)
+			log.Infof("Binary already exists in config (%s). Updating it instead", existing.Path)
+			strategy := lifecycleForMode(existing.InstallMode)
+			attemptFetchOpts := resolved.fetchOpts
+			if err := strategy.applyStoredFetch(existing, &attemptFetchOpts); err != nil {
+				return err
+			}
+
+			if root.opts.systemPackage {
+				attemptFetchOpts.PackageName = target.path
+				logSystemPackageSelected(attemptFetchOpts.PackageType, target.path)
+			}
+
+			if attemptFetchOpts.SystemPackage {
+				strategy = lifecycleForMode(installModeSystemPackage)
+			}
+
+			res, err := strategy.install(InstallOpts{
+				URL:                   resolved.url,
+				Provider:              root.opts.provider,
+				Path:                  existing.Path,
+				ConfigPath:            existing.Path,
+				Force:                 true,
+				Pinned:                pinVersion,
+				MinAgeDays:            minAgeDays,
+				FetchOpts:             attemptFetchOpts,
+				ResolvePath:           strategy.resolvePath(existing),
+				AllowProviderFallback: root.opts.provider == "" && existing.Provider != "",
+			})
+			if err != nil {
+				log.WithError(err).Debugf("Failed to update existing install for %q", resolved.url)
+				return err
+			}
+
+			log.Infof("Done updating %s %s", res.Name, res.Version)
+			continue
 		}
 
-		if root.opts.systemPackage {
-			resolved.fetchOpts.PackageName = target.path
-			logSystemPackageSelected(resolved.fetchOpts.PackageType, target.path)
-		}
+		modes := requestedInstallModes(root.opts.systemPackage, root.opts.preferSystemPackage, target.path)
+		var lastErr error
+		installed := false
+		for idx, mode := range modes {
+			strategy := lifecycleForMode(mode)
+			attemptFetchOpts := resolved.fetchOpts
+			if err := strategy.applyRequestFetch(requestedName, &attemptFetchOpts); err != nil {
+				return err
+			}
+			if mode == installModeSystemPackage {
+				logSystemPackageSelected(attemptFetchOpts.PackageType, requestedName)
+			}
 
-		if resolved.fetchOpts.SystemPackage {
-			strategy = lifecycleForMode(installModeSystemPackage)
-		}
+			attemptPath := resolvedPath
+			if !strategy.resolvePath(nil) {
+				attemptPath = ""
+			}
+			log.Debugf("Attempting %q install for %q (path=%q, provider=%q, packageType=%q, release-prefix=%q)", mode, resolved.url, attemptPath, root.opts.provider, attemptFetchOpts.PackageType, attemptFetchOpts.ReleaseTagPrefix)
 
-		res, err := strategy.install(InstallOpts{
-			URL:                   resolved.url,
-			Provider:              root.opts.provider,
-			Path:                  existing.Path,
-			ConfigPath:            existing.Path,
-			Force:                 true,
-			Pinned:                pinVersion,
-			MinAgeDays:            minAgeDays,
-			FetchOpts:             resolved.fetchOpts,
-			ResolvePath:           strategy.resolvePath(existing),
-			AllowProviderFallback: root.opts.provider == "" && existing.Provider != "",
-		})
-		if err != nil {
-			log.WithError(err).Debugf("Failed to update existing install for %q", resolved.url)
-			return err
+			res, err := strategy.install(InstallOpts{
+				URL:                   resolved.url,
+				Provider:              root.opts.provider,
+				Path:                  attemptPath,
+				Force:                 root.opts.force,
+				Pinned:                pinVersion,
+				MinAgeDays:            minAgeDays,
+				FetchOpts:             attemptFetchOpts,
+				ResolvePath:           strategy.resolvePath(nil),
+				AllowProviderFallback: false,
+			})
+			if err == nil {
+				log.Infof("Done installing %s %s", res.Name, res.Version)
+				installed = true
+				break
+			}
+			log.WithError(err).Debugf("Install mode %q failed for %q", mode, resolved.url)
+			lastErr = err
+			if idx == len(modes)-1 || !shouldFallbackInstallMode(err) {
+				return err
+			}
+			log.Warnf("Install mode %q did not yield a compatible asset for %s, trying %q", mode, resolved.url, modes[idx+1])
 		}
-
-		log.Infof("Done updating %s %s", res.Name, res.Version)
-		return nil
+		if !installed {
+			return lastErr
+		}
 	}
 
-	modes := requestedInstallModes(root.opts.systemPackage, root.opts.preferSystemPackage, target.path)
-	var lastErr error
-	for idx, mode := range modes {
-		strategy := lifecycleForMode(mode)
-		attemptFetchOpts := resolved.fetchOpts
-		if err := strategy.applyRequestFetch(requestedName, &attemptFetchOpts); err != nil {
-			return err
-		}
-		if mode == installModeSystemPackage {
-			logSystemPackageSelected(attemptFetchOpts.PackageType, requestedName)
-		}
-
-		attemptPath := resolvedPath
-		if !strategy.resolvePath(nil) {
-			attemptPath = ""
-		}
-		log.Debugf("Attempting %q install for %q (path=%q, provider=%q, packageType=%q)", mode, resolved.url, attemptPath, root.opts.provider, attemptFetchOpts.PackageType)
-
-		res, err := strategy.install(InstallOpts{
-			URL:                   resolved.url,
-			Provider:              root.opts.provider,
-			Path:                  attemptPath,
-			Force:                 root.opts.force,
-			Pinned:                pinVersion,
-			MinAgeDays:            minAgeDays,
-			FetchOpts:             attemptFetchOpts,
-			ResolvePath:           strategy.resolvePath(nil),
-			AllowProviderFallback: false,
-		})
-		if err == nil {
-			log.Infof("Done installing %s %s", res.Name, res.Version)
-			return nil
-		}
-		log.WithError(err).Debugf("Install mode %q failed for %q", mode, resolved.url)
-		lastErr = err
-		if idx == len(modes)-1 || !shouldFallbackInstallMode(err) {
-			return err
-		}
-		log.Warnf("Install mode %q did not yield a compatible asset for %s, trying %q", mode, resolved.url, modes[idx+1])
-	}
-
-	return lastErr
+	return nil
 }
 
 func parseInstallTargets(args []string, systemPackage bool) ([]installTarget, error) {
@@ -267,13 +297,14 @@ func looksLikeInstallURL(input string) bool {
 	return looksLikeUpdateURL(input)
 }
 
-func existingBinaryForInstall(bins map[string]*config.Binary, normalizedURL, forcedProvider, requestedPath string) *config.Binary {
+func existingBinaryForInstall(bins map[string]*config.Binary, normalizedURL, forcedProvider, requestedPath, requestedReleaseTagPrefix string) *config.Binary {
 	if requestedPath != "" {
 		if b, ok := existingConfigBinary(InstallOpts{Path: requestedPath}); ok {
 			return b
 		}
 	}
 
+	var matched *config.Binary
 	for _, b := range bins {
 		if b.URL != normalizedURL {
 			continue
@@ -281,10 +312,16 @@ func existingBinaryForInstall(bins map[string]*config.Binary, normalizedURL, for
 		if forcedProvider != "" && b.Provider != forcedProvider {
 			continue
 		}
-		return b
+		if strings.TrimSpace(requestedReleaseTagPrefix) != strings.TrimSpace(b.ReleaseTagPrefix) {
+			continue
+		}
+		if matched != nil {
+			return nil
+		}
+		matched = b
 	}
 
-	return nil
+	return matched
 }
 
 func resolveFetchRequest(rawURL, forcedProvider string, fetchOpts providers.FetchOpts) (*resolvedFetchRequest, error) {
@@ -295,6 +332,7 @@ func resolveFetchRequest(rawURL, forcedProvider string, fetchOpts providers.Fetc
 
 	if requestedVersion != "" {
 		fetchOpts.Version = requestedVersion
+		fetchOpts.ReleaseTagPrefix = providers.ReleaseTagPrefix(requestedVersion)
 	}
 
 	return &resolvedFetchRequest{
