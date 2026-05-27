@@ -40,6 +40,19 @@ func (g *gitLab) Fetch(opts *FetchOpts) (*File, error) {
 		ctx, cancel := newProviderRequestContext()
 		release, _, err = g.client.Releases.GetRelease(projectPath, g.tag, gitlab.WithContext(ctx))
 		cancel()
+	} else if opts.ReleaseTagPrefix != "" {
+		log.Infof("Getting latest %q release for %s/%s", opts.ReleaseTagPrefix, g.owner, g.repo)
+		history, historyErr := g.ListReleases(100)
+		if historyErr != nil {
+			return nil, historyErr
+		}
+		selected := SelectReleaseByPrefix(history, opts.ReleaseTagPrefix)
+		if selected == nil {
+			return nil, fmt.Errorf("repository %s/%s does not have a release with prefix %q", g.owner, g.repo, opts.ReleaseTagPrefix)
+		}
+		ctx, cancel := newProviderRequestContext()
+		release, _, err = g.client.Releases.GetRelease(projectPath, selected.Version, gitlab.WithContext(ctx))
+		cancel()
 	} else {
 		log.Infof("Getting latest release for %s/%s", g.owner, g.repo)
 		var name string
@@ -221,11 +234,12 @@ func (g *gitLab) Fetch(opts *FetchOpts) (*File, error) {
 	version := release.TagName
 
 	file := &File{
-		Data:        outFile.Source,
-		Name:        outFile.Name,
-		Version:     version,
-		ExpectedSHA: finalExpectedSHA,
-		PublishedAt: gitLabPublishedAt(release),
+		Data:             outFile.Source,
+		Name:             outFile.Name,
+		Version:          version,
+		ReleaseTagPrefix: ReleaseTagPrefix(version),
+		ExpectedSHA:      finalExpectedSHA,
+		PublishedAt:      gitLabPublishedAt(release),
 	}
 
 	return file, nil
@@ -313,9 +327,24 @@ func gitLabReleaseInfo(release *gitlab.Release) *ReleaseInfo {
 	return &ReleaseInfo{
 		Version:     release.TagName,
 		URL:         url,
+		Assets:      gitLabReleaseAssets(release),
 		PublishedAt: gitLabPublishedAt(release),
 		Body:        release.Description,
 	}
+}
+
+func gitLabReleaseAssets(release *gitlab.Release) []string {
+	if release == nil {
+		return nil
+	}
+	assets := make([]string, 0, len(release.Assets.Links))
+	for _, link := range release.Assets.Links {
+		name := strings.TrimSpace(link.Name)
+		if name != "" {
+			assets = append(assets, name)
+		}
+	}
+	return assets
 }
 
 func newGitLab(u *url.URL) (Provider, error) {

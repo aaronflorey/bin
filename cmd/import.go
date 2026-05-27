@@ -57,18 +57,19 @@ func newImportCmd() *importCmd {
 				}
 
 				target := &config.Binary{
-					Path:        filepath.Join(defaultPath, name),
-					RemoteName:  b.RemoteName,
-					Version:     b.Version,
-					Hash:        b.Hash,
-					URL:         b.URL,
-					Provider:    b.Provider,
-					InstallMode: b.InstallMode,
-					PackageType: b.PackageType,
-					AppBundle:   b.AppBundle,
-					PackagePath: b.PackagePath,
-					Pinned:      b.Pinned,
-					MinAgeDays:  b.MinAgeDays,
+					Path:             filepath.Join(defaultPath, name),
+					RemoteName:       b.RemoteName,
+					Version:          b.Version,
+					Hash:             b.Hash,
+					URL:              b.URL,
+					Provider:         b.Provider,
+					InstallMode:      b.InstallMode,
+					PackageType:      b.PackageType,
+					AppBundle:        b.AppBundle,
+					PackagePath:      b.PackagePath,
+					ReleaseTagPrefix: b.ReleaseTagPrefix,
+					Pinned:           b.Pinned,
+					MinAgeDays:       b.MinAgeDays,
 				}
 
 				status := "installed"
@@ -154,6 +155,7 @@ func equalBinaryConfig(a, b *config.Binary) bool {
 		a.PackageType == b.PackageType &&
 		a.AppBundle == b.AppBundle &&
 		a.PackagePath == b.PackagePath &&
+		a.ReleaseTagPrefix == b.ReleaseTagPrefix &&
 		a.Pinned == b.Pinned &&
 		a.MinAgeDays == b.MinAgeDays
 }

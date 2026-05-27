@@ -38,6 +38,7 @@ var lifecycleRegistry = map[string]lifecycleStrategy{
 		applyStoredFetch: func(b *config.Binary, fetchOpts *providers.FetchOpts) error {
 			fetchOpts.PackagePath = b.PackagePath
 			fetchOpts.PackageName = b.RemoteName
+			fetchOpts.ReleaseTagPrefix = b.ReleaseTagPrefix
 			return nil
 		},
 		applyRequestFetch: func(_ string, _ *providers.FetchOpts) error {
@@ -57,6 +58,7 @@ var lifecycleRegistry = map[string]lifecycleStrategy{
 			}
 			fetchOpts.PackagePath = b.PackagePath
 			fetchOpts.PackageName = b.RemoteName
+			fetchOpts.ReleaseTagPrefix = b.ReleaseTagPrefix
 			fetchOpts.SystemPackage = true
 			fetchOpts.PackageType = packageType
 			return nil

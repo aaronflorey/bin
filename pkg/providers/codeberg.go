@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"code.gitea.io/sdk/gitea"
@@ -34,6 +35,17 @@ func (c *codeberg) Fetch(opts *FetchOpts) (*File, error) {
 		}
 		log.Infof("Getting %s release for %s/%s", c.tag, c.owner, c.repo)
 		release, _, err = c.client.GetReleaseByTag(c.owner, c.repo, c.tag)
+	} else if opts.ReleaseTagPrefix != "" {
+		log.Infof("Getting latest %q release for %s/%s", opts.ReleaseTagPrefix, c.owner, c.repo)
+		history, historyErr := c.ListReleases(100)
+		if historyErr != nil {
+			return nil, historyErr
+		}
+		selected := SelectReleaseByPrefix(history, opts.ReleaseTagPrefix)
+		if selected == nil {
+			return nil, fmt.Errorf("repository %s/%s does not have a release with prefix %q", c.owner, c.repo, opts.ReleaseTagPrefix)
+		}
+		release, _, err = c.client.GetReleaseByTag(c.owner, c.repo, selected.Version)
 	} else {
 		log.Infof("Getting latest release for %s/%s", c.owner, c.repo)
 		release, resp, err = c.client.GetLatestRelease(c.owner, c.repo)
@@ -105,12 +117,13 @@ func (c *codeberg) Fetch(opts *FetchOpts) (*File, error) {
 	version := release.TagName
 
 	file := &File{
-		Data:        outFile.Source,
-		Name:        outFile.Name,
-		Version:     version,
-		ExpectedSHA: finalExpectedSHA,
-		PackagePath: outFile.PackagePath,
-		PublishedAt: codebergPublishedAt(release),
+		Data:             outFile.Source,
+		Name:             outFile.Name,
+		Version:          version,
+		ReleaseTagPrefix: ReleaseTagPrefix(version),
+		ExpectedSHA:      finalExpectedSHA,
+		PackagePath:      outFile.PackagePath,
+		PublishedAt:      codebergPublishedAt(release),
 	}
 
 	return file, nil
@@ -171,9 +184,24 @@ func codebergReleaseInfo(release *gitea.Release) *ReleaseInfo {
 	return &ReleaseInfo{
 		Version:     release.TagName,
 		URL:         release.HTMLURL,
+		Assets:      codebergReleaseAssets(release),
 		PublishedAt: codebergPublishedAt(release),
 		Body:        release.Note,
 	}
+}
+
+func codebergReleaseAssets(release *gitea.Release) []string {
+	if release == nil {
+		return nil
+	}
+	assets := make([]string, 0, len(release.Attachments))
+	for _, attachment := range release.Attachments {
+		name := strings.TrimSpace(attachment.Name)
+		if name != "" {
+			assets = append(assets, name)
+		}
+	}
+	return assets
 }
 
 func newCodeberg(u *url.URL) (Provider, error) {

@@ -52,18 +52,19 @@ func newExportCmd() *exportCmd {
 
 // portableBinary is the shared serialization format for export and import.
 type portableBinary struct {
-	Name        string `json:"name"`
-	RemoteName  string `json:"remote_name"`
-	Version     string `json:"version"`
-	Hash        string `json:"hash"`
-	URL         string `json:"url"`
-	Provider    string `json:"provider"`
-	InstallMode string `json:"install_mode,omitempty"`
-	PackageType string `json:"package_type,omitempty"`
-	AppBundle   string `json:"app_bundle,omitempty"`
-	PackagePath string `json:"package_path"`
-	Pinned      bool   `json:"pinned"`
-	MinAgeDays  int    `json:"min_age_days,omitempty"`
+	Name             string `json:"name"`
+	RemoteName       string `json:"remote_name"`
+	Version          string `json:"version"`
+	Hash             string `json:"hash"`
+	URL              string `json:"url"`
+	Provider         string `json:"provider"`
+	InstallMode      string `json:"install_mode,omitempty"`
+	PackageType      string `json:"package_type,omitempty"`
+	AppBundle        string `json:"app_bundle,omitempty"`
+	PackagePath      string `json:"package_path"`
+	ReleaseTagPrefix string `json:"release_tag_prefix,omitempty"`
+	Pinned           bool   `json:"pinned"`
+	MinAgeDays       int    `json:"min_age_days,omitempty"`
 }
 
 func buildExportBins(bins map[string]*config.Binary) ([]*portableBinary, error) {
@@ -87,18 +88,19 @@ func buildExportBins(bins map[string]*config.Binary) ([]*portableBinary, error) 
 		}
 
 		exportedBins = append(exportedBins, &portableBinary{
-			Name:        filepath.Base(ep),
-			RemoteName:  binCfg.RemoteName,
-			Version:     binCfg.Version,
-			Hash:        hash,
-			URL:         binCfg.URL,
-			Provider:    binCfg.Provider,
-			InstallMode: binCfg.InstallMode,
-			PackageType: binCfg.PackageType,
-			AppBundle:   binCfg.AppBundle,
-			PackagePath: binCfg.PackagePath,
-			Pinned:      binCfg.Pinned,
-			MinAgeDays:  binCfg.MinAgeDays,
+			Name:             filepath.Base(ep),
+			RemoteName:       binCfg.RemoteName,
+			Version:          binCfg.Version,
+			Hash:             hash,
+			URL:              binCfg.URL,
+			Provider:         binCfg.Provider,
+			InstallMode:      binCfg.InstallMode,
+			PackageType:      binCfg.PackageType,
+			AppBundle:        binCfg.AppBundle,
+			PackagePath:      binCfg.PackagePath,
+			ReleaseTagPrefix: binCfg.ReleaseTagPrefix,
+			Pinned:           binCfg.Pinned,
+			MinAgeDays:       binCfg.MinAgeDays,
 		})
 	}
 

@@ -13,6 +13,7 @@ import (
 type staticProvider struct {
 	id      string
 	release *providers.ReleaseInfo
+	history []*providers.ReleaseInfo
 	err     error
 }
 
@@ -29,6 +30,13 @@ func (s *staticProvider) GetLatestVersion() (*providers.ReleaseInfo, error) {
 
 func (s *staticProvider) Cleanup(*providers.CleanupOpts) error {
 	return nil
+}
+
+func (s *staticProvider) ListReleases(limit int) ([]*providers.ReleaseInfo, error) {
+	if limit > 0 && len(s.history) > limit {
+		return s.history[:limit], nil
+	}
+	return s.history, nil
 }
 
 func (s *staticProvider) GetID() string {
