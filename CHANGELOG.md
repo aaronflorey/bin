@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.5.0](https://github.com/aaronflorey/bin/compare/v2.4.0...v2.5.0) (2026-05-27)
+
+
+### Features
+
+* allow exporting a list of installed ([8afb4d8](https://github.com/aaronflorey/bin/commit/8afb4d867d49bf3b3ce367618d55a34c6b0120dc))
+* **cmd,providers:** support multi-lane release installs ([fdebbe7](https://github.com/aaronflorey/bin/commit/fdebbe7f069697bb776fc3aed757b53ccb1e6bf3))
+* **FN-002:** document multi-tool selection persistence ([5acd680](https://github.com/aaronflorey/bin/commit/5acd68045975e75eb4cde897203fcfde7be1f125))
+
+
+### Bug Fixes
+
+* **assets:** detect macOS .app bundles in zip/tar archives ([9c85443](https://github.com/aaronflorey/bin/commit/9c85443996dbdde021731f0bb5cc090055d9714c))
+* **assets:** filter out .blockmap metadata files from release assets ([ee999dd](https://github.com/aaronflorey/bin/commit/ee999dd50d6543f00a4433744483d3a8fad4a48a))
+* **cmd,config:** harden install and config flows ([6bba9a0](https://github.com/aaronflorey/bin/commit/6bba9a0e0ba6c3817aaf857619d0dc8adf3440c6))
+* **cmd:** remove tui changelog browser ([2fbdbee](https://github.com/aaronflorey/bin/commit/2fbdbee59090be6dc3e112b70b1ddf9a82bd254a))
+* **providers,assets:** handle final binary checksums ([59911b0](https://github.com/aaronflorey/bin/commit/59911b00a0e24e4ce2a16aa4820f66fc1cd4aa87))
+
 ## [2.4.0](https://github.com/aaronflorey/bin/compare/v2.3.0...v2.4.0) (2026-05-01)
 
 
