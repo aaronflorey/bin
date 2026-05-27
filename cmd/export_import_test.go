@@ -126,6 +126,107 @@ func TestExportWritesToFileWhenPathIsProvided(t *testing.T) {
 	}
 }
 
+func TestExportListWritesURLsToStdout(t *testing.T) {
+	setupTestConfig(t)
+
+	binDir := t.TempDir()
+	firstPath := filepath.Join(binDir, "z-tool")
+	if err := os.WriteFile(firstPath, []byte("z-tool-content"), 0o755); err != nil {
+		t.Fatalf("failed to write first installed test binary: %v", err)
+	}
+	secondPath := filepath.Join(binDir, "a-tool")
+	if err := os.WriteFile(secondPath, []byte("a-tool-content"), 0o755); err != nil {
+		t.Fatalf("failed to write second installed test binary: %v", err)
+	}
+
+	if err := config.UpsertBinaries([]*config.Binary{
+		{
+			Path:       firstPath,
+			RemoteName: "z-tool",
+			Version:    "1.0.0",
+			URL:        "https://example.com/tools/z-tool/releases/tag/v1.0.0",
+			Provider:   "github",
+		},
+		{
+			Path:       secondPath,
+			RemoteName: "a-tool",
+			Version:    "2.0.0",
+			URL:        "https://example.com/tools/a-tool/releases/tag/v2.0.0",
+			Provider:   "github",
+		},
+	}); err != nil {
+		t.Fatalf("failed to seed binaries: %v", err)
+	}
+
+	cmd := newExportCmd().cmd
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"--format=list"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected export command error: %v", err)
+	}
+
+	got := out.String()
+	want := strings.Join([]string{
+		"https://example.com/tools/a-tool/releases/tag/v2.0.0",
+		"https://example.com/tools/z-tool/releases/tag/v1.0.0",
+	}, "\n") + "\n"
+	if got != want {
+		t.Fatalf("unexpected list output:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+func TestExportListWritesURLsToFile(t *testing.T) {
+	setupTestConfig(t)
+
+	installedPath := filepath.Join(t.TempDir(), "file-list-tool")
+	if err := os.WriteFile(installedPath, []byte("file-list-tool-content"), 0o755); err != nil {
+		t.Fatalf("failed to write installed test binary: %v", err)
+	}
+
+	if err := config.UpsertBinary(&config.Binary{
+		Path:       installedPath,
+		RemoteName: "file-list-tool",
+		Version:    "1.0.0",
+		URL:        "https://example.com/tools/file-list-tool/releases/tag/v1.0.0",
+		Provider:   "github",
+	}); err != nil {
+		t.Fatalf("failed to upsert binary: %v", err)
+	}
+
+	outPath := filepath.Join(t.TempDir(), "export.txt")
+
+	cmd := newExportCmd().cmd
+	cmd.SetArgs([]string{"--format=list", outPath})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected export command error: %v", err)
+	}
+
+	raw, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("failed to read export file: %v", err)
+	}
+
+	if got, want := string(raw), "https://example.com/tools/file-list-tool/releases/tag/v1.0.0\n"; got != want {
+		t.Fatalf("unexpected list file output: got %q, want %q", got, want)
+	}
+}
+
+func TestExportRejectsUnknownFormat(t *testing.T) {
+	cmd := newExportCmd().cmd
+	cmd.SetArgs([]string{"--format=xml"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected export command to reject unknown format")
+	}
+	if !strings.Contains(err.Error(), `unsupported --format "xml"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestImportReadsFromStdinWhenNoPathIsProvided(t *testing.T) {
 	defaultPath := setupTestConfig(t)
 

@@ -3,38 +3,45 @@ package cmd
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/aaronflorey/bin/pkg/config"
 	"github.com/spf13/cobra"
 )
 
 type exportCmd struct {
-	cmd *cobra.Command
+	cmd    *cobra.Command
+	format string
 }
 
 func newExportCmd() *exportCmd {
 	root := &exportCmd{}
 	cmd := &cobra.Command{
 		Use:           "export [file]",
-		Short:         "Exports locally installed binaries as JSON",
+		Short:         "Exports locally installed binaries",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Args:          cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			format, err := normalizeExportFormat(root.format)
+			if err != nil {
+				return err
+			}
+
 			cfg := config.Get()
 			exportedBins, err := buildExportBins(cfg.Bins)
 			if err != nil {
 				return err
 			}
 
-			payload, err := json.MarshalIndent(exportedBins, "", "    ")
+			payload, err := buildExportPayload(format, exportedBins)
 			if err != nil {
 				return err
 			}
-			payload = append(payload, '\n')
 
 			if len(args) == 1 {
 				return os.WriteFile(args[0], payload, 0o644)
@@ -46,8 +53,37 @@ func newExportCmd() *exportCmd {
 	}
 
 	root.cmd = cmd
+	root.cmd.Flags().StringVar(&root.format, "format", "json", "Output format: json or list")
 	enableSpinner(root.cmd)
 	return root
+}
+
+func normalizeExportFormat(format string) (string, error) {
+	switch normalized := strings.ToLower(strings.TrimSpace(format)); normalized {
+	case "", "json", "list":
+		if normalized == "" {
+			return "json", nil
+		}
+		return normalized, nil
+	default:
+		return "", fmt.Errorf("unsupported --format %q", format)
+	}
+}
+
+func buildExportPayload(format string, exportedBins []*portableBinary) ([]byte, error) {
+	if format == "list" {
+		urls := make([]string, 0, len(exportedBins))
+		for _, bin := range exportedBins {
+			urls = append(urls, bin.URL)
+		}
+		return []byte(strings.Join(urls, "\n") + "\n"), nil
+	}
+
+	payload, err := json.MarshalIndent(exportedBins, "", "    ")
+	if err != nil {
+		return nil, err
+	}
+	return append(payload, '\n'), nil
 }
 
 // portableBinary is the shared serialization format for export and import.
