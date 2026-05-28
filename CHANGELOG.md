@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.5.1](https://github.com/aaronflorey/bin/compare/v2.5.0...v2.5.1) (2026-05-28)
+
+
+### Bug Fixes
+
+* **providers,config:** tighten checksum asset selection ([b8591ba](https://github.com/aaronflorey/bin/commit/b8591ba3005b07724ce1551c2b6ae6685a87ef4d))
+
 ## [2.5.0](https://github.com/aaronflorey/bin/compare/v2.4.0...v2.5.0) (2026-05-27)
 
 
