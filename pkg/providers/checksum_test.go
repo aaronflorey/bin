@@ -72,6 +72,22 @@ func TestRankedChecksumAssets(t *testing.T) {
 	}
 }
 
+func TestRankedChecksumAssetsSkipsMetadataSidecars(t *testing.T) {
+	assets := []checksumAsset{
+		{Name: "trivy_0.70.0_checksums.txt.sigstore.json", URL: "https://example.com/checksums.sigstore.json"},
+		{Name: "trivy_0.70.0_checksums.txt", URL: "https://example.com/checksums.txt"},
+		{Name: "trivy_0.70.0_Linux-64bit.rpm", URL: "https://example.com/trivy.rpm"},
+	}
+
+	ranked := rankedChecksumAssets("trivy_0.70.0_Linux-64bit.tar.gz", assets)
+	if len(ranked) != 1 {
+		t.Fatalf("unexpected ranked asset count: %d", len(ranked))
+	}
+	if ranked[0].Name != "trivy_0.70.0_checksums.txt" {
+		t.Fatalf("unexpected ranked asset: %s", ranked[0].Name)
+	}
+}
+
 func TestRankedChecksumAssetsPrefersMatchingStem(t *testing.T) {
 	assets := []checksumAsset{
 		{Name: "other.sha256sum", URL: "https://example.com/other.sha256sum"},

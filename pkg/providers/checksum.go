@@ -16,6 +16,24 @@ import (
 
 var sha256Pattern = regexp.MustCompile(`(?i)\b[a-f0-9]{64}\b`)
 
+var checksumMetadataSuffixes = []string{
+	".sigstore.json",
+	".intoto.jsonl",
+	".sbom.json",
+	".spdx.json",
+	".cyclonedx.json",
+	".provenance.json",
+	".attestation.json",
+	".attest.json",
+	".sig",
+	".minisig",
+	".pem",
+	".crt",
+	".cer",
+	".asc",
+	".blockmap",
+}
+
 type checksumAsset struct {
 	Name string
 	URL  string
@@ -66,7 +84,7 @@ func rankedChecksumAssets(name string, assets []checksumAsset) []checksumAsset {
 	scored := []scoredAsset{}
 	for _, asset := range assets {
 		lower := strings.ToLower(asset.Name)
-		if strings.Contains(lower, "hashes_order") {
+		if strings.Contains(lower, "hashes_order") || isChecksumMetadataAsset(lower) || !isChecksumNamedAsset(lower) {
 			continue
 		}
 		score := 0
@@ -99,6 +117,37 @@ func rankedChecksumAssets(name string, assets []checksumAsset) []checksumAsset {
 	}
 
 	return result
+}
+
+func isChecksumMetadataAsset(name string) bool {
+	for _, suffix := range checksumMetadataSuffixes {
+		if strings.HasSuffix(name, suffix) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func isChecksumNamedAsset(name string) bool {
+	if strings.Contains(name, "checksum") || strings.Contains(name, "sha256") {
+		return true
+	}
+
+	for _, suffix := range []string{
+		".sha512sum",
+		".sha512",
+		".sha1sum",
+		".sha1",
+		".md5sum",
+		".md5",
+	} {
+		if strings.HasSuffix(name, suffix) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func fetchChecksumHashOrder(assets []checksumAsset, headers map[string]string) []string {

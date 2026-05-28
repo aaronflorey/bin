@@ -365,14 +365,6 @@ func RemoveBinaries(paths []string) error {
 	})
 }
 
-func writeLocked() error {
-	configPath, err := getConfigPath()
-	if err != nil {
-		return err
-	}
-	return writeConfigLocked(configPath, cfg)
-}
-
 func writeConfigLocked(configPath string, current config) error {
 	configDir := filepath.Dir(configPath)
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
