@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -93,6 +94,16 @@ func TestSaveToDiskValidatesExpectedSHA(t *testing.T) {
 	}, target, false)
 	if err != nil {
 		t.Fatalf("saveToDisk returned error: %v", err)
+	}
+
+	if runtime.GOOS != "windows" {
+		info, statErr := os.Stat(target)
+		if statErr != nil {
+			t.Fatalf("stat installed file: %v", statErr)
+		}
+		if info.Mode().Perm() != 0o755 {
+			t.Fatalf("unexpected installed mode: got %o, want 755", info.Mode().Perm())
+		}
 	}
 
 	_, err = saveToDisk(&providers.File{
