@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -24,12 +25,15 @@ var isPromptInteractive = prompt.IsInteractive
 var confirmPrompt = prompt.Confirm
 var installProviderFactory = newProviderWithPolicy
 
-// applyChmod applies the DefaultChmod setting from config, if set.
-// This is a no-op on non-Linux platforms where DefaultChmod is not set by default.
+// applyChmod applies the configured mode for installed binaries.
+// When unset, direct binary installs default to 0755 on non-Windows systems.
 func applyChmod(file *os.File) error {
 	defaultChmod := config.Get().DefaultChmod
 	if len(defaultChmod) == 0 {
-		return nil
+		if runtime.GOOS == "windows" {
+			return nil
+		}
+		defaultChmod = "0755"
 	}
 
 	var chmodVal int64
