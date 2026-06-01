@@ -100,28 +100,21 @@ func selectReleaseTagPrefixesInteractively(options []releasePrefixOption) ([]str
 		return []string{options[0].Prefix}, nil
 	}
 
-	items := make([]prompt.MultiSelectItem, 0, len(options))
-	for i, option := range options {
+	opts := make([]prompt.MultiSelectOption, 0, len(options))
+	for _, option := range options {
 		label := option.LatestTag
 		if option.Prefix != "" {
 			label = fmt.Sprintf("%s (%s)", option.Prefix, option.LatestTag)
 		}
-		description := option.MatchedAsset
-		if description == "" && len(option.Assets) > 0 {
-			description = strings.Join(option.Assets[:min(3, len(option.Assets))], ", ")
-		}
-		items = append(items, prompt.MultiSelectItem{
-			Value:       option.Prefix,
-			Label:       label,
-			Description: description,
-			Selected:    i == 0,
+		opts = append(opts, prompt.MultiSelectOption{
+			Value: option.Prefix,
+			Label: label,
 		})
 	}
 
-	selected, err := prompt.MultiSelectItems(
+	selected, err := prompt.SelectMultiple(
 		"Select release lanes to install",
-		"up/down: move  space: toggle  a: toggle all  enter: confirm  q: abort",
-		items,
+		opts,
 	)
 	if err != nil {
 		return nil, err
@@ -130,9 +123,3 @@ func selectReleaseTagPrefixesInteractively(options []releasePrefixOption) ([]str
 	return selected, nil
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

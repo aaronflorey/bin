@@ -3,8 +3,6 @@ module github.com/aaronflorey/bin
 go 1.24.4
 
 require (
-	charm.land/bubbletea/v2 v2.0.0
-	charm.land/lipgloss/v2 v2.0.0
 	code.gitea.io/sdk/gitea v0.22.0
 	github.com/caarlos0/log v0.5.4
 	github.com/charmbracelet/colorprofile v0.4.2
@@ -21,10 +19,12 @@ require (
 	github.com/yuin/goldmark v1.8.1
 	gitlab.com/gitlab-org/api/client-go v0.137.0
 	golang.org/x/oauth2 v0.30.0
+	golang.org/x/sys v0.41.0
 	golang.org/x/term v0.33.0
 )
 
 require (
+	charm.land/lipgloss/v2 v2.0.0-beta.3.0.20251120230642-dcccabe2cd63 // indirect
 	github.com/42wim/httpsig v1.2.3 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
@@ -75,7 +75,6 @@ require (
 	golang.org/x/crypto v0.40.0 // indirect
 	golang.org/x/net v0.42.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
-	golang.org/x/sys v0.41.0 // indirect
 	golang.org/x/time v0.12.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250721164621-a45f3dfb1074 // indirect
 	google.golang.org/grpc v1.73.0 // indirect
