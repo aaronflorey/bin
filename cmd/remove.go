@@ -36,7 +36,7 @@ type removeTarget struct {
 func newRemoveCmd() *removeCmd {
 	root := &removeCmd{
 		newProvider:   providers.New,
-		selectTargets: prompt.MultiSelect,
+		selectTargets: prompt.SelectMultiple,
 		isInteractive: prompt.IsInteractive,
 	}
 	// nolint: dupl

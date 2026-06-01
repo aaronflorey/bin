@@ -317,21 +317,15 @@ func selectUpdatesForInteractiveSession(updates []availableUpdate) ([]availableU
 		return updates, nil
 	}
 
-	items := make([]prompt.MultiSelectItem, 0, len(updates))
+	options := make([]prompt.MultiSelectOption, 0, len(updates))
 	for _, update := range updates {
-		items = append(items, prompt.MultiSelectItem{
-			Value:       update.binary.Path,
-			Label:       fmt.Sprintf("%s (%s -> %s)", update.binary.Path, update.binary.Version, update.info.version),
-			Description: update.info.url,
-			Selected:    true,
+		options = append(options, prompt.MultiSelectOption{
+			Value: update.binary.Path,
+			Label: fmt.Sprintf("%s (%s -> %s)", update.binary.Path, update.binary.Version, update.info.version),
 		})
 	}
 
-	selectedPaths, err := prompt.MultiSelectItems(
-		"Select binaries to update",
-		"up/down: move  space: toggle  a: toggle all  enter: confirm  q: abort",
-		items,
-	)
+	selectedPaths, err := prompt.SelectMultiple("Select binaries to update", options)
 	if err != nil {
 		return nil, err
 	}
