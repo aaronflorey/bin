@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.5.2](https://github.com/aaronflorey/bin/compare/v2.5.1...v2.5.2) (2026-05-31)
+
+
+### Bug Fixes
+
+* **cmd:** ensure installed binaries are executable ([8d186f5](https://github.com/aaronflorey/bin/commit/8d186f597559f32363d879e9cc91bb8c7df16cd6))
+
 ## [2.5.1](https://github.com/aaronflorey/bin/compare/v2.5.0...v2.5.1) (2026-05-28)
 
 
