@@ -37,7 +37,7 @@ var (
 	ascType = filetype.AddType("asc", "text/plain")
 
 	metadataSuffixes = []string{
-		".sha256", ".sha512", ".sha1", ".md5",
+		".sha256", ".sha512", ".sha1", ".md5", ".sha",
 		".sha256sum", ".sha512sum",
 		".sigstore.json", ".intoto.jsonl",
 		".sbom.json", ".spdx.json", ".cyclonedx.json",
