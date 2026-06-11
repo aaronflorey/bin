@@ -15,8 +15,9 @@ import (
 )
 
 type goinstall struct {
-	name, repo, subPath, tag, latestURL string
-	cachedVersionInfo                   *goInstallVersionInfo
+	name, repo, subPath, tag string
+	cachedVersionInfo        *goInstallVersionInfo
+	httpClient               *http.Client
 }
 
 type goInstallVersionInfo struct {
@@ -24,7 +25,7 @@ type goInstallVersionInfo struct {
 	Time    time.Time `json:"Time"`
 }
 
-func parseRepo(path string) (string, string, string, string) {
+func parseRepo(path string) (string, string, string) {
 	repo := path
 	tag := "latest"
 	if i := strings.LastIndex(path, "@"); i > -1 {
@@ -37,9 +38,7 @@ func parseRepo(path string) (string, string, string, string) {
 		name = repo[i+1:]
 	}
 
-	latestURL := fmt.Sprintf("https://proxy.golang.org/%s/@latest", repo)
-
-	return repo, tag, name, latestURL
+	return repo, tag, name
 }
 
 func versionInfoURL(repo, version string) string {
@@ -48,17 +47,22 @@ func versionInfoURL(repo, version string) string {
 
 func newGoInstall(repo string) (Provider, error) {
 	repoUrl := strings.TrimPrefix(repo, "goinstall://")
-	repo, tag, name, latestURL := parseRepo(repoUrl)
-	return &goinstall{repo: repo, tag: tag, name: name, latestURL: latestURL}, nil
+	repo, tag, name := parseRepo(repoUrl)
+	return &goinstall{repo: repo, tag: tag, name: name, httpClient: http.DefaultClient}, nil
 }
 
 // resolveSubPath probes for the Go module root and splits the repo into a
 // base module path and sub-path. This is deferred to Fetch time to avoid
 // shelling out to "go list -m" during provider construction.
 func (g *goinstall) resolveSubPath() {
+	g.resolveSubPathWith(baseModulePath)
+}
+
+// resolveSubPathWith is the testable variant of resolveSubPath.
+func (g *goinstall) resolveSubPathWith(resolver func(string) (string, bool)) {
 	repoUrlNoVer := moduleRemoveVersion(g.repo)
 
-	baseRepo, found := baseModulePath(repoUrlNoVer)
+	baseRepo, found := resolver(repoUrlNoVer)
 	if !found || baseRepo == repoUrlNoVer {
 		return
 	}
@@ -66,6 +70,11 @@ func (g *goinstall) resolveSubPath() {
 	g.subPath = strings.TrimPrefix(repoUrlNoVer, baseRepo)
 	g.repo = baseRepo
 	log.Debugf("Using base module %s with sub path %q", baseRepo, g.subPath)
+}
+
+// latestURL returns the Go proxy @latest URL for the current base module path.
+func (g *goinstall) latestURL() string {
+	return fmt.Sprintf("https://proxy.golang.org/%s/@latest", g.repo)
 }
 
 // moduleRemoveVersion strips an @version suffix from a module path.
@@ -136,7 +145,7 @@ func (g *goinstall) Fetch(opts *FetchOpts) (*File, error) {
 		log.Infof("Getting %s release for %s", g.tag, g.repo)
 	} else {
 		log.Infof("Getting latest release for %s", g.repo)
-		versionInfo, err := g.getVersionInfo(g.latestURL)
+		versionInfo, err := g.getVersionInfo(g.latestURL())
 		if err != nil {
 			return nil, fmt.Errorf("failed to get latest version: %w", err)
 		}
@@ -178,7 +187,9 @@ func (g *goinstall) Fetch(opts *FetchOpts) (*File, error) {
 }
 
 func (g *goinstall) GetLatestVersion() (*ReleaseInfo, error) {
-	releaseInfo, err := g.getVersionInfo(g.latestURL)
+	g.resolveSubPath()
+
+	releaseInfo, err := g.getVersionInfo(g.latestURL())
 	if err != nil {
 		return nil, err
 	}
@@ -194,7 +205,7 @@ func (g *goinstall) GetLatestVersion() (*ReleaseInfo, error) {
 const maxVersionInfoSize = 1 << 20 // 1 MB
 
 func (g *goinstall) getVersionInfo(versionURL string) (*goInstallVersionInfo, error) {
-	resp, err := http.Get(versionURL)
+	resp, err := g.httpClient.Get(versionURL)
 	if err != nil {
 		return nil, err
 	}
@@ -204,6 +215,14 @@ func (g *goinstall) getVersionInfo(versionURL string) (*goInstallVersionInfo, er
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxVersionInfoSize))
 	if err != nil {
 		return nil, err
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		snippet := string(body)
+		if len(snippet) > 200 {
+			snippet = snippet[:200] + "..."
+		}
+		return nil, fmt.Errorf("unexpected status %d from %s: %s", resp.StatusCode, versionURL, snippet)
 	}
 
 	var result goInstallVersionInfo
