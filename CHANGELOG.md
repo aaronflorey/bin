@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.5.3](https://github.com/aaronflorey/bin/compare/v2.5.2...v2.5.3) (2026-06-11)
+
+
+### Bug Fixes
+
+* **assets:** add .sha to metadata suffixes to prevent selecting checksum files ([87fc4a1](https://github.com/aaronflorey/bin/commit/87fc4a19307d0f827c16a1a29a339628260ec1c5))
+* **goinstall:** resolve latest from base module ([32a7732](https://github.com/aaronflorey/bin/commit/32a77325871f427575e6401b21e381ca1c91ece4))
+
 ## [2.5.2](https://github.com/aaronflorey/bin/compare/v2.5.1...v2.5.2) (2026-05-31)
 
 
