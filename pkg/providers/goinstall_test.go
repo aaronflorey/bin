@@ -2,6 +2,9 @@ package providers
 
 import (
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -145,5 +148,123 @@ func TestNewGoInstallSubPath(t *testing.T) {
 				t.Errorf("name: got %q, want %q", g.name, c.wantName)
 			}
 		})
+	}
+}
+
+func TestSubPathLatestUsesBaseModule(t *testing.T) {
+	// Simulate: repo is a sub-package, resolveSubPath finds the base module.
+	// After resolution, latestURL() must point to the base module, not the sub-package.
+	p, err := newGoInstall("goinstall://go.kenn.io/kata/cmd/kata@latest")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	g := p.(*goinstall)
+
+	// Mock the module resolver: go.kenn.io/kata is the base module.
+	resolver := func(noVer string) (string, bool) {
+		if noVer == "go.kenn.io/kata/cmd/kata" {
+			return "go.kenn.io/kata", true
+		}
+		return "", false
+	}
+
+	g.resolveSubPathWith(resolver)
+
+	if g.repo != "go.kenn.io/kata" {
+		t.Errorf("repo: got %q, want %q", g.repo, "go.kenn.io/kata")
+	}
+	if g.subPath != "/cmd/kata" {
+		t.Errorf("subPath: got %q, want %q", g.subPath, "/cmd/kata")
+	}
+
+	wantLatestURL := "https://proxy.golang.org/go.kenn.io/kata/@latest"
+	if got := g.latestURL(); got != wantLatestURL {
+		t.Errorf("latestURL(): got %q, want %q", got, wantLatestURL)
+	}
+
+	// Also verify GetLatestVersion sends the request to the base module URL.
+	var requestedURL string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestedURL = r.URL.String()
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"Version":"v1.2.3","Time":"2024-01-01T00:00:00Z"}`)
+	}))
+	defer ts.Close()
+
+	g.httpClient = ts.Client()
+	// Point the proxy base to our test server.
+	g.repo = strings.TrimPrefix(ts.URL, "https://")
+	// Since we're testing URL routing, override latestURL to use the test server.
+	// Reset repo to the base module so latestURL() builds the right path.
+	g.repo = "go.kenn.io/kata"
+
+	// Replace httpClient with a transport that redirects to our test server.
+	g.httpClient = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			req.URL.Scheme = "http"
+			req.URL.Host = strings.TrimPrefix(ts.URL, "http://")
+			return ts.Client().Transport.RoundTrip(req)
+		}),
+	}
+
+	_, _ = g.GetLatestVersion()
+
+	// The request should have gone to /go.kenn.io/kata/@latest, not /go.kenn.io/kata/cmd/kata/@latest.
+	if !strings.Contains(requestedURL, "/go.kenn.io/kata/@latest") {
+		t.Errorf("expected request to base module @latest, got %q", requestedURL)
+	}
+	if strings.Contains(requestedURL, "/cmd/kata") {
+		t.Errorf("request should not include sub-path, got %q", requestedURL)
+	}
+}
+
+// roundTripFunc adapts a function to http.RoundTripper.
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func TestGetVersionInfoNon200(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(w, "module not found")
+	}))
+	defer ts.Close()
+
+	g := &goinstall{httpClient: ts.Client()}
+	_, err := g.getVersionInfo(ts.URL + "/@latest")
+	if err == nil {
+		t.Fatal("expected error for 404 response")
+	}
+
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "404") {
+		t.Errorf("error should mention status code 404, got: %s", errMsg)
+	}
+	if !strings.Contains(errMsg, "module not found") {
+		t.Errorf("error should include response body snippet, got: %s", errMsg)
+	}
+	if !strings.Contains(errMsg, ts.URL) {
+		t.Errorf("error should include request URL, got: %s", errMsg)
+	}
+}
+
+func TestGetVersionInfo500(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprint(w, "internal server error")
+	}))
+	defer ts.Close()
+
+	g := &goinstall{httpClient: ts.Client()}
+	_, err := g.getVersionInfo(ts.URL + "/@latest")
+	if err == nil {
+		t.Fatal("expected error for 500 response")
+	}
+
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "500") {
+		t.Errorf("error should mention status code 500, got: %s", errMsg)
 	}
 }
