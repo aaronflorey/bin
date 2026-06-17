@@ -44,6 +44,7 @@ var (
 		".provenance.json", ".attestation.json", ".attest.json",
 		".sig", ".minisig", ".pem", ".crt", ".cer", ".asc",
 		".blockmap",
+		".bundle",
 	}
 
 	metadataTokens = []string{
@@ -1319,13 +1320,23 @@ func isSupportedExt(filename string) bool {
 		return false
 	}
 
+	if looksLikeMetadataAsset(filename) {
+		log.Debugf("Filename %s is a metadata asset", filename)
+		return false
+	}
+
 	if ext := strings.TrimPrefix(filepath.Ext(filename), "."); len(ext) > 0 {
-		switch filetype.GetType(ext) {
-		case msiType, matchers.TypeDeb, matchers.TypeRpm, ascType:
+		if strings.EqualFold(ext, "AppImage") {
+			return true
+		}
+		switch t := filetype.GetType(ext); {
+		case t == types.Unknown:
+			return true
+		case t == msiType, t == matchers.TypeDeb, t == matchers.TypeRpm, t == ascType:
 			log.Debugf("Filename %s doesn't have a supported extension", filename)
 			return false
-		case matchers.TypeGz, types.Unknown, matchers.TypeZip, matchers.TypeXz, matchers.TypeTar, matchers.TypeBz2, matchers.TypeExe:
-			break
+		case t == matchers.TypeGz, t == matchers.TypeZip, t == matchers.TypeXz, t == matchers.TypeTar, t == matchers.TypeBz2, t == matchers.TypeExe:
+			return true
 		default:
 			log.Debugf("Filename %s doesn't have a supported extension", filename)
 			return false

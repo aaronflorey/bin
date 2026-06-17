@@ -1,0 +1,120 @@
+version: 1
+skills:
+    https://github.com/aaronflorey/agent-skills::charmbracelet:
+        destination: /Users/aaronflorey/Code/bin/.codex/skills/charmbracelet,/Users/aaronflorey/Code/bin/.opencode/skills/charmbracelet
+        hash: 8fcd3375b0a15f4eb817e7752b570cf4a783db9ff59261e9331c712f52f14fa8
+        skill: charmbracelet
+        description: '---'
+        source: https://github.com/aaronflorey/agent-skills
+        source_revision: branch:main
+        scope: project
+    https://github.com/aaronflorey/agent-skills::go-cobra:
+        destination: /Users/aaronflorey/Code/bin/.codex/skills/go-cobra,/Users/aaronflorey/Code/bin/.opencode/skills/go-cobra
+        hash: 24d4e4be96743db906973543fc949ce1419abf1647ab6439e5d71ac7f0e909a5
+        skill: go-cobra
+        description: '---'
+        source: https://github.com/aaronflorey/agent-skills
+        source_revision: branch:main
+        scope: project
+    https://github.com/aaronflorey/agent-skills::go-viper:
+        destination: /Users/aaronflorey/Code/bin/.codex/skills/go-viper,/Users/aaronflorey/Code/bin/.opencode/skills/go-viper
+        hash: bb7e01580daccaedfbc8f4745ca52adeafcc7e96a8d302c7179897245225935c
+        skill: go-viper
+        description: '---'
+        source: https://github.com/aaronflorey/agent-skills
+        source_revision: branch:main
+        scope: project
+    https://github.com/aaronflorey/agent-skills::goreleaser:
+        destination: /Users/aaronflorey/Code/bin/.codex/skills/goreleaser,/Users/aaronflorey/Code/bin/.opencode/skills/goreleaser
+        hash: 699cf5a51d6fd92bc82c647c65d091e27b03c4d96f08ac804ab74411806d9dee
+        skill: goreleaser
+        description: '---'
+        source: https://github.com/aaronflorey/agent-skills
+        source_revision: branch:main
+        scope: project
+    https://github.com/aaronflorey/agent-skills::release-please:
+        destination: /Users/aaronflorey/Code/bin/.codex/skills/release-please,/Users/aaronflorey/Code/bin/.opencode/skills/release-please
+        hash: d2532033ef054189cdc1b14d38cb2db2c1667f0de48bf60359d28236013093a1
+        skill: release-please
+        description: '---'
+        source: https://github.com/aaronflorey/agent-skills
+        source_revision: branch:main
+        scope: project
+    https://github.com/jeffallan/claude-skills::cli-developer:
+        destination: /Users/aaronflorey/Code/bin/.codex/skills/cli-developer,/Users/aaronflorey/Code/bin/.opencode/skills/cli-developer
+        hash: a229e3a01068edc0a9b24929a16789404a1597add6769ebf25809b54b8496ac2
+        skill: cli-developer
+        description: '---'
+        source: https://github.com/jeffallan/claude-skills
+        source_revision: branch:main
+        scope: project
+    https://github.com/jeffallan/claude-skills::code-documenter:
+        destination: /Users/aaronflorey/Code/bin/.codex/skills/code-documenter,/Users/aaronflorey/Code/bin/.opencode/skills/code-documenter
+        hash: 3f29c96402e3d6387e366f7e6d75d756635b0d33cdd123c198a8dc7d1fcfcc10
+        skill: code-documenter
+        description: '---'
+        source: https://github.com/jeffallan/claude-skills
+        source_revision: branch:main
+        scope: project
+    https://github.com/jeffallan/claude-skills::code-reviewer:
+        destination: /Users/aaronflorey/Code/bin/.codex/skills/code-reviewer,/Users/aaronflorey/Code/bin/.opencode/skills/code-reviewer
+        hash: 4969941121e6fd8c8f1e8165465ce4b62829f2150e325a72cac20c2ab369a41c
+        skill: code-reviewer
+        description: '---'
+        source: https://github.com/jeffallan/claude-skills
+        source_revision: branch:main
+        scope: project
+    https://github.com/jeffallan/claude-skills::golang-pro:
+        destination: /Users/aaronflorey/Code/bin/.codex/skills/golang-pro,/Users/aaronflorey/Code/bin/.opencode/skills/golang-pro
+        hash: 278d36d1e09c65924d166fd57566887daff1aefd8711130d8c0c58c0fe296fed
+        skill: golang-pro
+        description: '---'
+        source: https://github.com/jeffallan/claude-skills
+        source_revision: branch:main
+        scope: project
+    https://github.com/jeffallan/claude-skills::spec-miner:
+        destination: /Users/aaronflorey/Code/bin/.codex/skills/spec-miner,/Users/aaronflorey/Code/bin/.opencode/skills/spec-miner
+        hash: ea30ef947460780ca1a6682130f77c4a3d3dbd89f43807defe0adeed04db0a47
+        skill: spec-miner
+        description: '---'
+        source: https://github.com/jeffallan/claude-skills
+        source_revision: branch:main
+        scope: project
+assets:
+    agent::https://github.com/aaronflorey/agent-skills::docs-writer:
+        kind: agent
+        name: docs-writer
+        hash: aa1efb47e1a250e25856a07c19b6030bff46e08fd51f96efdc75d8dfe0bfdb41
+        source: https://github.com/aaronflorey/agent-skills
+        destination: /Users/aaronflorey/Code/bin/.opencode/agents/docs-writer.md
+    agent::https://github.com/aaronflorey/agent-skills::package-finder:
+        kind: agent
+        name: package-finder
+        hash: 006e2e932a212de47cef73198cf651d02c3943637609d9b32b1495acc36719c1
+        source: https://github.com/aaronflorey/agent-skills
+        destination: /Users/aaronflorey/Code/bin/.opencode/agents/package-finder.md
+    agent::https://github.com/aaronflorey/agent-skills::scout:
+        kind: agent
+        name: scout
+        hash: 47e3a3b579d837a3e3bcbf69f1c9f9743664291373966387345ca7cb7c7e56f6
+        source: https://github.com/aaronflorey/agent-skills
+        destination: /Users/aaronflorey/Code/bin/.opencode/agents/scout.md
+    agent::https://github.com/aaronflorey/agent-skills::todo-executor:
+        kind: agent
+        name: todo-executor
+        hash: 17d3ebf2d642d6169517160f8e489ecb05664cd87b74ef37fb0a8c393117aa56
+        source: https://github.com/aaronflorey/agent-skills
+        destination: /Users/aaronflorey/Code/bin/.opencode/agents/todo-executor.md
+    agent::https://github.com/aaronflorey/agent-skills::todo-reviewer:
+        kind: agent
+        name: todo-reviewer
+        hash: d35cd00d86357c4837b7d243f59fcabe5a47a8193d2edefef7f164cd9c3f6ff7
+        source: https://github.com/aaronflorey/agent-skills
+        destination: /Users/aaronflorey/Code/bin/.opencode/agents/todo-reviewer.md
+    agent::https://github.com/aaronflorey/agent-skills::todo-verifier:
+        kind: agent
+        name: todo-verifier
+        hash: c6615d87555845d411bda506a19ffb9c1a6c178f5ddb48df1e61338fe5ecf5a9
+        source: https://github.com/aaronflorey/agent-skills
+        destination: /Users/aaronflorey/Code/bin/.opencode/agents/todo-verifier.md
+latest_report: '{"config":"/Users/aaronflorey/Code/bin/orqen.yaml","destination":"project","dry_run":false,"summary":{"installed":16,"updated":0,"removed":0,"unchanged":1,"broken":0,"failed":0},"actions":[{"source":"https://github.com/aaronflorey/agent-skills","skill":"charmbracelet","status":"installed","error":null},{"source":"https://github.com/aaronflorey/agent-skills","skill":"docs-writer","status":"installed","error":null},{"source":"https://github.com/aaronflorey/agent-skills","skill":"go-cobra","status":"installed","error":null},{"source":"https://github.com/aaronflorey/agent-skills","skill":"go-viper","status":"installed","error":null},{"source":"https://github.com/aaronflorey/agent-skills","skill":"goreleaser","status":"installed","error":null},{"source":"https://github.com/aaronflorey/agent-skills","skill":"package-finder","status":"installed","error":null},{"source":"https://github.com/aaronflorey/agent-skills","skill":"release-please","status":"installed","error":null},{"source":"https://github.com/aaronflorey/agent-skills","skill":"scout","status":"installed","error":null},{"source":"https://github.com/aaronflorey/agent-skills","skill":"todo-executor","status":"installed","error":null},{"source":"https://github.com/aaronflorey/agent-skills","skill":"todo-reviewer","status":"installed","error":null},{"source":"https://github.com/aaronflorey/agent-skills","skill":"todo-verifier","status":"installed","error":null},{"source":"https://github.com/jeffallan/claude-skills","skill":"cli-developer","status":"installed","error":null},{"source":"https://github.com/jeffallan/claude-skills","skill":"cli-developer","status":"unchanged","error":null},{"source":"https://github.com/jeffallan/claude-skills","skill":"code-documenter","status":"installed","error":null},{"source":"https://github.com/jeffallan/claude-skills","skill":"code-reviewer","status":"installed","error":null},{"source":"https://github.com/jeffallan/claude-skills","skill":"golang-pro","status":"installed","error":null},{"source":"https://github.com/jeffallan/claude-skills","skill":"spec-miner","status":"installed","error":null}]}'
