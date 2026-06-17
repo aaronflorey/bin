@@ -967,6 +967,18 @@ func TestIsSupportedExt(t *testing.T) {
 			"suite-4.7.1-win64.msi",
 			false,
 		},
+		{
+			"codebase-memory-mcp-darwin-arm64.tar.gz.bundle",
+			false,
+		},
+		{
+			"codebase-memory-mcp-darwin-arm64.tar.gz",
+			true,
+		},
+		{
+			"codebase-memory-mcp",
+			true,
+		},
 	}
 
 	for _, c := range cases {

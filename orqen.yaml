@@ -1,0 +1,20 @@
+scope: project
+agent:
+  - opencode
+  - codex
+skills:
+  - source: https://github.com/aaronflorey/agent-skills
+    skills:
+      - charmbracelet
+      - go-cobra
+      - go-viper
+      - release-please
+      - goreleaser
+  - source: https://github.com/jeffallan/claude-skills
+    skills:
+      - cli-developer
+      - golang-pro
+      - spec-miner
+      - code-reviewer
+      - code-documenter
+      - cli-developer
