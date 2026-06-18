@@ -1329,13 +1329,13 @@ func isSupportedExt(filename string) bool {
 		if strings.EqualFold(ext, "AppImage") {
 			return true
 		}
-		switch t := filetype.GetType(ext); {
-		case t == types.Unknown:
+		switch t := filetype.GetType(ext); t {
+		case types.Unknown:
 			return true
-		case t == msiType, t == matchers.TypeDeb, t == matchers.TypeRpm, t == ascType:
+		case msiType, matchers.TypeDeb, matchers.TypeRpm, ascType:
 			log.Debugf("Filename %s doesn't have a supported extension", filename)
 			return false
-		case t == matchers.TypeGz, t == matchers.TypeZip, t == matchers.TypeXz, t == matchers.TypeTar, t == matchers.TypeBz2, t == matchers.TypeExe:
+		case matchers.TypeGz, matchers.TypeZip, matchers.TypeXz, matchers.TypeTar, matchers.TypeBz2, matchers.TypeExe:
 			return true
 		default:
 			log.Debugf("Filename %s doesn't have a supported extension", filename)
