@@ -189,7 +189,7 @@ func newUpdateCmd() *updateCmd {
 	root.cmd.Flags().BoolVarP(&root.opts.all, "all", "a", false, "Show all possible download options (skip scoring & filtering)")
 	root.cmd.Flags().IntVarP(&root.opts.parallelism, "parallelism", "p", defaultUpdateParallelism, "Maximum number of binaries to check for updates concurrently")
 	root.cmd.Flags().BoolVarP(&root.opts.skipPathCheck, "skip-path-check", "", false, "Skips path checking when looking into packages")
-	root.cmd.Flags().BoolVarP(&root.opts.continueOnError, "continue-on-error", "c", false, "Continues to update next package if an error is encountered")
+	root.cmd.Flags().BoolVarP(&root.opts.continueOnError, "continue-on-error", "c", true, "Continues to update next package if an error is encountered")
 	return root
 }
 
