@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.5.4](https://github.com/aaronflorey/bin/compare/v2.5.3...v2.5.4) (2026-06-18)
+
+
+### Bug Fixes
+
+* **assets:** satisfy staticcheck switch lint ([52c0c04](https://github.com/aaronflorey/bin/commit/52c0c04388575643826edcd6442637e775c6aa95))
+
 ## [2.5.3](https://github.com/aaronflorey/bin/compare/v2.5.2...v2.5.3) (2026-06-11)
 
 
