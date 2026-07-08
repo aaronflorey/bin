@@ -642,7 +642,10 @@ main() {
 	mkdir -p "$CONFIG_DIR"
 	if [ "$CONFIG_EXISTS" = "false" ]; then
 		log "Preparing config at ${CONFIG_PATH}"
-		printf '{\n  "default_path": "%s",\n  "bins": {}\n}\n' "$INSTALL_DIR" > "$CONFIG_PATH"
+		(
+			umask 077
+			printf '{\n  "default_path": "%s",\n  "bins": {}\n}\n' "$INSTALL_DIR" > "$CONFIG_PATH"
+		) || fail "failed to create config at ${CONFIG_PATH}"
 	fi
 
 	if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ] && [ "${SUDO_USER}" != "root" ]; then

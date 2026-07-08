@@ -13,6 +13,23 @@ import (
 	"testing"
 )
 
+func assertConfigFileMode(t *testing.T, configPath string) {
+	t.Helper()
+
+	if !supportsConfigFileMode() {
+		t.Skip("permission bits are not stable on Windows")
+	}
+
+	info, err := os.Stat(configPath)
+	if err != nil {
+		t.Fatalf("failed to stat config file: %v", err)
+	}
+
+	if got := info.Mode().Perm(); got != configFileMode {
+		t.Fatalf("expected config file mode %04o, got %04o", configFileMode, got)
+	}
+}
+
 func TestGetArchIncludesAliases(t *testing.T) {
 	archs := GetArch()
 	contains := func(v string) bool {
@@ -129,6 +146,7 @@ func TestCheckAndLoadAllowsFreshBINCONFIGPath(t *testing.T) {
 	if _, err := os.Stat(configPath); err != nil {
 		t.Fatalf("expected config file to be created: %v", err)
 	}
+	assertConfigFileMode(t, configPath)
 
 	raw, err := os.ReadFile(configPath)
 	if err != nil {
@@ -141,6 +159,51 @@ func TestCheckAndLoadAllowsFreshBINCONFIGPath(t *testing.T) {
 	}
 	if persisted.DefaultPath != defaultPath {
 		t.Fatalf("expected persisted default path %q, got %q", defaultPath, persisted.DefaultPath)
+	}
+}
+
+func TestCheckAndLoadDoesNotRewriteExistingConfigWithoutDefaultPath(t *testing.T) {
+	t.Cleanup(func() {
+		cfg = config{}
+	})
+
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	defaultPath := filepath.Join(t.TempDir(), "bin")
+	t.Setenv("BIN_CONFIG", configPath)
+	t.Setenv("BIN_EXE_DIR", defaultPath)
+
+	if err := os.WriteFile(configPath, []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("failed to seed config file: %v", err)
+	}
+
+	beforeInfo, err := os.Stat(configPath)
+	if err != nil {
+		t.Fatalf("failed to stat seeded config file: %v", err)
+	}
+
+	if err := CheckAndLoad(); err != nil {
+		t.Fatalf("CheckAndLoad returned error: %v", err)
+	}
+
+	if cfg.DefaultPath != defaultPath {
+		t.Fatalf("expected in-memory default path %q, got %q", defaultPath, cfg.DefaultPath)
+	}
+
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("failed to read config file: %v", err)
+	}
+	if got := string(raw); got != "{}\n" {
+		t.Fatalf("expected existing config to remain unchanged, got %q", got)
+	}
+
+	afterInfo, err := os.Stat(configPath)
+	if err != nil {
+		t.Fatalf("failed to stat config file after load: %v", err)
+	}
+
+	if supportsConfigFileMode() && afterInfo.Mode().Perm() != beforeInfo.Mode().Perm() {
+		t.Fatalf("expected config mode to remain %04o, got %04o", beforeInfo.Mode().Perm(), afterInfo.Mode().Perm())
 	}
 }
 
@@ -166,6 +229,7 @@ func TestUpsertBinaryPersistsValidConfig(t *testing.T) {
 	if err := UpsertBinary(binary); err != nil {
 		t.Fatalf("UpsertBinary returned error: %v", err)
 	}
+	assertConfigFileMode(t, configPath)
 
 	raw, err := os.ReadFile(configPath)
 	if err != nil {
@@ -178,6 +242,39 @@ func TestUpsertBinaryPersistsValidConfig(t *testing.T) {
 	}
 	if got := persisted.Bins[binary.Path]; got == nil || got.Version != binary.Version {
 		t.Fatalf("expected persisted binary %+v, got %+v", binary, got)
+	}
+}
+
+func TestSetRewritesExistingConfigOnExplicitMutation(t *testing.T) {
+	t.Cleanup(func() {
+		cfg = config{}
+	})
+
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	updatedPath := filepath.Join(t.TempDir(), "bin")
+	t.Setenv("BIN_CONFIG", configPath)
+
+	if err := os.WriteFile(configPath, []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("failed to seed config file: %v", err)
+	}
+
+	if err := Set("default_path", updatedPath); err != nil {
+		t.Fatalf("Set returned error: %v", err)
+	}
+
+	assertConfigFileMode(t, configPath)
+
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("failed to read config file: %v", err)
+	}
+
+	var persisted config
+	if err := json.Unmarshal(raw, &persisted); err != nil {
+		t.Fatalf("expected valid config json, got error: %v", err)
+	}
+	if persisted.DefaultPath != updatedPath {
+		t.Fatalf("expected persisted default path %q, got %q", updatedPath, persisted.DefaultPath)
 	}
 }
 
@@ -221,6 +318,7 @@ func TestUpsertBinaryReloadsLatestOnDiskState(t *testing.T) {
 	if err := UpsertBinary(newBinary); err != nil {
 		t.Fatalf("UpsertBinary returned error: %v", err)
 	}
+	assertConfigFileMode(t, configPath)
 
 	persistedRaw, err := os.ReadFile(configPath)
 	if err != nil {

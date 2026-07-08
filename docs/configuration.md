@@ -11,7 +11,7 @@ The config path is resolved in this order:
 3. Unix: `XDG_CONFIG_HOME/bin/config.json` when `XDG_CONFIG_HOME` points to an existing path, otherwise `~/.config/bin/config.json`, otherwise `~/.bin/config.json` (`pkg/config/config_unix.go`).
 4. Windows: `%APPDATA%/bin/config.json`, otherwise `~/.bin/config.json` (`pkg/config/config_windows.go`).
 
-The file is created automatically if missing when `bin` starts (`CheckAndLoad`). Invalid JSON aborts startup with `error loading config file: ...` (`cmd/root.go`, `pkg/config/config.go`).
+The file is created automatically if missing when `bin` starts (`CheckAndLoad`). On non-Windows systems, `bin` creates and rewrites the config with owner-only permissions (`0600`) because hooks can execute commands. Invalid JSON aborts startup with `error loading config file: ...` (`cmd/root.go`, `pkg/config/config.go`).
 
 ## Config schema
 
