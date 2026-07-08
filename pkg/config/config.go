@@ -23,6 +23,12 @@ var cfg config
 
 var ErrInvalidConfigKey = errors.New("invalid config key")
 
+const configFileMode os.FileMode = 0o600
+
+func supportsConfigFileMode() bool {
+	return runtime.GOOS != "windows"
+}
+
 var (
 	osStat    = os.Stat
 	globFiles = filepath.Glob
@@ -135,7 +141,7 @@ func CheckAndLoad() error {
 	}
 
 	return withConfigLock(configPath, func() error {
-		loaded, err := loadConfigLocked(configPath)
+		loaded, created, err := loadConfigLocked(configPath)
 		if err != nil {
 			return err
 		}
@@ -168,8 +174,10 @@ func CheckAndLoad() error {
 				}
 			}
 
-			if err := writeConfigLocked(configPath, loaded); err != nil {
-				return err
+			if created {
+				if err := writeConfigLocked(configPath, loaded); err != nil {
+					return err
+				}
 			}
 		}
 
@@ -211,19 +219,36 @@ func Set(key, value string) error {
 	})
 }
 
-func loadConfigLocked(configPath string) (config, error) {
+func loadConfigLocked(configPath string) (config, bool, error) {
 	log.Debugf("Config directory is: %s", filepath.Dir(configPath))
 
-	f, err := os.OpenFile(configPath, os.O_RDWR|os.O_CREATE, 0o664)
-	if err != nil && !os.IsNotExist(err) {
-		return config{}, err
+	created := false
+	f, err := os.Open(configPath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return config{}, false, err
+		}
+
+		f, err = os.OpenFile(configPath, os.O_RDWR|os.O_CREATE|os.O_EXCL, configFileMode)
+		if err != nil {
+			if !os.IsExist(err) {
+				return config{}, false, err
+			}
+
+			f, err = os.Open(configPath)
+			if err != nil {
+				return config{}, false, err
+			}
+		} else {
+			created = true
+		}
 	}
 	defer f.Close()
 
 	loaded := config{}
 	if err := json.NewDecoder(f).Decode(&loaded); err != nil {
 		if err != io.EOF {
-			return config{}, err
+			return config{}, false, err
 		}
 	}
 
@@ -234,7 +259,7 @@ func loadConfigLocked(configPath string) (config, error) {
 		loaded.DefaultChmod = "0755"
 	}
 
-	return loaded, nil
+	return loaded, created, nil
 }
 
 func mutateConfigLocked(mutate func(*config) error) error {
@@ -244,7 +269,7 @@ func mutateConfigLocked(mutate func(*config) error) error {
 	}
 
 	return withConfigLock(configPath, func() error {
-		loaded, err := loadConfigLocked(configPath)
+		loaded, _, err := loadConfigLocked(configPath)
 		if err != nil {
 			return err
 		}
@@ -389,8 +414,10 @@ func writeConfigLocked(configPath string, current config) error {
 		return err
 	}
 
-	if err := f.Chmod(0o664); err != nil {
-		return err
+	if supportsConfigFileMode() {
+		if err := f.Chmod(configFileMode); err != nil {
+			return err
+		}
 	}
 
 	if err := f.Close(); err != nil {
