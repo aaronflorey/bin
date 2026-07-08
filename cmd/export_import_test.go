@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -497,6 +498,66 @@ func TestImportReadsFromFileWhenPathIsProvided(t *testing.T) {
 	}
 }
 
+func TestImportAcceptsValidBaseNamesUnderDefaultPath(t *testing.T) {
+	tests := []struct {
+		name string
+	}{
+		{name: "tool"},
+		{name: "tool.exe"},
+		{name: "my-tool_1"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			defaultPath := setupTestConfig(t)
+			expectedPath := filepath.Join(defaultPath, tc.name)
+
+			imported := []map[string]any{
+				{
+					"name":        tc.name,
+					"remote_name": tc.name,
+					"version":     "1.2.3",
+					"hash":        "some-hash",
+					"url":         "https://example.com/tools/" + tc.name + "/releases/tag/v1.2.3",
+					"provider":    "github",
+				},
+			}
+			payload, err := json.Marshal(imported)
+			if err != nil {
+				t.Fatalf("failed to marshal import payload: %v", err)
+			}
+
+			cmd := newImportCmd().cmd
+			cmd.SetIn(bytes.NewReader(payload))
+			cmd.SetArgs([]string{"--skip-ensure"})
+
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("unexpected import command error: %v", err)
+			}
+
+			if len(config.Get().Bins) != 1 {
+				t.Fatalf("expected 1 imported binary, got %d", len(config.Get().Bins))
+			}
+
+			got, ok := config.Get().Bins[expectedPath]
+			if !ok {
+				t.Fatalf("expected imported binary at path %q", expectedPath)
+			}
+
+			rel, err := filepath.Rel(defaultPath, got.Path)
+			if err != nil {
+				t.Fatalf("failed to compute relative path: %v", err)
+			}
+			if rel != tc.name {
+				t.Fatalf("expected imported path relative to default_path to be %q, got %q", tc.name, rel)
+			}
+			if strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+				t.Fatalf("expected imported path %q to remain under default_path %q", got.Path, defaultPath)
+			}
+		})
+	}
+}
+
 func TestImportOutputsInstalledUpdatedSkipped(t *testing.T) {
 	defaultPath := setupTestConfig(t)
 
@@ -739,6 +800,132 @@ func TestImportSkipEnsureFlagSkipsEnsure(t *testing.T) {
 
 	if called {
 		t.Fatalf("expected ensure to be skipped")
+	}
+}
+
+func TestImportRejectsInvalidManifestBeforeMutationOrEnsure(t *testing.T) {
+	defaultPath := setupTestConfig(t)
+
+	imported := []map[string]any{
+		{
+			"name":        "valid-imported-tool",
+			"remote_name": "valid-imported-tool",
+			"version":     "1.2.3",
+			"hash":        "some-hash",
+			"url":         "https://example.com/tools/valid-imported-tool/releases/tag/v1.2.3",
+			"provider":    "github",
+		},
+		{
+			"name":        "../escape",
+			"remote_name": "escape",
+			"version":     "9.9.9",
+			"hash":        "bad-hash",
+			"url":         "https://example.com/tools/escape/releases/tag/v9.9.9",
+			"provider":    "github",
+		},
+	}
+	payload, err := json.Marshal(imported)
+	if err != nil {
+		t.Fatalf("failed to marshal import payload: %v", err)
+	}
+
+	imp := newImportCmd()
+	called := false
+	imp.runEnsure = func(args []string) error {
+		called = true
+		return nil
+	}
+	imp.cmd.SetIn(bytes.NewReader(payload))
+	imp.cmd.SetArgs([]string{})
+
+	err = imp.cmd.Execute()
+	if err == nil {
+		t.Fatal("expected import error for invalid manifest")
+	}
+	if !strings.Contains(err.Error(), `binary at index 1 has invalid name "../escape"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if called {
+		t.Fatalf("expected ensure not to run on invalid manifest")
+	}
+	if len(config.Get().Bins) != 0 {
+		t.Fatalf("expected config to remain unchanged, got %d binaries", len(config.Get().Bins))
+	}
+	if _, ok := config.Get().Bins[filepath.Join(defaultPath, "valid-imported-tool")]; ok {
+		t.Fatalf("expected valid entries to be skipped when manifest is invalid")
+	}
+}
+
+func TestImportRejectsReservedOrNonPortableNamesBeforeMutationOrEnsure(t *testing.T) {
+	tests := []struct {
+		label string
+		name  string
+	}{
+		{label: "parent traversal", name: "../outside"},
+		{label: "nested slash path", name: "dir/tool"},
+		{label: "nested backslash path", name: "dir\\tool"},
+		{label: "single dot", name: "."},
+		{label: "double dot", name: ".."},
+		{label: "reserved device basename", name: "CON"},
+		{label: "reserved device with extension", name: "aux.txt"},
+		{label: "windows special character", name: "tool:beta"},
+		{label: "control character", name: "tool\n"},
+		{label: "trailing dot", name: "tool."},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.label, func(t *testing.T) {
+			defaultPath := setupTestConfig(t)
+
+			imported := []map[string]any{
+				{
+					"name":        "valid-imported-tool",
+					"remote_name": "valid-imported-tool",
+					"version":     "1.2.3",
+					"hash":        "some-hash",
+					"url":         "https://example.com/tools/valid-imported-tool/releases/tag/v1.2.3",
+					"provider":    "github",
+				},
+				{
+					"name":        tc.name,
+					"remote_name": "rejected-name",
+					"version":     "9.9.9",
+					"hash":        "bad-hash",
+					"url":         "https://example.com/tools/rejected-name/releases/tag/v9.9.9",
+					"provider":    "github",
+				},
+			}
+			payload, err := json.Marshal(imported)
+			if err != nil {
+				t.Fatalf("failed to marshal import payload: %v", err)
+			}
+
+			imp := newImportCmd()
+			called := false
+			imp.runEnsure = func(args []string) error {
+				called = true
+				return nil
+			}
+			imp.cmd.SetIn(bytes.NewReader(payload))
+			imp.cmd.SetArgs([]string{})
+
+			err = imp.cmd.Execute()
+			if err == nil {
+				t.Fatalf("expected import error for invalid manifest name %q", tc.name)
+			}
+			if !strings.Contains(err.Error(), "binary at index 1 has invalid name "+strconv.Quote(tc.name)) {
+				t.Fatalf("unexpected error for %q: %v", tc.name, err)
+			}
+			if called {
+				t.Fatalf("expected ensure not to run for invalid manifest name %q", tc.name)
+			}
+			if len(config.Get().Bins) != 0 {
+				t.Fatalf("expected config to remain unchanged for %q, got %d binaries", tc.name, len(config.Get().Bins))
+			}
+			if _, ok := config.Get().Bins[filepath.Join(defaultPath, "valid-imported-tool")]; ok {
+				t.Fatalf("expected valid entries to be skipped when manifest contains %q", tc.name)
+			}
+		})
 	}
 }
 

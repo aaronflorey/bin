@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	"github.com/aaronflorey/bin/pkg/config"
 	"github.com/spf13/cobra"
@@ -44,6 +45,15 @@ func newImportCmd() *importCmd {
 				return err
 			}
 
+			validatedNames := make([]string, len(bins))
+			for i, b := range bins {
+				name, err := safePortableBinaryName(b.Name, i)
+				if err != nil {
+					return err
+				}
+				validatedNames[i] = name
+			}
+
 			defaultPath := config.Get().DefaultPath
 			existingBins := config.Get().Bins
 			toUpsert := make([]*config.Binary, 0, len(bins))
@@ -51,10 +61,7 @@ func newImportCmd() *importCmd {
 			updatedCount := 0
 			skippedCount := 0
 			for i, b := range bins {
-				name := strings.TrimSpace(b.Name)
-				if name == "" {
-					return fmt.Errorf("binary at index %d has empty name", i)
-				}
+				name := validatedNames[i]
 
 				target := &config.Binary{
 					Path:             filepath.Join(defaultPath, name),
@@ -139,6 +146,59 @@ func parseImportBins(r io.Reader) ([]*portableBinary, error) {
 		return nil, err
 	}
 	return bins, nil
+}
+
+func safePortableBinaryName(raw string, index int) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", fmt.Errorf("binary at index %d has empty name", index)
+	}
+	if raw != trimmed {
+		return "", fmt.Errorf("binary at index %d has invalid name %q", index, raw)
+	}
+	name := raw
+	if name == "." || name == ".." {
+		return "", fmt.Errorf("binary at index %d has invalid name %q", index, name)
+	}
+	if filepath.IsAbs(name) || strings.Contains(name, "/") || strings.ContainsRune(name, '\\') || hasWindowsDrivePrefix(name) {
+		return "", fmt.Errorf("binary at index %d has invalid name %q", index, name)
+	}
+	if strings.HasSuffix(name, ".") || strings.HasSuffix(name, " ") || hasNonPortableWindowsFilenameChars(name) || isWindowsReservedBaseName(name) {
+		return "", fmt.Errorf("binary at index %d has invalid name %q", index, name)
+	}
+	return name, nil
+}
+
+func hasNonPortableWindowsFilenameChars(name string) bool {
+	for _, r := range name {
+		if unicode.IsControl(r) || strings.ContainsRune(`<>:"|?*`, r) {
+			return true
+		}
+	}
+	return false
+}
+
+func isWindowsReservedBaseName(name string) bool {
+	base := name
+	if dot := strings.IndexRune(base, '.'); dot >= 0 {
+		base = base[:dot]
+	}
+	base = strings.ToUpper(base)
+	if base == "CON" || base == "PRN" || base == "AUX" || base == "NUL" {
+		return true
+	}
+	if len(base) == 4 && (strings.HasPrefix(base, "COM") || strings.HasPrefix(base, "LPT")) {
+		return base[3] >= '1' && base[3] <= '9'
+	}
+	return false
+}
+
+func hasWindowsDrivePrefix(name string) bool {
+	if len(name) < 2 || name[1] != ':' {
+		return false
+	}
+	drive := name[0]
+	return (drive >= 'a' && drive <= 'z') || (drive >= 'A' && drive <= 'Z')
 }
 
 func equalBinaryConfig(a, b *config.Binary) bool {
