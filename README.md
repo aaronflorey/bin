@@ -419,7 +419,11 @@ cd bin
 just clean
 just download
 
-# Run syntax check
+# Apply fixes when needed
+just fmt
+just tidy
+
+# Run non-mutating checks
 just lint
 just verify
 

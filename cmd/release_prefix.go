@@ -122,4 +122,3 @@ func selectReleaseTagPrefixesInteractively(options []releasePrefixOption) ([]str
 	sort.Strings(selected)
 	return selected, nil
 }
-

@@ -7,6 +7,8 @@ The repository’s documented workflow is:
 ```bash
 just clean
 just download
+just fmt        # fix formatting when needed
+just tidy       # fix module metadata when needed
 just lint
 just verify
 just test
@@ -18,13 +20,17 @@ just build
 | Target | Effect |
 | --- | --- |
 | `build` | `go build .` |
-| `lint` | `go fmt ./...` and `go vet ./...` |
+| `fmt` | `gofmt -w -s ./.` |
+| `tidy` | `go mod tidy` |
+| `lint` | `gofmt -l -s ./.` and `go vet ./...` |
 | `test` | `go test ./...` |
 | `test-race` | `go test -race ./...` |
 | `coverage` | `go test -coverprofile=coverage.out ./...` |
-| `download` | `go mod download` and `go mod tidy` |
-| `verify` | `download`, `gofmt -w -s ./.`, `golangci-lint run` |
+| `download` | `go mod download` |
+| `verify` | `download`, `gofmt -l -s ./.`, `go mod tidy -diff`, `golangci-lint run` |
 | `hooks` | `lefthook install` |
+
+`just lint` and `just verify` are check-only commands. Use `just fmt` to apply formatting fixes and `just tidy` to rewrite module metadata when the checks fail.
 
 ## Repository layout
 
