@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/aaronflorey/bin/pkg/config"
+	"github.com/aaronflorey/bin/pkg/providers"
 	"github.com/spf13/cobra"
 )
 
@@ -33,9 +34,14 @@ func newExportCmd() *exportCmd {
 			}
 
 			cfg := config.Get()
-			exportedBins, err := buildExportBins(cfg.Bins)
+			exportedBins, normalizedBins, err := buildExportBins(cfg.Bins)
 			if err != nil {
 				return err
+			}
+			if len(normalizedBins) > 0 {
+				if err := config.UpsertBinaries(normalizedBins); err != nil {
+					return err
+				}
 			}
 
 			payload, err := buildExportPayload(format, exportedBins)
@@ -53,14 +59,14 @@ func newExportCmd() *exportCmd {
 	}
 
 	root.cmd = cmd
-	root.cmd.Flags().StringVar(&root.format, "format", "json", "Output format: json or list")
+	root.cmd.Flags().StringVar(&root.format, "format", "json", "Output format: json, list, or line")
 	enableSpinner(root.cmd)
 	return root
 }
 
 func normalizeExportFormat(format string) (string, error) {
 	switch normalized := strings.ToLower(strings.TrimSpace(format)); normalized {
-	case "", "json", "list":
+	case "", "json", "list", "line":
 		if normalized == "" {
 			return "json", nil
 		}
@@ -71,12 +77,16 @@ func normalizeExportFormat(format string) (string, error) {
 }
 
 func buildExportPayload(format string, exportedBins []*portableBinary) ([]byte, error) {
-	if format == "list" {
+	if format == "list" || format == "line" {
 		urls := make([]string, 0, len(exportedBins))
 		for _, bin := range exportedBins {
 			urls = append(urls, bin.URL)
 		}
-		return []byte(strings.Join(urls, "\n") + "\n"), nil
+		separator := "\n"
+		if format == "line" {
+			separator = " "
+		}
+		return []byte(strings.Join(urls, separator) + "\n"), nil
 	}
 
 	payload, err := json.MarshalIndent(exportedBins, "", "    ")
@@ -103,7 +113,7 @@ type portableBinary struct {
 	MinAgeDays       int    `json:"min_age_days,omitempty"`
 }
 
-func buildExportBins(bins map[string]*config.Binary) ([]*portableBinary, error) {
+func buildExportBins(bins map[string]*config.Binary) ([]*portableBinary, []*config.Binary, error) {
 	keys := make([]string, 0, len(bins))
 	for k := range bins {
 		keys = append(keys, k)
@@ -111,6 +121,7 @@ func buildExportBins(bins map[string]*config.Binary) ([]*portableBinary, error) 
 	sort.Strings(keys)
 
 	exportedBins := make([]*portableBinary, 0, len(keys))
+	normalizedBins := make([]*config.Binary, 0)
 	for _, k := range keys {
 		binCfg := bins[k]
 		ep := os.ExpandEnv(binCfg.Path)
@@ -120,7 +131,17 @@ func buildExportBins(bins map[string]*config.Binary) ([]*portableBinary, error) 
 			if errors.Is(err, os.ErrNotExist) {
 				continue
 			}
-			return nil, err
+			return nil, nil, err
+		}
+
+		normalizedURL, _, _, err := providers.NormalizeGitHubURL(binCfg.URL, binCfg.Provider)
+		if err != nil {
+			return nil, nil, err
+		}
+		if normalizedURL != binCfg.URL {
+			updatedBin := *binCfg
+			updatedBin.URL = normalizedURL
+			normalizedBins = append(normalizedBins, &updatedBin)
 		}
 
 		exportedBins = append(exportedBins, &portableBinary{
@@ -128,7 +149,7 @@ func buildExportBins(bins map[string]*config.Binary) ([]*portableBinary, error) 
 			RemoteName:       binCfg.RemoteName,
 			Version:          binCfg.Version,
 			Hash:             hash,
-			URL:              binCfg.URL,
+			URL:              normalizedURL,
 			Provider:         binCfg.Provider,
 			InstallMode:      binCfg.InstallMode,
 			PackageType:      binCfg.PackageType,
@@ -140,5 +161,5 @@ func buildExportBins(bins map[string]*config.Binary) ([]*portableBinary, error) 
 		})
 	}
 
-	return exportedBins, nil
+	return exportedBins, normalizedBins, nil
 }

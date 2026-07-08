@@ -145,14 +145,14 @@ func TestExportListWritesURLsToStdout(t *testing.T) {
 			RemoteName: "z-tool",
 			Version:    "1.0.0",
 			URL:        "https://example.com/tools/z-tool/releases/tag/v1.0.0",
-			Provider:   "github",
+			Provider:   "gitlab",
 		},
 		{
 			Path:       secondPath,
 			RemoteName: "a-tool",
 			Version:    "2.0.0",
 			URL:        "https://example.com/tools/a-tool/releases/tag/v2.0.0",
-			Provider:   "github",
+			Provider:   "gitlab",
 		},
 	}); err != nil {
 		t.Fatalf("failed to seed binaries: %v", err)
@@ -190,7 +190,7 @@ func TestExportListWritesURLsToFile(t *testing.T) {
 		RemoteName: "file-list-tool",
 		Version:    "1.0.0",
 		URL:        "https://example.com/tools/file-list-tool/releases/tag/v1.0.0",
-		Provider:   "github",
+		Provider:   "gitlab",
 	}); err != nil {
 		t.Fatalf("failed to upsert binary: %v", err)
 	}
@@ -211,6 +211,195 @@ func TestExportListWritesURLsToFile(t *testing.T) {
 
 	if got, want := string(raw), "https://example.com/tools/file-list-tool/releases/tag/v1.0.0\n"; got != want {
 		t.Fatalf("unexpected list file output: got %q, want %q", got, want)
+	}
+}
+
+func TestExportLineWritesURLsToStdout(t *testing.T) {
+	setupTestConfig(t)
+
+	binDir := t.TempDir()
+	firstPath := filepath.Join(binDir, "z-tool")
+	if err := os.WriteFile(firstPath, []byte("z-tool-content"), 0o755); err != nil {
+		t.Fatalf("failed to write first installed test binary: %v", err)
+	}
+	secondPath := filepath.Join(binDir, "a-tool")
+	if err := os.WriteFile(secondPath, []byte("a-tool-content"), 0o755); err != nil {
+		t.Fatalf("failed to write second installed test binary: %v", err)
+	}
+
+	if err := config.UpsertBinaries([]*config.Binary{
+		{
+			Path:       firstPath,
+			RemoteName: "z-tool",
+			Version:    "1.0.0",
+			URL:        "https://example.com/tools/z-tool/releases/tag/v1.0.0",
+			Provider:   "gitlab",
+		},
+		{
+			Path:       secondPath,
+			RemoteName: "a-tool",
+			Version:    "2.0.0",
+			URL:        "https://example.com/tools/a-tool/releases/tag/v2.0.0",
+			Provider:   "gitlab",
+		},
+	}); err != nil {
+		t.Fatalf("failed to seed binaries: %v", err)
+	}
+
+	cmd := newExportCmd().cmd
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"--format=line"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected export command error: %v", err)
+	}
+
+	got := out.String()
+	want := strings.Join([]string{
+		"https://example.com/tools/a-tool/releases/tag/v2.0.0",
+		"https://example.com/tools/z-tool/releases/tag/v1.0.0",
+	}, " ") + "\n"
+	if got != want {
+		t.Fatalf("unexpected line output:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+func TestExportLineWritesURLsToFile(t *testing.T) {
+	setupTestConfig(t)
+
+	installedPath := filepath.Join(t.TempDir(), "file-line-tool")
+	if err := os.WriteFile(installedPath, []byte("file-line-tool-content"), 0o755); err != nil {
+		t.Fatalf("failed to write installed test binary: %v", err)
+	}
+
+	if err := config.UpsertBinary(&config.Binary{
+		Path:       installedPath,
+		RemoteName: "file-line-tool",
+		Version:    "1.0.0",
+		URL:        "https://example.com/tools/file-line-tool/releases/tag/v1.0.0",
+		Provider:   "gitlab",
+	}); err != nil {
+		t.Fatalf("failed to upsert binary: %v", err)
+	}
+
+	outPath := filepath.Join(t.TempDir(), "export.txt")
+
+	cmd := newExportCmd().cmd
+	cmd.SetArgs([]string{"--format=line", outPath})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected export command error: %v", err)
+	}
+
+	raw, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("failed to read export file: %v", err)
+	}
+
+	if got, want := string(raw), "https://example.com/tools/file-line-tool/releases/tag/v1.0.0\n"; got != want {
+		t.Fatalf("unexpected line file output: got %q, want %q", got, want)
+	}
+}
+
+func TestExportNormalizesGitHubURLsInListOutput(t *testing.T) {
+	setupTestConfig(t)
+
+	binDir := t.TempDir()
+	githubPath := filepath.Join(binDir, "github-tool")
+	if err := os.WriteFile(githubPath, []byte("github-tool-content"), 0o755); err != nil {
+		t.Fatalf("failed to write github test binary: %v", err)
+	}
+	otherPath := filepath.Join(binDir, "gitlab-tool")
+	if err := os.WriteFile(otherPath, []byte("gitlab-tool-content"), 0o755); err != nil {
+		t.Fatalf("failed to write non-github test binary: %v", err)
+	}
+
+	if err := config.UpsertBinaries([]*config.Binary{
+		{
+			Path:       githubPath,
+			RemoteName: "github-tool",
+			Version:    "1.2.3",
+			URL:        "https://github.com/example/github-tool/releases/tag/v1.2.3",
+			Provider:   "github",
+		},
+		{
+			Path:       otherPath,
+			RemoteName: "gitlab-tool",
+			Version:    "4.5.6",
+			URL:        "https://gitlab.com/example/gitlab-tool/-/releases/v4.5.6",
+			Provider:   "gitlab",
+		},
+	}); err != nil {
+		t.Fatalf("failed to seed binaries: %v", err)
+	}
+
+	cmd := newExportCmd().cmd
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"--format=list"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected export command error: %v", err)
+	}
+
+	got := out.String()
+	want := strings.Join([]string{
+		"github.com/example/github-tool",
+		"https://gitlab.com/example/gitlab-tool/-/releases/v4.5.6",
+	}, "\n") + "\n"
+	if got != want {
+		t.Fatalf("unexpected normalized list output:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+func TestExportPersistsNormalizedGitHubURLs(t *testing.T) {
+	setupTestConfig(t)
+
+	binDir := t.TempDir()
+	githubPath := filepath.Join(binDir, "github-tool")
+	if err := os.WriteFile(githubPath, []byte("github-tool-content"), 0o755); err != nil {
+		t.Fatalf("failed to write github test binary: %v", err)
+	}
+	otherPath := filepath.Join(binDir, "gitlab-tool")
+	if err := os.WriteFile(otherPath, []byte("gitlab-tool-content"), 0o755); err != nil {
+		t.Fatalf("failed to write non-github test binary: %v", err)
+	}
+
+	if err := config.UpsertBinaries([]*config.Binary{
+		{
+			Path:       githubPath,
+			RemoteName: "github-tool",
+			Version:    "1.2.3",
+			URL:        "https://github.com/example/github-tool/releases/tag/v1.2.3",
+			Provider:   "github",
+		},
+		{
+			Path:       otherPath,
+			RemoteName: "gitlab-tool",
+			Version:    "4.5.6",
+			URL:        "https://gitlab.com/example/gitlab-tool/-/releases/v4.5.6",
+			Provider:   "gitlab",
+		},
+	}); err != nil {
+		t.Fatalf("failed to seed binaries: %v", err)
+	}
+
+	cmd := newExportCmd().cmd
+	cmd.SetArgs([]string{"--format=list"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected export command error: %v", err)
+	}
+
+	githubBin := config.Get().Bins[githubPath]
+	if githubBin.URL != "github.com/example/github-tool" {
+		t.Fatalf("unexpected normalized github URL: got %q, want %q", githubBin.URL, "github.com/example/github-tool")
+	}
+
+	otherBin := config.Get().Bins[otherPath]
+	if otherBin.URL != "https://gitlab.com/example/gitlab-tool/-/releases/v4.5.6" {
+		t.Fatalf("unexpected non-github URL: got %q, want %q", otherBin.URL, "https://gitlab.com/example/gitlab-tool/-/releases/v4.5.6")
 	}
 }
 
