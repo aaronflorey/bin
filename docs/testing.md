@@ -18,12 +18,14 @@ go test -coverprofile=coverage.out ./...
 ## Related checks
 
 ```bash
+just fmt
+just tidy
 just lint
 just verify
 just coverage
 ```
 
-`just lint` runs `go fmt ./...` and `go vet ./...`. `just verify` adds dependency download, `gofmt -w -s`, and `golangci-lint run`. `just coverage` writes `coverage.out` in the repo root.
+`just fmt` runs `gofmt -w -s ./.` and `just tidy` runs `go mod tidy` when you need to fix local drift. `just lint` is non-mutating and runs `gofmt -l -s ./.` plus `go vet ./...`. `just verify` is also non-mutating: it adds `go mod download`, `go mod tidy -diff`, and `golangci-lint run`. `just coverage` writes `coverage.out` in the repo root.
 
 ## What the test suite covers
 
