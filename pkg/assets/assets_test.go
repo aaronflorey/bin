@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -763,6 +764,7 @@ func TestFilterAssetsSelectsCompatibleDMGOnMacOS(t *testing.T) {
 	f := NewFilter(&FilterOpts{SystemPackage: true, PackageType: "dmg", NonInteractive: true})
 	result, err := f.FilterAssets("paseo", []*Asset{
 		{Name: "Paseo-0.1.64-arm64.dmg", URL: "https://example.test/Paseo-0.1.64-arm64.dmg"},
+		{Name: "Paseo-Setup-0.1.64-arm64.exe", URL: "https://example.test/Paseo-Setup-0.1.64-arm64.exe"},
 		{Name: "paseo-darwin-arm64.tar.gz", URL: "https://example.test/paseo-darwin-arm64.tar.gz"},
 	}, "")
 	if err != nil {
@@ -770,6 +772,144 @@ func TestFilterAssetsSelectsCompatibleDMGOnMacOS(t *testing.T) {
 	}
 	if result.Name != "Paseo-0.1.64-arm64.dmg" {
 		t.Fatalf("expected dmg package artifact, got %s", result.Name)
+	}
+}
+
+func TestFilterAssetsRejectsWrongPlatformExeInBinaryMode(t *testing.T) {
+	originalResolver := resolver
+	defer func() {
+		resolver = originalResolver
+	}()
+
+	resolver = testDarwinARMResolver
+
+	f := NewFilter(&FilterOpts{NonInteractive: true})
+	_, err := f.FilterAssets("paseo", []*Asset{
+		{Name: "Paseo-Setup-0.1.104-arm64.exe", URL: "https://example.test/Paseo-Setup-0.1.104-arm64.exe"},
+		{Name: "Paseo-0.1.104-arm64.dmg", URL: "https://example.test/Paseo-0.1.104-arm64.dmg"},
+	}, "")
+	if err == nil {
+		t.Fatal("expected no compatible files; wrong-platform .exe should not be selected in binary mode")
+	}
+	if !errors.Is(err, ErrNoCompatibleFiles) && !strings.Contains(err.Error(), "Could not find any compatible files") {
+		t.Fatalf("expected no-compatible-files error, got %v", err)
+	}
+}
+
+func TestFilterAssetsRejectsMetadataOnlyCandidatesInBinaryMode(t *testing.T) {
+	originalResolver := resolver
+	defer func() {
+		resolver = originalResolver
+	}()
+
+	resolver = testLinuxAMDResolver
+
+	f := NewFilter(&FilterOpts{NonInteractive: true})
+	_, err := f.FilterAssets("tool", []*Asset{
+		{Name: "tool-linux-amd64.tar.gz.sha256", URL: "https://example.test/tool-linux-amd64.tar.gz.sha256"},
+		{Name: "tool-linux-amd64.tar.gz.sig", URL: "https://example.test/tool-linux-amd64.tar.gz.sig"},
+		{Name: "tool-linux-amd64.tar.gz.minisig", URL: "https://example.test/tool-linux-amd64.tar.gz.minisig"},
+		{Name: "tool-linux-amd64.tar.gz.sbom.json", URL: "https://example.test/tool-linux-amd64.tar.gz.sbom.json"},
+	}, "")
+	if err == nil {
+		t.Fatal("expected no compatible files for metadata-only candidates")
+	}
+	if !errors.Is(err, ErrNoCompatibleFiles) && !strings.Contains(err.Error(), "Could not find any compatible files") {
+		t.Fatalf("expected no-compatible-files error, got %v", err)
+	}
+}
+
+func TestFilterAssetsRejectsPackageOnlyCandidatesInBinaryMode(t *testing.T) {
+	originalResolver := resolver
+	defer func() {
+		resolver = originalResolver
+	}()
+
+	resolver = testDarwinARMResolver
+
+	f := NewFilter(&FilterOpts{NonInteractive: true})
+	_, err := f.FilterAssets("tool", []*Asset{
+		{Name: "tool-darwin-arm64.dmg", URL: "https://example.test/tool-darwin-arm64.dmg"},
+		{Name: "tool-linux-amd64.msi", URL: "https://example.test/tool-linux-amd64.msi"},
+		{Name: "tool-linux-amd64.deb", URL: "https://example.test/tool-linux-amd64.deb"},
+		{Name: "tool-linux-amd64.rpm", URL: "https://example.test/tool-linux-amd64.rpm"},
+	}, "")
+	if err == nil {
+		t.Fatal("expected no compatible files for package-only candidates")
+	}
+	if !errors.Is(err, ErrNoCompatibleFiles) && !strings.Contains(err.Error(), "Could not find any compatible files") {
+		t.Fatalf("expected no-compatible-files error, got %v", err)
+	}
+}
+
+func TestFilterAssetsUsesNormalizedAssetNameOnlyForCompatibility(t *testing.T) {
+	originalResolver := resolver
+	defer func() {
+		resolver = originalResolver
+	}()
+
+	resolver = testDarwinARMResolver
+
+	t.Run("url and display metadata do not override asset name", func(t *testing.T) {
+		f := NewFilter(&FilterOpts{NonInteractive: true})
+		result, err := f.FilterAssets("paseo", []*Asset{
+			{
+				Name:        "tool.tar.gz",
+				DisplayName: "Paseo-Setup-0.1.104-arm64.exe",
+				URL:         "https://example.test/download/tool.exe?sig=1#tool.exe",
+			},
+			{Name: "Paseo-0.1.104-arm64.dmg", URL: "https://example.test/Paseo-0.1.104-arm64.dmg"},
+		}, "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.Name != "tool.tar.gz" {
+			t.Fatalf("expected FilterAssets to use Asset.Name only, got %s", result.Name)
+		}
+	})
+
+	for _, tc := range []struct {
+		name  string
+		asset *Asset
+	}{
+		{
+			name: "metadata suffix stays filtered even when display metadata looks executable",
+			asset: &Asset{
+				Name:        "tool.exe.sha256",
+				DisplayName: "Paseo-Setup-0.1.104-arm64.exe",
+				URL:         "https://example.test/download/Paseo-Setup-0.1.104-arm64.exe?sig=1",
+			},
+		},
+		{
+			name: "windows path separators do not bypass asset-name checks",
+			asset: &Asset{
+				Name:        `dir\\tool.exe`,
+				DisplayName: "Paseo-Setup-0.1.104-arm64.exe",
+				URL:         "https://example.test/download/Paseo-Setup-0.1.104-arm64.exe?sig=1",
+			},
+		},
+		{
+			name: "parent path segments do not bypass asset-name checks",
+			asset: &Asset{
+				Name:        "../tool.exe",
+				DisplayName: "Paseo-Setup-0.1.104-arm64.exe",
+				URL:         "https://example.test/download/Paseo-Setup-0.1.104-arm64.exe?sig=1",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := NewFilter(&FilterOpts{NonInteractive: true})
+			_, err := f.FilterAssets("paseo", []*Asset{
+				tc.asset,
+				{Name: "Paseo-0.1.104-arm64.dmg", URL: "https://example.test/Paseo-0.1.104-arm64.dmg"},
+			}, "")
+			if err == nil {
+				t.Fatal("expected no compatible files")
+			}
+			if !errors.Is(err, ErrNoCompatibleFiles) && !strings.Contains(err.Error(), "Could not find any compatible files") {
+				t.Fatalf("expected no-compatible-files error, got %v", err)
+			}
+		})
 	}
 }
 
@@ -956,11 +1096,39 @@ func TestIsSupportedExt(t *testing.T) {
 			true,
 		},
 		{
+			"tool-linux-amd64.tar.gz.sha256",
+			false,
+		},
+		{
+			"tool-linux-amd64.tar.gz.sig",
+			false,
+		},
+		{
+			"tool-linux-amd64.tar.gz.minisig",
+			false,
+		},
+		{
+			"tool-linux-amd64.tar.gz.sbom.json",
+			false,
+		},
+		{
+			"tool-darwin-arm64.dmg",
+			false,
+		},
+		{
 			"goreleaser_2.15.2_linux_amd64.flatpak",
 			false,
 		},
 		{
+			"tool-linux-amd64.deb",
+			false,
+		},
+		{
 			"goreleaser-2.15.2-1-x86_64.pkg.tar.zst",
+			false,
+		},
+		{
+			"tool-linux-amd64.rpm",
 			false,
 		},
 		{

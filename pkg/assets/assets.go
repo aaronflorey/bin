@@ -235,7 +235,9 @@ func (f *Filter) FilterAssets(repoName string, as []*Asset, autoSelect string) (
 	matches := []*FilteredAsset{}
 	if len(as) == 1 {
 		a := as[0]
-		matches = append(matches, &FilteredAsset{RepoName: repoName, Name: a.Name, URL: a.URL, score: 0})
+		if f.supportsAssetExt(a.Name) {
+			matches = append(matches, &FilteredAsset{RepoName: repoName, Name: a.Name, URL: a.URL, score: 0})
+		}
 	} else {
 		if !f.opts.SkipScoring {
 			scores := map[string]int{}
@@ -388,6 +390,21 @@ func (f *Filter) supportsAssetExt(filename string) bool {
 	}
 
 	return isSupportedExt(filename)
+}
+
+func normalizedAssetBasename(filename string) string {
+	filename = strings.ReplaceAll(filename, "\\", "/")
+	return path.Base(filename)
+}
+
+func supportsExeForCurrentRuntime() bool {
+	for _, os := range resolver.GetOS() {
+		if strings.EqualFold(os, "windows") || strings.EqualFold(os, "win") {
+			return true
+		}
+	}
+
+	return false
 }
 
 func rankLinuxLibCMatches(matches []*FilteredAsset) []*FilteredAsset {
@@ -1315,6 +1332,8 @@ func (f *Filter) processZip(name string, r io.Reader, autoSelect string) (*final
 // isSupportedExt checks if this provider supports
 // dealing with this specific file extension
 func isSupportedExt(filename string) bool {
+	filename = normalizedAssetBasename(filename)
+
 	if looksLikePackageArtifact(filename) {
 		log.Debugf("Filename %s is a package-manager artifact", filename)
 		return false
@@ -1335,8 +1354,10 @@ func isSupportedExt(filename string) bool {
 		case msiType, matchers.TypeDeb, matchers.TypeRpm, ascType:
 			log.Debugf("Filename %s doesn't have a supported extension", filename)
 			return false
-		case matchers.TypeGz, matchers.TypeZip, matchers.TypeXz, matchers.TypeTar, matchers.TypeBz2, matchers.TypeExe:
+		case matchers.TypeGz, matchers.TypeZip, matchers.TypeXz, matchers.TypeTar, matchers.TypeBz2:
 			return true
+		case matchers.TypeExe:
+			return supportsExeForCurrentRuntime()
 		default:
 			log.Debugf("Filename %s doesn't have a supported extension", filename)
 			return false

@@ -30,6 +30,7 @@
 ## Notes
 
 - `install` rejects multiple binaries plus custom paths; custom paths are only valid for a single target (`cmd/install.go`).
+- On macOS, GUI app releases that ship a `.dmg` should be installed with `--system-package --package-type dmg`, for example `bin install --system-package --package-type dmg github.com/getpaseo/paseo Paseo`; binary mode intentionally ignores Windows `.exe` installers on non-Windows platforms.
 - `update` requires `--yes` or `--dry-run` in non-interactive mode when updates are available (`cmd/update.go`).
 - `update` pre/post hooks are global blockers: if either hook fails, the command stops instead of continuing per binary (`cmd/update.go`).
 - `remove` without arguments requires an interactive terminal (`cmd/remove.go`).
