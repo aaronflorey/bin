@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.6.0](https://github.com/aaronflorey/bin/compare/v2.5.4...v2.6.0) (2026-07-09)
+
+
+### Features
+
+* installer hardening ([481f871](https://github.com/aaronflorey/bin/commit/481f87104f615cc97f2e917b037db3685d3f0f64))
+
+
+### Bug Fixes
+
+* **assets:** reject wrong-platform release assets ([d0b3c04](https://github.com/aaronflorey/bin/commit/d0b3c046103f39a21120fae51053b2c01631321c))
+* improve provider export ([f1ebc0b](https://github.com/aaronflorey/bin/commit/f1ebc0bdd5413740b1e7bc279dd2f3d9c4219685))
+* lock config file permissions ([56ac56e](https://github.com/aaronflorey/bin/commit/56ac56ea1eedcdd8e6aa6bc3c1ae48c30c1df855))
+* preserve update failure accounting ([b1a4eeb](https://github.com/aaronflorey/bin/commit/b1a4eeba6d24ba5b542c3508a57ae4cb728e2400))
+* validate imported binaries ([1e76486](https://github.com/aaronflorey/bin/commit/1e764866f301a5129c6df45b758169b714a2b15b))
+
 ## [2.5.4](https://github.com/aaronflorey/bin/compare/v2.5.3...v2.5.4) (2026-06-18)
 
 
