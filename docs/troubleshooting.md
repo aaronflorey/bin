@@ -66,6 +66,14 @@ Use a positive integer only.
 
 Use one of the supported values.
 
+For macOS GUI app releases that ship `.dmg` assets, use system-package mode explicitly:
+
+```bash
+bin install --system-package --package-type dmg github.com/getpaseo/paseo Paseo
+```
+
+`bin` intentionally rejects Windows `.exe` installers when you are installing on macOS or Linux.
+
 ## `update requires --yes or --dry-run in non-interactive mode`
 
 **Cause**

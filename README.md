@@ -182,6 +182,14 @@ Supported system package types today are:
 
 On macOS, `.dmg` installs are app-focused rather than binary-focused. `bin` mounts the image, copies the single `.app` bundle into `/Applications`, stores the installed app bundle name in config, and then uses that metadata so `update`, `ensure`, and `remove` continue to work.
 
+If a macOS GUI app release publishes a `.dmg`, install it in system-package mode instead of binary mode. For example:
+
+```shell
+bin install --system-package --package-type dmg github.com/getpaseo/paseo Paseo
+```
+
+Binary mode intentionally rejects Windows-only installers such as `.exe` on non-Windows platforms, so `.exe` assets are not a macOS fallback.
+
 ## 🎯 Supported providers
 
 ### GitHub Releases
