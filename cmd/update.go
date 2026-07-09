@@ -63,6 +63,7 @@ func newUpdateCmd() *updateCmd {
 
 			var updates []availableUpdate
 			updateFailures := map[*config.Binary]error{}
+			alreadyReportedFailures := map[*config.Binary]bool{}
 
 			if hasExplicitVersion {
 				updates = collectExplicitVersionUpdates(binsToProcess, explicitVersion)
@@ -83,6 +84,9 @@ func newUpdateCmd() *updateCmd {
 						log.Warnf("%v", err)
 					}
 					log.Infof("No binaries selected for update")
+					if len(updateFailures) > 0 {
+						return wrapErrorWithCode(fmt.Errorf("some updates failed"), 4, "")
+					}
 					return nil
 				}
 			}
@@ -111,10 +115,10 @@ func newUpdateCmd() *updateCmd {
 					return fmt.Errorf("update requires --yes or --dry-run in non-interactive mode")
 				}
 
-				for _, err := range updateFailures {
+				for b, err := range updateFailures {
 					log.Warnf("%v", err)
+					alreadyReportedFailures[b] = true
 				}
-				updateFailures = map[*config.Binary]error{}
 
 				err := root.confirm("Do you want to continue?")
 				if err != nil {
@@ -137,7 +141,7 @@ func newUpdateCmd() *updateCmd {
 				}
 				if err := strategy.applyStoredFetch(b, &fetchOpts); err != nil {
 					if root.opts.continueOnError {
-						updateFailures[b] = err
+						updateFailures[b] = wrapUpdateFailure(b, err)
 						continue
 					}
 					return err
@@ -154,19 +158,26 @@ func newUpdateCmd() *updateCmd {
 					AllowProviderFallback: b.Provider != "",
 				})
 				if err != nil {
-					if effectiveInstallMode(b.InstallMode) == installModeSystemPackage && (errors.Is(err, assets.ErrNoCompatibleFiles) || errors.Is(err, systempackage.ErrIncompatible)) {
-						err = fmt.Errorf("update failed for %s: latest release no longer exposes a compatible %s package", b.Path, b.PackageType)
+					compatibilityFailure := effectiveInstallMode(b.InstallMode) == installModeSystemPackage && (errors.Is(err, assets.ErrNoCompatibleFiles) || errors.Is(err, systempackage.ErrIncompatible))
+					if compatibilityFailure {
+						err = fmt.Errorf("latest release no longer exposes a compatible %s package", b.PackageType)
 					}
 					if root.opts.continueOnError {
-						updateFailures[b] = fmt.Errorf("Error while fetching %v: %w", ui.url, err)
+						updateFailures[b] = wrapUpdateFailure(b, err)
 						continue
+					}
+					if compatibilityFailure {
+						return wrapUpdateFailure(b, err)
 					}
 					return err
 				}
 
 				log.Infof("Done updating %s to %s", os.ExpandEnv(b.Path), color.GreenString(res.Version))
 			}
-			for _, err := range updateFailures {
+			for b, err := range updateFailures {
+				if alreadyReportedFailures[b] {
+					continue
+				}
 				log.Warnf("%v", err)
 			}
 

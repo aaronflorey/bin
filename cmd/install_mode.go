@@ -31,6 +31,14 @@ type lifecycleStrategy struct {
 	resolvePath       func(*config.Binary) bool
 }
 
+func wrapUpdateFailure(b *config.Binary, err error) error {
+	if err == nil {
+		return nil
+	}
+
+	return fmt.Errorf("update failed for %s: %w", b.Path, err)
+}
+
 var lifecycleRegistry = map[string]lifecycleStrategy{
 	installModeBinary: {
 		install:   installBinary,

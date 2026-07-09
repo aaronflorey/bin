@@ -152,7 +152,7 @@ When installing multiple repos in one command, custom paths are not supported. U
 `bin remove` with no arguments opens an interactive multi-select picker of configured binaries.  
 By default it runs `ensure` for imported/updated entries after writing config; use `--skip-ensure` to skip that step.  
 `bin outdated` supports `--format=text` (default) and `--format=json`.  
-`bin update` with no arguments opens an interactive multi-select list of outdated binaries; confirm to update the selected entries.  
+`bin update` with no arguments opens an interactive multi-select list of outdated binaries; confirm to update the selected entries. By default, it keeps going when one binary update fails, then exits with code `4` if any selected update failed; use `--continue-on-error=false` to stop on the first per-binary failure instead. Pre/post update hooks still run as global blockers.
 Imported binaries are mapped to your local default path using the exported binary `name`.
 
 ```shell
