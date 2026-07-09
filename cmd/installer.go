@@ -176,11 +176,14 @@ func fetchBinary(newProvider providerFactory, url, forcedProvider string, fetchO
 		return nil, nil, err
 	}
 
-	log.Warnf("Provider %q did not yield a compatible asset for %s, retrying with auto-detection", forcedProvider, url)
 	fallbackProvider, fallbackErr := newProvider(url, "")
 	if fallbackErr != nil {
 		return nil, nil, err
 	}
+	if fallbackProvider.GetID() == p.GetID() {
+		return nil, nil, err
+	}
+	log.Warnf("Provider %q did not yield a compatible asset for %s, retrying with auto-detection", forcedProvider, url)
 	log.Debugf("Using fallback provider '%s' for '%s'", fallbackProvider.GetID(), url)
 
 	fallbackResult, fallbackFetchErr := fallbackProvider.Fetch(&fetchOpts)

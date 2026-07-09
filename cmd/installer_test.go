@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -14,7 +15,28 @@ import (
 	"github.com/aaronflorey/bin/pkg/config"
 	"github.com/aaronflorey/bin/pkg/providers"
 	"github.com/aaronflorey/bin/pkg/systempackage"
+	"github.com/caarlos0/log"
 )
+
+type fetchBinaryTestProvider struct {
+	id      string
+	fetchFn func(*providers.FetchOpts) (*providers.File, error)
+	fetches *int
+}
+
+func (p fetchBinaryTestProvider) Fetch(opts *providers.FetchOpts) (*providers.File, error) {
+	if p.fetches != nil {
+		(*p.fetches)++
+	}
+	if p.fetchFn != nil {
+		return p.fetchFn(opts)
+	}
+	return nil, nil
+}
+
+func (p fetchBinaryTestProvider) GetLatestVersion() (*providers.ReleaseInfo, error) { return nil, nil }
+func (p fetchBinaryTestProvider) Cleanup(*providers.CleanupOpts) error              { return nil }
+func (p fetchBinaryTestProvider) GetID() string                                     { return p.id }
 
 func TestAbsExpandedPath(t *testing.T) {
 	homeDir := t.TempDir()
@@ -322,5 +344,46 @@ func TestShouldFallbackProviderFetch(t *testing.T) {
 	}
 	if shouldFallbackProviderFetch(errors.New("boom")) {
 		t.Fatal("did not expect generic error to trigger provider fallback")
+	}
+}
+
+func TestFetchBinarySkipsNoOpProviderFallbackRetry(t *testing.T) {
+	previousLogger := log.Log
+	var logs bytes.Buffer
+	logger := log.New(&logs)
+	logger.Level = log.DebugLevel
+	log.Log = logger
+	defer func() {
+		log.Log = previousLogger
+	}()
+
+	fetchCount := 0
+	newProviderCalls := 0
+	newProvider := func(_ string, forcedProvider string) (providers.Provider, error) {
+		newProviderCalls++
+		return fetchBinaryTestProvider{
+			id:      "github",
+			fetches: &fetchCount,
+			fetchFn: func(*providers.FetchOpts) (*providers.File, error) {
+				return nil, fmt.Errorf("%w: no linux asset", assets.ErrNoCompatibleFiles)
+			},
+		}, nil
+	}
+
+	provider, file, err := fetchBinary(newProvider, "https://example.test/owner/repo", "github", providers.FetchOpts{}, true)
+	if !errors.Is(err, assets.ErrNoCompatibleFiles) {
+		t.Fatalf("expected original compatibility error, got provider=%v file=%v err=%v", provider, file, err)
+	}
+	if provider != nil || file != nil {
+		t.Fatalf("expected no provider or file on no-op fallback, got provider=%v file=%v", provider, file)
+	}
+	if fetchCount != 1 {
+		t.Fatalf("expected exactly one fetch attempt, got %d", fetchCount)
+	}
+	if newProviderCalls != 2 {
+		t.Fatalf("expected provider auto-detection lookup after forced provider failure, got %d calls", newProviderCalls)
+	}
+	if strings.Contains(logs.String(), "retrying with auto-detection") {
+		t.Fatalf("expected no fallback retry warning when auto-detection resolves same provider, got %q", logs.String())
 	}
 }

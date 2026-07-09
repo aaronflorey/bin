@@ -79,6 +79,19 @@ bin update --yes
 bin update --dry-run
 ```
 
+## `bin update` finished some updates but still exited non-zero
+
+**Cause**
+
+- `bin update` defaults to `--continue-on-error=true`, so it keeps updating later binaries after a per-binary failure.
+- If any update fails during discovery or install, the command still exits with code `4` after finishing the rest.
+- Pre-update and post-update hooks are global blockers and can stop the command before or after the per-binary loop.
+
+**Fix**
+
+- Review the warning lines above the final error to identify the specific failing binary.
+- Re-run with `--continue-on-error=false` if you want the command to stop at the first per-binary failure.
+
 ## `remove without arguments requires an interactive terminal`
 
 **Cause**

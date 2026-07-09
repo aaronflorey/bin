@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -8,8 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aaronflorey/bin/pkg/assets"
 	"github.com/aaronflorey/bin/pkg/config"
 	"github.com/aaronflorey/bin/pkg/providers"
+	"github.com/caarlos0/log"
 )
 
 type mockProvider struct {
@@ -446,4 +449,467 @@ func TestUpdateYesFlagNoArgsSkipsInteractiveSelector(t *testing.T) {
 	if selectorCalled {
 		t.Fatal("did not expect interactive selector to be called with --yes")
 	}
+}
+
+func TestUpdateContinuesAfterInstallFailureWithYesFlag(t *testing.T) {
+	setupTestConfig(t)
+
+	paths := seedOutdatedUpdateBinaries(t, []string{
+		"alpha-update-install-failure-tool",
+		"beta-update-install-failure-tool",
+		"gamma-update-install-failure-tool",
+	})
+
+	cmd := newUpdateCmd()
+	cmd.newProvider = newMockOutdatedProviderFactory(t, map[string]mockProvider{
+		"https://example.com/alpha-update-install-failure-tool": {latestVersion: "1.1.0", latestVersionURL: "https://example.com/alpha-update-install-failure-tool/releases/tag/v1.1.0"},
+		"https://example.com/beta-update-install-failure-tool":  {latestVersion: "1.1.0", latestVersionURL: "https://example.com/beta-update-install-failure-tool/releases/tag/v1.1.0"},
+		"https://example.com/gamma-update-install-failure-tool": {latestVersion: "1.1.0", latestVersionURL: "https://example.com/gamma-update-install-failure-tool/releases/tag/v1.1.0"},
+	})
+
+	originalRegistry := lifecycleRegistry
+	defer func() {
+		lifecycleRegistry = originalRegistry
+	}()
+
+	var attemptedPaths []string
+	var succeededPaths []string
+	lifecycleRegistry = map[string]lifecycleStrategy{
+		installModeBinary: {
+			applyStoredFetch: func(_ *config.Binary, _ *providers.FetchOpts) error {
+				return nil
+			},
+			install: func(opts InstallOpts) (*InstallResult, error) {
+				attemptedPaths = append(attemptedPaths, opts.Path)
+				if opts.Path == paths[0] {
+					return nil, fmt.Errorf("mock install failure for %s", opts.Path)
+				}
+				succeededPaths = append(succeededPaths, opts.Path)
+				return &InstallResult{Name: filepath.Base(opts.Path), Version: opts.FetchOpts.Version, Path: opts.Path}, nil
+			},
+			resolvePath: originalRegistry[installModeBinary].resolvePath,
+		},
+	}
+
+	cmd.cmd.SetArgs([]string{"--yes", "--parallelism=1"})
+	err := cmd.cmd.Execute()
+	if err == nil {
+		t.Fatal("expected some updates failed error")
+	}
+	if !strings.Contains(err.Error(), "some updates failed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !reflect.DeepEqual(attemptedPaths, paths) {
+		t.Fatalf("unexpected install attempt order: got %v want %v", attemptedPaths, paths)
+	}
+	if len(succeededPaths) < 1 {
+		t.Fatalf("expected at least one later successful update, got %v", succeededPaths)
+	}
+	if succeededPaths[0] != paths[1] {
+		t.Fatalf("expected first success after failure to be %s, got %v", paths[1], succeededPaths)
+	}
+}
+
+func TestUpdateContinuesAfterApplyStoredFetchFailureWithYesFlag(t *testing.T) {
+	setupTestConfig(t)
+
+	paths := seedOutdatedUpdateBinaries(t, []string{
+		"alpha-update-fetch-failure-tool",
+		"beta-update-fetch-failure-tool",
+		"gamma-update-fetch-failure-tool",
+	})
+
+	cmd := newUpdateCmd()
+	cmd.newProvider = newMockOutdatedProviderFactory(t, map[string]mockProvider{
+		"https://example.com/alpha-update-fetch-failure-tool": {latestVersion: "1.1.0", latestVersionURL: "https://example.com/alpha-update-fetch-failure-tool/releases/tag/v1.1.0"},
+		"https://example.com/beta-update-fetch-failure-tool":  {latestVersion: "1.1.0", latestVersionURL: "https://example.com/beta-update-fetch-failure-tool/releases/tag/v1.1.0"},
+		"https://example.com/gamma-update-fetch-failure-tool": {latestVersion: "1.1.0", latestVersionURL: "https://example.com/gamma-update-fetch-failure-tool/releases/tag/v1.1.0"},
+	})
+
+	originalRegistry := lifecycleRegistry
+	defer func() {
+		lifecycleRegistry = originalRegistry
+	}()
+
+	var attemptedPaths []string
+	var installedPaths []string
+	lifecycleRegistry = map[string]lifecycleStrategy{
+		installModeBinary: {
+			applyStoredFetch: func(b *config.Binary, _ *providers.FetchOpts) error {
+				attemptedPaths = append(attemptedPaths, b.Path)
+				if b.Path == paths[0] {
+					return fmt.Errorf("mock stored fetch failure for %s", b.Path)
+				}
+				return nil
+			},
+			install: func(opts InstallOpts) (*InstallResult, error) {
+				installedPaths = append(installedPaths, opts.Path)
+				return &InstallResult{Name: filepath.Base(opts.Path), Version: opts.FetchOpts.Version, Path: opts.Path}, nil
+			},
+			resolvePath: originalRegistry[installModeBinary].resolvePath,
+		},
+	}
+
+	cmd.cmd.SetArgs([]string{"--yes", "--parallelism=1"})
+	err := cmd.cmd.Execute()
+	if err == nil {
+		t.Fatal("expected some updates failed error")
+	}
+	if !strings.Contains(err.Error(), "some updates failed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !reflect.DeepEqual(attemptedPaths, paths) {
+		t.Fatalf("unexpected update attempt order: got %v want %v", attemptedPaths, paths)
+	}
+	if !reflect.DeepEqual(installedPaths, paths[1:]) {
+		t.Fatalf("expected later installs to continue after applyStoredFetch failure, got %v want %v", installedPaths, paths[1:])
+	}
+}
+
+func TestUpdateRecordsPerBinaryFailuresAndContinuesWithYesFlag(t *testing.T) {
+	setupTestConfig(t)
+
+	paths := seedOutdatedUpdateBinaries(t, []string{
+		"alpha-update-stored-metadata-failure-tool",
+		"beta-update-compatibility-failure-tool",
+		"gamma-update-fetch-failure-tool",
+		"delta-update-save-failure-tool",
+		"epsilon-update-install-failure-tool",
+		"zeta-update-success-tool",
+	})
+
+	if err := config.UpsertBinary(&config.Binary{
+		Path:        paths[1],
+		Version:     "1.0.0",
+		URL:         "https://example.com/beta-update-compatibility-failure-tool",
+		Provider:    "github",
+		InstallMode: installModeSystemPackage,
+		PackageType: "deb",
+	}); err != nil {
+		t.Fatalf("failed to seed system package binary: %v", err)
+	}
+
+	cmd := newUpdateCmd()
+	cmd.newProvider = newMockOutdatedProviderFactory(t, map[string]mockProvider{
+		"https://example.com/alpha-update-stored-metadata-failure-tool": {latestVersion: "1.1.0", latestVersionURL: "https://example.com/alpha-update-stored-metadata-failure-tool/releases/tag/v1.1.0"},
+		"https://example.com/beta-update-compatibility-failure-tool":    {latestVersion: "1.1.0", latestVersionURL: "https://example.com/beta-update-compatibility-failure-tool/releases/tag/v1.1.0"},
+		"https://example.com/gamma-update-fetch-failure-tool":           {latestVersion: "1.1.0", latestVersionURL: "https://example.com/gamma-update-fetch-failure-tool/releases/tag/v1.1.0"},
+		"https://example.com/delta-update-save-failure-tool":            {latestVersion: "1.1.0", latestVersionURL: "https://example.com/delta-update-save-failure-tool/releases/tag/v1.1.0"},
+		"https://example.com/epsilon-update-install-failure-tool":       {latestVersion: "1.1.0", latestVersionURL: "https://example.com/epsilon-update-install-failure-tool/releases/tag/v1.1.0"},
+		"https://example.com/zeta-update-success-tool":                  {latestVersion: "1.1.0", latestVersionURL: "https://example.com/zeta-update-success-tool/releases/tag/v1.1.0"},
+	})
+
+	originalRegistry := lifecycleRegistry
+	defer func() {
+		lifecycleRegistry = originalRegistry
+	}()
+
+	originalLog := log.Log
+	defer func() {
+		log.Log = originalLog
+	}()
+	var logOutput bytes.Buffer
+	log.Log = log.New(&logOutput)
+
+	var applyStoredFetchPaths []string
+	var installAttemptPaths []string
+	var installedPaths []string
+	lifecycleRegistry = map[string]lifecycleStrategy{
+		installModeBinary: {
+			applyStoredFetch: func(b *config.Binary, _ *providers.FetchOpts) error {
+				applyStoredFetchPaths = append(applyStoredFetchPaths, b.Path)
+				if b.Path == paths[0] {
+					return fmt.Errorf("mock stored metadata failure")
+				}
+				return nil
+			},
+			install: func(opts InstallOpts) (*InstallResult, error) {
+				installAttemptPaths = append(installAttemptPaths, opts.Path)
+				switch opts.Path {
+				case paths[2]:
+					return nil, fmt.Errorf("mock fetch failure")
+				case paths[3]:
+					return nil, fmt.Errorf("error installing binary: mock save failure")
+				case paths[4]:
+					return nil, fmt.Errorf("mock install failure")
+				default:
+					installedPaths = append(installedPaths, opts.Path)
+					return &InstallResult{Name: filepath.Base(opts.Path), Version: opts.FetchOpts.Version, Path: opts.Path}, nil
+				}
+			},
+			resolvePath: originalRegistry[installModeBinary].resolvePath,
+		},
+		installModeSystemPackage: {
+			applyStoredFetch: func(b *config.Binary, _ *providers.FetchOpts) error {
+				applyStoredFetchPaths = append(applyStoredFetchPaths, b.Path)
+				return nil
+			},
+			install: func(opts InstallOpts) (*InstallResult, error) {
+				installAttemptPaths = append(installAttemptPaths, opts.Path)
+				return nil, assets.ErrNoCompatibleFiles
+			},
+			resolvePath: originalRegistry[installModeSystemPackage].resolvePath,
+		},
+	}
+
+	cmd.cmd.SetArgs([]string{"--yes", "--parallelism=1"})
+	err := cmd.cmd.Execute()
+	if err == nil {
+		t.Fatal("expected some updates failed error")
+	}
+	if !strings.Contains(err.Error(), "some updates failed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !reflect.DeepEqual(applyStoredFetchPaths, paths) {
+		t.Fatalf("unexpected applyStoredFetch order: got %v want %v", applyStoredFetchPaths, paths)
+	}
+	if !reflect.DeepEqual(installAttemptPaths, paths[1:]) {
+		t.Fatalf("unexpected install attempt order: got %v want %v", installAttemptPaths, paths[1:])
+	}
+	if !reflect.DeepEqual(installedPaths, []string{paths[5]}) {
+		t.Fatalf("expected only final binary to install successfully, got %v", installedPaths)
+	}
+
+	logs := logOutput.String()
+	for _, path := range paths[:5] {
+		if !strings.Contains(logs, path) {
+			t.Fatalf("expected warning logs to mention failed binary %s, logs: %s", path, logs)
+		}
+	}
+	if !strings.Contains(logs, "latest release no longer exposes a compatible deb package") {
+		t.Fatalf("expected compatibility failure details in logs, got: %s", logs)
+	}
+	if got := strings.Count(logs, "latest release no longer exposes a compatible deb package"); got != 1 {
+		t.Fatalf("expected compatibility failure warning exactly once, got %d occurrences in logs: %s", got, logs)
+	}
+}
+
+func TestUpdateStopsAfterInstallFailureWhenContinueOnErrorDisabled(t *testing.T) {
+	setupTestConfig(t)
+
+	paths := seedOutdatedUpdateBinaries(t, []string{
+		"alpha-update-stop-on-install-failure-tool",
+		"beta-update-stop-on-install-failure-tool",
+		"gamma-update-stop-on-install-failure-tool",
+	})
+
+	cmd := newUpdateCmd()
+	cmd.newProvider = newMockOutdatedProviderFactory(t, map[string]mockProvider{
+		"https://example.com/alpha-update-stop-on-install-failure-tool": {latestVersion: "1.1.0", latestVersionURL: "https://example.com/alpha-update-stop-on-install-failure-tool/releases/tag/v1.1.0"},
+		"https://example.com/beta-update-stop-on-install-failure-tool":  {latestVersion: "1.1.0", latestVersionURL: "https://example.com/beta-update-stop-on-install-failure-tool/releases/tag/v1.1.0"},
+		"https://example.com/gamma-update-stop-on-install-failure-tool": {latestVersion: "1.1.0", latestVersionURL: "https://example.com/gamma-update-stop-on-install-failure-tool/releases/tag/v1.1.0"},
+	})
+
+	originalRegistry := lifecycleRegistry
+	defer func() {
+		lifecycleRegistry = originalRegistry
+	}()
+
+	var attemptedPaths []string
+	expectedErr := fmt.Errorf("mock install failure for %s", paths[0])
+	lifecycleRegistry = map[string]lifecycleStrategy{
+		installModeBinary: {
+			applyStoredFetch: func(_ *config.Binary, _ *providers.FetchOpts) error {
+				return nil
+			},
+			install: func(opts InstallOpts) (*InstallResult, error) {
+				attemptedPaths = append(attemptedPaths, opts.Path)
+				if opts.Path == paths[0] {
+					return nil, expectedErr
+				}
+				return &InstallResult{Name: filepath.Base(opts.Path), Version: opts.FetchOpts.Version, Path: opts.Path}, nil
+			},
+			resolvePath: originalRegistry[installModeBinary].resolvePath,
+		},
+	}
+
+	cmd.cmd.SetArgs([]string{"--yes", "--parallelism=1", "--continue-on-error=false"})
+	err := cmd.cmd.Execute()
+	if err == nil {
+		t.Fatal("expected first install failure")
+	}
+	if err != expectedErr {
+		t.Fatalf("expected original install failure, got %v", err)
+	}
+	if !reflect.DeepEqual(attemptedPaths, paths[:1]) {
+		t.Fatalf("expected only first install attempt, got %v want %v", attemptedPaths, paths[:1])
+	}
+	if strings.Contains(err.Error(), "some updates failed") {
+		t.Fatalf("expected original failure instead of aggregate error, got %v", err)
+	}
+}
+
+func TestUpdateInteractivePromptPreservesDiscoveryFailuresForFinalExit(t *testing.T) {
+	setupTestConfig(t)
+
+	paths := seedOutdatedUpdateBinaries(t, []string{
+		"alpha-update-discovery-failure-tool",
+		"beta-update-selected-tool",
+		"gamma-update-unselected-tool",
+	})
+
+	cmd := newUpdateCmd()
+	cmd.newProvider = func(u, _ string) (providers.Provider, error) {
+		switch u {
+		case "https://example.com/alpha-update-discovery-failure-tool":
+			return nil, fmt.Errorf("mock discovery failure for %s", u)
+		case "https://example.com/beta-update-selected-tool":
+			return mockProvider{latestVersion: "1.1.0", latestVersionURL: u + "/releases/tag/v1.1.0"}, nil
+		case "https://example.com/gamma-update-unselected-tool":
+			return mockProvider{latestVersion: "1.1.0", latestVersionURL: u + "/releases/tag/v1.1.0"}, nil
+		default:
+			return nil, fmt.Errorf("unexpected provider request for %s", u)
+		}
+	}
+
+	selectorCalled := false
+	cmd.selectItems = func(updates []availableUpdate) ([]availableUpdate, error) {
+		selectorCalled = true
+		if len(updates) != 2 {
+			t.Fatalf("expected 2 selectable updates after discovery failure, got %d", len(updates))
+		}
+		return updates[:1], nil
+	}
+
+	confirmCalled := false
+	cmd.confirm = func(string) error {
+		confirmCalled = true
+		return nil
+	}
+	cmd.isInteractive = func() bool {
+		return true
+	}
+
+	originalRegistry := lifecycleRegistry
+	defer func() {
+		lifecycleRegistry = originalRegistry
+	}()
+
+	var installedPaths []string
+	lifecycleRegistry = map[string]lifecycleStrategy{
+		installModeBinary: {
+			applyStoredFetch: func(_ *config.Binary, _ *providers.FetchOpts) error {
+				return nil
+			},
+			install: func(opts InstallOpts) (*InstallResult, error) {
+				installedPaths = append(installedPaths, opts.Path)
+				return &InstallResult{Name: filepath.Base(opts.Path), Version: opts.FetchOpts.Version, Path: opts.Path}, nil
+			},
+			resolvePath: originalRegistry[installModeBinary].resolvePath,
+		},
+	}
+
+	err := cmd.cmd.Execute()
+	if err == nil {
+		t.Fatal("expected discovery failure to produce a final aggregate error")
+	}
+	exitErr, ok := err.(*exitError)
+	if !ok {
+		t.Fatalf("expected exitError, got %T: %v", err, err)
+	}
+	if exitErr.code != 4 {
+		t.Fatalf("expected exit code 4, got %d", exitErr.code)
+	}
+	if !strings.Contains(err.Error(), "some updates failed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !selectorCalled {
+		t.Fatal("expected interactive selector to be called")
+	}
+	if !confirmCalled {
+		t.Fatal("expected confirmation prompt to be called")
+	}
+	if !reflect.DeepEqual(installedPaths, []string{paths[1]}) {
+		t.Fatalf("expected selected update to install despite discovery failure, got %v want %v", installedPaths, []string{paths[1]})
+	}
+}
+
+func TestUpdateInteractivePromptNoSelectionPreservesDiscoveryFailuresForFinalExit(t *testing.T) {
+	setupTestConfig(t)
+
+	seedOutdatedUpdateBinaries(t, []string{
+		"alpha-update-discovery-failure-tool",
+		"beta-update-unselected-tool",
+	})
+
+	cmd := newUpdateCmd()
+	cmd.newProvider = func(u, _ string) (providers.Provider, error) {
+		switch u {
+		case "https://example.com/alpha-update-discovery-failure-tool":
+			return nil, fmt.Errorf("mock discovery failure for %s", u)
+		case "https://example.com/beta-update-unselected-tool":
+			return mockProvider{latestVersion: "1.1.0", latestVersionURL: u + "/releases/tag/v1.1.0"}, nil
+		default:
+			return nil, fmt.Errorf("unexpected provider request for %s", u)
+		}
+	}
+
+	selectorCalled := false
+	cmd.selectItems = func(updates []availableUpdate) ([]availableUpdate, error) {
+		selectorCalled = true
+		if len(updates) != 1 {
+			t.Fatalf("expected 1 selectable update after discovery failure, got %d", len(updates))
+		}
+		return nil, nil
+	}
+	cmd.confirm = func(string) error {
+		t.Fatal("did not expect confirmation prompt when nothing was selected")
+		return nil
+	}
+	cmd.isInteractive = func() bool {
+		return true
+	}
+
+	originalLog := log.Log
+	defer func() {
+		log.Log = originalLog
+	}()
+	var logOutput bytes.Buffer
+	log.Log = log.New(&logOutput)
+
+	err := cmd.cmd.Execute()
+	if err == nil {
+		t.Fatal("expected discovery failure to produce a final aggregate error")
+	}
+	exitErr, ok := err.(*exitError)
+	if !ok {
+		t.Fatalf("expected exitError, got %T: %v", err, err)
+	}
+	if exitErr.code != 4 {
+		t.Fatalf("expected exit code 4, got %d", exitErr.code)
+	}
+	if !strings.Contains(err.Error(), "some updates failed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !selectorCalled {
+		t.Fatal("expected interactive selector to be called")
+	}
+
+	logs := logOutput.String()
+	if !strings.Contains(logs, "mock discovery failure for https://example.com/alpha-update-discovery-failure-tool") {
+		t.Fatalf("expected discovery failure warning in logs, got: %s", logs)
+	}
+	if !strings.Contains(logs, "No binaries selected for update") {
+		t.Fatalf("expected no-selection message in logs, got: %s", logs)
+	}
+}
+
+func seedOutdatedUpdateBinaries(t *testing.T, names []string) []string {
+	t.Helper()
+
+	paths := make([]string, 0, len(names))
+	for _, name := range names {
+		path := filepath.Join(t.TempDir(), name)
+		writeTestBinary(t, path)
+		if err := config.UpsertBinary(&config.Binary{
+			Path:     path,
+			Version:  "1.0.0",
+			URL:      fmt.Sprintf("https://example.com/%s", name),
+			Provider: "github",
+		}); err != nil {
+			t.Fatalf("failed to seed binary %s: %v", name, err)
+		}
+		paths = append(paths, path)
+	}
+	return paths
 }

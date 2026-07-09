@@ -17,7 +17,7 @@
 | `run` | Download a binary into the user cache and execute it | Supports passthrough args after `--`. Cached files live under `os.UserCacheDir()/bin`. |
 | `ensure` | Reinstall tracked binaries when they are missing or mismatched | Alias: `e`. |
 | `outdated` | Show tracked binaries with newer versions available | `--format=text|json` (default `text`). |
-| `update` | Update one or more tracked binaries | Alias: `u`. Supports `--yes`, `--dry-run`, `--all`, `--parallelism`, `--skip-path-check`, `--continue-on-error`. |
+| `update` | Update one or more tracked binaries | Alias: `u`. Supports `--yes`, `--dry-run`, `--all`, `--parallelism`, `--skip-path-check`, `--continue-on-error`. Defaults to `--continue-on-error=true`: later binaries still run after a per-binary failure, but the command exits with code `4` if any update failed. Use `--continue-on-error=false` to stop on the first per-binary failure. |
 | `set-config` | Update supported config keys | Only `default_path` and `use_gh_for_github_token`. |
 | `export` | Write managed binaries as JSON | Writes to stdout unless a file is passed. |
 | `import` | Read managed binaries from JSON | `--skip-ensure` skips the post-import ensure step. |
@@ -31,5 +31,6 @@
 
 - `install` rejects multiple binaries plus custom paths; custom paths are only valid for a single target (`cmd/install.go`).
 - `update` requires `--yes` or `--dry-run` in non-interactive mode when updates are available (`cmd/update.go`).
+- `update` pre/post hooks are global blockers: if either hook fails, the command stops instead of continuing per binary (`cmd/update.go`).
 - `remove` without arguments requires an interactive terminal (`cmd/remove.go`).
 - `--package-type flatpack` is normalized to `flatpak` (`pkg/systempackage/systempackage.go`).
