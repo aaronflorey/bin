@@ -179,6 +179,15 @@ func CheckAndLoad() error {
 					return err
 				}
 			}
+		} else if err := ensureDefaultPathExists(loaded.DefaultPath); err != nil {
+			log.Debugf("Cached default path %s was missing or unusable: %v", loaded.DefaultPath, err)
+			loaded.DefaultPath, err = getDefaultPath()
+			if err != nil {
+				return err
+			}
+			if err := writeConfigLocked(configPath, loaded); err != nil {
+				return err
+			}
 		}
 
 		cfg = loaded
@@ -282,6 +291,16 @@ func mutateConfigLocked(mutate func(*config) error) error {
 		cfg = loaded
 		return nil
 	})
+}
+
+// ensureDefaultPathExists recreates the cached default install directory if
+// it was deleted after the first run, then verifies it is writable.
+func ensureDefaultPathExists(dir string) error {
+	expanded := os.ExpandEnv(dir)
+	if err := os.MkdirAll(expanded, 0o755); err != nil {
+		return err
+	}
+	return checkDirExistsAndWritable(expanded)
 }
 
 // ForceInstallationDir returns the directory specified by the BIN_EXE_DIR
