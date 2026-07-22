@@ -110,10 +110,15 @@ func installBinary(opts InstallOpts) (*InstallResult, error) {
 		return nil, err
 	}
 
+	logicalName := assets.SanitizeName(pResult.Name, pResult.Version)
+	if logicalName == "" {
+		logicalName = pResult.Name
+	}
+
 	resolvedPath := opts.Path
 	overwrite := opts.Force
 	if opts.ResolvePath {
-		resolvedPath, overwrite, err = checkFinalPath(resolvedPath, assets.SanitizeName(pResult.Name, pResult.Version), overwrite)
+		resolvedPath, overwrite, err = checkFinalPath(resolvedPath, logicalName, overwrite)
 		if err != nil {
 			return nil, err
 		}
@@ -132,7 +137,7 @@ func installBinary(opts InstallOpts) (*InstallResult, error) {
 	}
 
 	err = persistInstalledBinary(&config.Binary{
-		RemoteName:       pResult.Name,
+		RemoteName:       logicalName,
 		Path:             configPath,
 		Version:          pResult.Version,
 		Hash:             hashString,
@@ -149,10 +154,10 @@ func installBinary(opts InstallOpts) (*InstallResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	log.Debugf("Saved installed binary config for %q at %s", pResult.Name, configPath)
+	log.Debugf("Saved installed binary config for %q at %s", logicalName, configPath)
 
 	return &InstallResult{
-		Name:    pResult.Name,
+		Name:    logicalName,
 		Version: pResult.Version,
 		Path:    configPath,
 	}, nil

@@ -90,7 +90,7 @@ func newInstallCmd() *installCmd {
 	root.cmd = cmd
 	enableSpinner(root.cmd)
 	root.cmd.Flags().BoolVarP(&root.opts.force, "force", "f", false, "Force the installation even if the file already exists")
-	root.cmd.Flags().BoolVarP(&root.opts.all, "all", "a", false, "Show all possible download options (skip scoring & filtering)")
+	root.cmd.Flags().BoolVarP(&root.opts.all, "all", "a", false, "Show all compatible download options (skip product scoring)")
 	root.cmd.Flags().StringVarP(&root.opts.provider, "provider", "p", "", "Forces to use a specific provider")
 	root.cmd.Flags().StringVarP(&root.opts.autoSelect, "select", "s", "", "Auto select installation file (skips interactive prompt)")
 	root.cmd.Flags().IntVar(&root.opts.minAgeDays, "min-age-days", 0, "Require the selected release to be at least this many days old")
@@ -98,7 +98,7 @@ func newInstallCmd() *installCmd {
 	root.cmd.Flags().BoolVar(&root.opts.systemPackage, "system-package", false, "Install from compatible system package artifacts (deb, rpm, apk, flatpak, dmg on macOS)")
 	root.cmd.Flags().BoolVar(&root.opts.preferSystemPackage, "prefer-system-package", false, "Prefer compatible system package artifacts before direct binaries when installing")
 	root.cmd.Flags().StringVar(&root.opts.packageType, "package-type", "", "Restrict system package selection to a specific type (deb, rpm, apk, flatpak, dmg)")
-	root.cmd.Flags().BoolVar(&root.opts.nonInteractive, "non-interactive", false, "Disable all interactive prompts (auto-select best option)")
+	root.cmd.Flags().BoolVar(&root.opts.nonInteractive, "non-interactive", false, "Disable prompts and fail on ambiguous choices")
 	return root
 }
 
@@ -154,10 +154,7 @@ func (root *installCmd) installTarget(cmd *cobra.Command, target installTarget) 
 		if err != nil {
 			log.WithError(err).Debugf("Skipping release lane discovery for %q", resolved.url)
 		} else if len(options) > 1 {
-			if target.path != "" {
-				return fmt.Errorf("multiple release lanes detected for %s; omit the custom install path and install lanes separately or choose the default derived names", resolved.url)
-			}
-			prefixes, err = selectReleaseTagPrefixesInteractively(options)
+			prefixes, err = selectReleaseTagPrefixesInteractively(options, root.opts.nonInteractive)
 			if err != nil {
 				return err
 			}
@@ -165,7 +162,7 @@ func (root *installCmd) installTarget(cmd *cobra.Command, target installTarget) 
 				return fmt.Errorf("no release lanes selected")
 			}
 		} else if len(options) == 1 {
-			prefixes = []string{options[0].Prefix}
+			prefixes = []string{releaseFetchPrefix(options[0].Prefix)}
 		}
 	}
 
@@ -312,7 +309,8 @@ func existingBinaryForInstall(bins map[string]*config.Binary, normalizedURL, for
 		if forcedProvider != "" && b.Provider != forcedProvider {
 			continue
 		}
-		if strings.TrimSpace(requestedReleaseTagPrefix) != strings.TrimSpace(b.ReleaseTagPrefix) {
+		effectiveStoredPrefix := providers.EffectiveReleaseTagPrefix(b.Version, b.ReleaseTagPrefix)
+		if strings.TrimSpace(requestedReleaseTagPrefix) != strings.TrimSpace(effectiveStoredPrefix) {
 			continue
 		}
 		if matched != nil {
@@ -332,7 +330,7 @@ func resolveFetchRequest(rawURL, forcedProvider string, fetchOpts providers.Fetc
 
 	if requestedVersion != "" {
 		fetchOpts.Version = requestedVersion
-		fetchOpts.ReleaseTagPrefix = providers.ReleaseTagPrefix(requestedVersion)
+		fetchOpts.ReleaseTagPrefix = releaseFetchPrefix(providers.ReleaseTagPrefix(requestedVersion))
 	}
 
 	return &resolvedFetchRequest{

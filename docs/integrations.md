@@ -16,7 +16,9 @@
 
 ## Common behaviors
 
-- Asset selection is shared across providers and can be influenced with `--all`, `--select`, `--non-interactive`, `--package-type`, and related install flags.
+- Asset selection is shared across providers. It filters foreign targets and unsupported artifact shapes, prefers an explicitly requested or stored product, and prompts or fails when multiple products remain.
+- `--all` skips product scoring but still lists only compatible candidates. `--select` selects an exact candidate before ranking but cannot bypass downloaded executable validation.
+- Release downloads are inspected without execution. Native executables, shebang scripts, and executable archive entries are accepted; shared libraries, language packages, metadata, and ordinary files are rejected.
 - For macOS GUI app releases on GitHub that publish `.dmg` assets, prefer `bin install --system-package --package-type dmg github.com/getpaseo/paseo Paseo`; non-Windows installs do not treat Windows `.exe` assets as valid binary fallbacks.
 - `run` uses the same provider resolution logic but caches binaries in the user cache instead of writing to config.
 - `update` reuses the stored provider and asset-selection metadata from the config entry.

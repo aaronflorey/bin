@@ -39,6 +39,17 @@ func TestLifecycleForModeDefaultsToBinary(t *testing.T) {
 	}
 }
 
+func TestLifecycleForBinaryUsesRequestedPathBasenameAsProduct(t *testing.T) {
+	strategy := lifecycleForMode(installModeBinary)
+	fetchOpts := providers.FetchOpts{}
+	if err := strategy.applyRequestFetch("/usr/local/bin/fff-mcp", &fetchOpts); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fetchOpts.PackageName != "fff-mcp" {
+		t.Fatalf("unexpected package name: %q", fetchOpts.PackageName)
+	}
+}
+
 func TestLifecycleForModeSystemPackageAppliesStoredMetadata(t *testing.T) {
 	strategy := lifecycleForMode(installModeSystemPackage)
 	fetchOpts := providers.FetchOpts{}

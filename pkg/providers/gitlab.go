@@ -185,6 +185,7 @@ func (g *gitLab) Fetch(opts *FetchOpts) (*File, error) {
 		SkipScoring:    opts.All,
 		PackagePath:    opts.PackagePath,
 		SkipPathCheck:  opts.SkipPatchCheck,
+		PackageName:    opts.PackageName,
 		SystemPackage:  opts.SystemPackage,
 		PackageType:    opts.PackageType,
 		NonInteractive: opts.NonInteractive,
@@ -237,8 +238,9 @@ func (g *gitLab) Fetch(opts *FetchOpts) (*File, error) {
 		Data:             outFile.Source,
 		Name:             outFile.Name,
 		Version:          version,
-		ReleaseTagPrefix: ReleaseTagPrefix(version),
+		ReleaseTagPrefix: fetchedReleaseTagPrefix(version, opts.ReleaseTagPrefix),
 		ExpectedSHA:      finalExpectedSHA,
+		PackagePath:      outFile.PackagePath,
 		PublishedAt:      gitLabPublishedAt(release),
 	}
 

@@ -74,6 +74,26 @@ bin install --system-package --package-type dmg github.com/getpaseo/paseo Paseo
 
 `bin` intentionally rejects Windows `.exe` installers when you are installing on macOS or Linux.
 
+## `multiple compatible products found`
+
+**Cause**
+
+- The release contains several current-platform tools and `bin` will not choose one alphabetically.
+
+**Fix**
+
+Run with `--all` to inspect compatible choices, then pass the exact asset with `--select`. In CI, always provide `--select` for an ambiguous multi-product release.
+
+## `selected payload ... is not executable`
+
+**Cause**
+
+- The selected release asset resolved to a library, package metadata, source file, or another non-executable payload.
+
+**Fix**
+
+Choose a native binary or binary archive from the release. `--select` does not bypass this validation.
+
 ## `update requires --yes or --dry-run in non-interactive mode`
 
 **Cause**

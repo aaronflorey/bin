@@ -174,6 +174,101 @@ func TestGetLatestVersionUsesStoredReleaseTagPrefix(t *testing.T) {
 	}
 }
 
+func TestGetLatestVersionAutoHealsLegacyPrereleaseReleaseTagPrefix(t *testing.T) {
+	b := &config.Binary{
+		Path:             "/home/user/bin/tool",
+		Version:          "v2.18.0-a734383d-nightly",
+		URL:              "github.com/acme/tool",
+		Provider:         "github",
+		ReleaseTagPrefix: "v",
+	}
+
+	p := mockProvider{
+		history: []*providers.ReleaseInfo{
+			{Version: "v2.18.0", URL: "https://example.test/stable"},
+			{Version: "v2.18.1-b734383d-nightly", URL: "https://example.test/nightly"},
+		},
+	}
+
+	got, err := getLatestVersion(b, p)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected update info")
+	}
+	if got.version != "v2.18.1-b734383d-nightly" {
+		t.Fatalf("unexpected version: %s", got.version)
+	}
+	if got.url != "https://example.test/nightly" {
+		t.Fatalf("unexpected url: %s", got.url)
+	}
+}
+
+func TestGetLatestVersionAutoHealsLegacyEmptyPrereleaseReleaseTagPrefix(t *testing.T) {
+	b := &config.Binary{
+		Path:             "/home/user/bin/tool",
+		Version:          "1.2.3-rc.1",
+		URL:              "github.com/acme/tool",
+		Provider:         "github",
+		ReleaseTagPrefix: "",
+	}
+
+	p := mockProvider{
+		history: []*providers.ReleaseInfo{
+			{Version: "1.2.3", URL: "https://example.test/stable"},
+			{Version: "1.2.4-rc.1", URL: "https://example.test/rc"},
+		},
+		release: &providers.ReleaseInfo{Version: "1.2.3", URL: "https://example.test/stable"},
+	}
+
+	got, err := getLatestVersion(b, p)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected update info")
+	}
+	if got.version != "1.2.4-rc.1" {
+		t.Fatalf("unexpected version: %s", got.version)
+	}
+	if got.url != "https://example.test/rc" {
+		t.Fatalf("unexpected url: %s", got.url)
+	}
+}
+
+func TestGetLatestVersionKeepsPrefixedPrereleaseOnOwnLane(t *testing.T) {
+	b := &config.Binary{
+		Path:             "/home/user/bin/tool",
+		Version:          "pi-v1.2.3-rc.1",
+		URL:              "github.com/acme/tool",
+		Provider:         "github",
+		ReleaseTagPrefix: "pi-v",
+	}
+
+	p := mockProvider{
+		history: []*providers.ReleaseInfo{
+			{Version: "1.2.4-rc.2", URL: "https://example.test/bare-rc"},
+			{Version: "pi-v1.2.4-rc.2", URL: "https://example.test/pi-v-rc"},
+		},
+		release: &providers.ReleaseInfo{Version: "1.2.4-rc.2", URL: "https://example.test/bare-rc"},
+	}
+
+	got, err := getLatestVersion(b, p)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected update info")
+	}
+	if got.version != "pi-v1.2.4-rc.2" {
+		t.Fatalf("unexpected version: %s", got.version)
+	}
+	if got.url != "https://example.test/pi-v-rc" {
+		t.Fatalf("unexpected url: %s", got.url)
+	}
+}
+
 func TestResolveUpdateTargetsWithURL(t *testing.T) {
 	bins := map[string]*config.Binary{
 		"/tmp/tool": {

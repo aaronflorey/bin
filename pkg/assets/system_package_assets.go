@@ -6,6 +6,7 @@ import (
 
 	bstrings "github.com/aaronflorey/bin/pkg/strings"
 	"github.com/aaronflorey/bin/pkg/systempackage"
+	"github.com/caarlos0/log"
 )
 
 func filterInstallableAssets(opts *FilterOpts, as []*Asset) []*Asset {
@@ -33,6 +34,101 @@ func filterInstallableAssets(opts *FilterOpts, as []*Asset) []*Asset {
 	return filterAssetsBy(as, func(name string) bool {
 		return looksLikeMetadataAsset(name) || looksLikePackageArtifact(name)
 	}, "metadata/package")
+}
+
+type osRank int
+
+const (
+	osRankPreferred osRank = iota
+	osRankGeneric
+	osRankOpposite
+)
+
+var knownOSTokens = []string{
+	"darwin", "macos", "macosx", "osx", "apple",
+	"linux", "manylinux", "android",
+	"windows", "win", "win32", "win64",
+	"freebsd", "openbsd", "netbsd", "dragonfly",
+}
+
+func filterTargetCompatibleAssets(as []*Asset, preferSpecific bool) []*Asset {
+	preferredOS := preferredOSTokens()
+	preferredArch := make(map[string]struct{})
+	for _, token := range preferredArchTokens() {
+		preferredArch[token] = struct{}{}
+	}
+
+	type rankedAsset struct {
+		asset       *Asset
+		specificity int
+	}
+	ranked := make([]rankedAsset, 0, len(as))
+	maxSpecificity := 0
+	for _, a := range as {
+		osMatch := classifyOS(a.Name, preferredOS)
+		archMatch := classifyArch(a.Name, preferredArch)
+		if osMatch == osRankOpposite || archMatch == archRankOpposite {
+			log.Debugf("Skipping wrong-platform asset %s", a.Name)
+			continue
+		}
+
+		specificity := 0
+		if osMatch == osRankPreferred {
+			specificity++
+		}
+		if archMatch == archRankPreferred {
+			specificity++
+		}
+		if specificity > maxSpecificity {
+			maxSpecificity = specificity
+		}
+		ranked = append(ranked, rankedAsset{asset: a, specificity: specificity})
+	}
+
+	filtered := make([]*Asset, 0, len(ranked))
+	for _, candidate := range ranked {
+		if !preferSpecific || candidate.specificity == maxSpecificity {
+			filtered = append(filtered, candidate.asset)
+		}
+	}
+	return filtered
+}
+
+func preferredOSTokens() map[string]struct{} {
+	preferred := make(map[string]struct{})
+	for _, token := range resolver.GetOS() {
+		preferred[strings.ToLower(token)] = struct{}{}
+	}
+	if _, ok := preferred["darwin"]; ok {
+		preferred["apple"] = struct{}{}
+		preferred["macosx"] = struct{}{}
+	}
+	if _, ok := preferred["linux"]; ok {
+		preferred["manylinux"] = struct{}{}
+	}
+	if _, ok := preferred["windows"]; ok {
+		preferred["win32"] = struct{}{}
+		preferred["win64"] = struct{}{}
+	}
+	return preferred
+}
+
+func classifyOS(candidate string, preferred map[string]struct{}) osRank {
+	lower := strings.ToLower(candidate)
+	hasKnown := false
+	for _, token := range knownOSTokens {
+		if !containsDelimitedToken(lower, token) {
+			continue
+		}
+		hasKnown = true
+		if _, ok := preferred[token]; ok {
+			return osRankPreferred
+		}
+	}
+	if hasKnown {
+		return osRankOpposite
+	}
+	return osRankGeneric
 }
 
 func isCompatibleSystemPackageAsset(name, packageType string) bool {
@@ -101,9 +197,15 @@ func isSystemPackageArchCompatible(name string) bool {
 }
 
 func filterArchiveAssets(as []*Asset) []*Asset {
-	return filterAssetsBy(as, func(name string) bool {
-		return looksLikeMetadataAsset(name) || looksLikeArchiveJunk(name)
-	}, "non-binary archive")
+	filtered := make([]*Asset, 0, len(as))
+	for _, a := range as {
+		if !a.Executable || looksLikeMetadataAsset(a.Name) || looksLikeArchiveJunk(a.Name) {
+			log.Debugf("Skipping non-binary archive asset %s", a.Name)
+			continue
+		}
+		filtered = append(filtered, a)
+	}
+	return filtered
 }
 
 func looksLikeMetadataAsset(name string) bool {
@@ -126,6 +228,9 @@ func looksLikeArchiveJunk(name string) bool {
 	normalized := strings.ToLower(strings.ReplaceAll(name, "\\", "/"))
 	normalizedWithRoot := "/" + strings.TrimPrefix(normalized, "/")
 	base := path.Base(normalized)
+	if strings.Contains(normalizedWithRoot, ".dist-info/") || strings.Contains(normalizedWithRoot, ".egg-info/") {
+		return true
+	}
 
 	if bstrings.ContainsAny(normalizedWithRoot, archiveJunkDirs) {
 		return true
