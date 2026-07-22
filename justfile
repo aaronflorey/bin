@@ -41,4 +41,4 @@ verify: download fmt-check mod-check
 	golangci-lint run
 
 hooks:
-	lefthook install
+	hk install --mise
