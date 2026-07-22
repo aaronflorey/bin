@@ -1085,10 +1085,17 @@ func closeReader(r io.Reader) error {
 func (f *Filter) processGz(name string, r io.Reader, _ string) (*finalFile, error) {
 	gr, err := gzip.NewReader(r)
 	if err != nil {
+		log.Debugf("Failed to open gzip reader for %q: %v", name, err)
 		return nil, err
 	}
 
-	return &finalFile{Source: gr, Name: gr.Name}, nil
+	innerName := gr.Name
+	if innerName == "" {
+		innerName = name
+	}
+	log.Debugf("Decompressing gzip %q -> %q", name, innerName)
+
+	return &finalFile{Source: gr, Name: innerName}, nil
 }
 
 // matchesPackagePath returns true if the entry name matches the configured
