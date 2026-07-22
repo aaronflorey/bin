@@ -1,0 +1,65 @@
+[tools]
+go = "1.24"
+hk = "latest"
+
+[tasks.build]
+description = "Build the bin CLI"
+run = "go build ."
+
+[tasks.clean]
+description = "Remove build artifacts"
+run = "rm -rf bin coverage.out"
+
+[tasks.download]
+description = "Download Go module dependencies"
+run = "go mod download"
+
+[tasks.tidy]
+description = "Tidy Go module metadata"
+run = "go mod tidy"
+
+[tasks.fmt]
+description = "Format Go source files"
+run = "gofmt -w -s ./."
+
+[tasks.fmt-check]
+description = "Check Go source formatting without writing"
+run = "@files=$(gofmt -l -s ./.); if [ -n \"$files\" ]; then printf '%s\\n' \"$files\"; exit 1; fi"
+
+[tasks.mod-check]
+description = "Verify go.mod/go.sum are tidy"
+run = "go mod tidy -diff"
+
+[tasks.lint]
+description = "Run go vet and formatting check"
+depends = ["fmt-check"]
+run = "go vet ./..."
+
+[tasks.test]
+description = "Run Go tests"
+run = "go test ./..."
+
+[tasks.test-race]
+description = "Run Go tests with race detector"
+run = "go test -race ./..."
+
+[tasks.coverage]
+description = "Run tests with coverage profile"
+run = "go test -coverprofile=coverage.out ./..."
+
+[tasks.verify]
+description = "Run full verification (deps, format, modules, golangci-lint)"
+depends = ["download", "fmt-check", "mod-check"]
+run = "golangci-lint run"
+
+[tasks.check]
+description = "Run all checks (format, vet, tests)"
+depends = ["fmt-check", "lint", "test"]
+
+[tasks.fix]
+description = "Auto-format and tidy the source"
+depends = ["fmt", "tidy"]
+
+[tasks.hooks]
+description = "Install Git hooks via hk"
+run = "hk install --mise"

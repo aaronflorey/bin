@@ -24,10 +24,10 @@ builds:
       - arm64
 
 archives:
-  - format: tar.gz
+  - formats: ["tar.gz"]
     format_overrides:
       - goos: windows
-        format: zip
+        formats: ["zip"]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - LICENSE
@@ -36,11 +36,27 @@ archives:
 checksum:
   name_template: checksums.txt
 
+homebrew_casks:
+  - repository:
+      owner: aaronflorey
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: "https://github.com/aaronflorey/bin"
+    description: "Effortless binary manager - download, install, and update binaries without root"
+    license: MIT
+    binaries: [bin]
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/bin"]
+          end
+
 release:
   include_meta: true
 
 snapshot:
-  name_template: "{{ .Tag }}-next"
+  version_template: "{{ .Tag }}-next"
 
 changelog:
   sort: asc

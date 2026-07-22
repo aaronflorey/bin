@@ -1,5 +1,10 @@
 # bin - Effortless Binary Manager
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![CI](https://github.com/aaronflorey/bin/actions/workflows/build.yml/badge.svg?branch=master)](https://github.com/aaronflorey/bin/actions/workflows/build.yml)
+[![Release](https://github.com/aaronflorey/bin/actions/workflows/release.yaml/badge.svg)](https://github.com/aaronflorey/bin/actions/workflows/release.yaml)
+[![Latest Release](https://img.shields.io/github/v/release/aaronflorey/bin)](https://github.com/aaronflorey/bin/releases/latest)
+
 > **Note:** This is a fork of [marcosnils/bin](https://github.com/marcosnils/bin) with additional features including lifecycle hooks, configurable file permissions, non-interactive asset selection, `goinstall://` sub-path support, and more.
 
 A lightweight, cross-platform binary manager that simplifies downloading, installing, and managing binaries without requiring root privileges.
@@ -56,6 +61,12 @@ If you prefer not to pipe to a shell, download the script first and inspect it:
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/aaronflorey/bin/master/install.sh
 sh install.sh
+```
+
+### Homebrew (macOS)
+
+```bash
+brew install aaronflorey/tap/bin
 ```
 
 ### Quick install from Scoop (Windows)
@@ -134,7 +145,7 @@ jobs:
 | `bin prune`                 | Remove missing binaries from database      | `bin prune`                      |
 | `bin help`                  | Show help for any command                  | `bin help install`               |
 
-**Tips**: if `bin` is unable to found the right package, try `bin install -a` to show all possible download options (skip scoring & filtering).
+**Tips**: if `bin` cannot determine the intended product, try `bin install -a` to show all compatible options for the current platform without product scoring.
 For commands that target managed binaries (for example `update`/`outdated`/`ensure`), you can use a unique prefix (like `uni`) and `bin` will suggest a matching managed name.
 `bin list` shows whether an entry is managed as a direct `binary` or a `system-package:<type>` install.
 
@@ -144,6 +155,8 @@ When a release publishes multiple installable tools, `bin install` now selects b
 - `--select <token>` still bypasses the prompt by choosing an exact selection token.
 - The selected logical tool is persisted and reused by `bin update` and `bin ensure`, so later runs keep fetching the same sibling tool.
 - Alias behavior is supported for repos that publish `*-cli` assets: requesting `weave` can resolve to `weave-cli` when no exact `weave` tool exists, while distinct tools like `weave-driver` remain separate.
+- Downloaded release assets must resolve to a native executable, a shebang script, or an executable archive entry. Libraries, wheels, metadata, and ordinary source files are not installed as binaries.
+- Repositories with multiple release lanes prompt for one lane and fail in non-interactive mode; use an explicit release URL to select a lane.
 
 When installing multiple repos in one command, custom paths are not supported. Use either `bin install <repo> [path]` for a single repo or `bin install <repo>...` for many repos.
 
@@ -416,31 +429,9 @@ There are some bugs, and the code has not been tested due to a lack of time, but
 - Submit pull requests for improvements
 - Update documentation
 
-### Development Setup
+## 🛠️ Development
 
-```shell
-# Clone the repository
-git clone https://github.com/aaronflorey/bin.git
-cd bin
-
-# Clean and init
-just clean
-just download
-
-# Apply fixes when needed
-just fmt
-just tidy
-
-# Run non-mutating checks
-just lint
-just verify
-
-# Run tests
-just test
-
-# Build from source
-just build
-```
+Local setup, build, test, lint, and release commands are documented in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 ## 📄 License
 
