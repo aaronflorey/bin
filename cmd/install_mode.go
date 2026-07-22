@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/aaronflorey/bin/pkg/assets"
@@ -45,11 +46,17 @@ var lifecycleRegistry = map[string]lifecycleStrategy{
 		uninstall: nil,
 		applyStoredFetch: func(b *config.Binary, fetchOpts *providers.FetchOpts) error {
 			fetchOpts.PackagePath = b.PackagePath
-			fetchOpts.PackageName = b.RemoteName
-			fetchOpts.ReleaseTagPrefix = b.ReleaseTagPrefix
+			fetchOpts.PackageName = assets.SanitizeName(b.RemoteName, b.Version)
+			if fetchOpts.PackageName == "" {
+				fetchOpts.PackageName = b.RemoteName
+			}
+			fetchOpts.ReleaseTagPrefix = providers.EffectiveReleaseTagPrefix(b.Version, b.ReleaseTagPrefix)
 			return nil
 		},
-		applyRequestFetch: func(_ string, _ *providers.FetchOpts) error {
+		applyRequestFetch: func(requestedName string, fetchOpts *providers.FetchOpts) error {
+			if requestedName != "" {
+				fetchOpts.PackageName = filepath.Base(requestedName)
+			}
 			return nil
 		},
 		resolvePath: func(*config.Binary) bool {
@@ -66,7 +73,7 @@ var lifecycleRegistry = map[string]lifecycleStrategy{
 			}
 			fetchOpts.PackagePath = b.PackagePath
 			fetchOpts.PackageName = b.RemoteName
-			fetchOpts.ReleaseTagPrefix = b.ReleaseTagPrefix
+			fetchOpts.ReleaseTagPrefix = providers.EffectiveReleaseTagPrefix(b.Version, b.ReleaseTagPrefix)
 			fetchOpts.SystemPackage = true
 			fetchOpts.PackageType = packageType
 			return nil

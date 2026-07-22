@@ -34,6 +34,19 @@ func TestInstallHasPinFlag(t *testing.T) {
 	}
 }
 
+func TestResolveFetchRequestPreservesExplicitBareReleaseLane(t *testing.T) {
+	resolved, err := resolveFetchRequest("github.com/acme/tool/releases/tag/1.2.3", "", providers.FetchOpts{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !resolved.hasExplicitVersion || resolved.requestedVersion != "1.2.3" {
+		t.Fatalf("unexpected resolved version: %+v", resolved)
+	}
+	if resolved.fetchOpts.ReleaseTagPrefix != providers.BareReleaseTagPrefix {
+		t.Fatalf("unexpected release prefix: %q", resolved.fetchOpts.ReleaseTagPrefix)
+	}
+}
+
 func TestInstallHasPreferSystemPackageFlag(t *testing.T) {
 	cmd := newInstallCmd()
 

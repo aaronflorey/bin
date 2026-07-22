@@ -28,7 +28,7 @@ just build
 | `coverage` | `go test -coverprofile=coverage.out ./...` |
 | `download` | `go mod download` |
 | `verify` | `download`, `gofmt -l -s ./.`, `go mod tidy -diff`, `golangci-lint run` |
-| `hooks` | `lefthook install` |
+| `hooks` | `hk install --mise` |
 
 `just lint` and `just verify` are check-only commands. Use `just fmt` to apply formatting fixes and `just tidy` to rewrite module metadata when the checks fail.
 
@@ -42,7 +42,7 @@ just build
 ## Release automation
 
 - CI runs lint, `go test ./...`, `go test -race ./...`, and a coverage pass (`.github/workflows/build.yml`).
-- Releases are created by `release-please` and published with GoReleaser (`.github/workflows/release-please.yml`, `.goreleaser.yml`).
+- Releases are created by `release-please` and published with GoReleaser (`.github/workflows/release.yaml`, `.goreleaser.yml`).
 
 ## Notes
 

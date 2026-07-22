@@ -10,7 +10,7 @@
 | `cmd/` | Cobra commands, command orchestration, lifecycle hooks, cache handling, and install/update/remove flows. |
 | `pkg/config/` | Persistent config file loading, path selection, hooks, and tracked binary metadata. |
 | `pkg/providers/` | Provider detection and fetch/update logic for GitHub, GitLab, Codeberg, Docker, HashiCorp, `go install`, and generic URLs. |
-| `pkg/assets/` | Asset scoring, filtering, naming, and checksum selection. |
+| `pkg/assets/` | Target-aware asset resolution, executable validation, archive selection, naming, and checksums. |
 | `pkg/systempackage/` | Package-artifact detection and normalization. |
 | `pkg/prompt/` | Interactive prompts and multi-select helpers. |
 | `pkg/spinner/` | Terminal spinner UI. |
@@ -19,9 +19,10 @@
 
 1. `cmd/root.go` loads config and configures logging.
 2. The command resolves a provider in `pkg/providers`.
-3. The provider selects an asset or package artifact through `pkg/assets`.
-4. The command installs, updates, removes, or runs the binary.
-5. The config file is updated with the resolved binary metadata.
+3. The provider resolves compatible products through `pkg/assets`; ambiguity prompts interactively or fails non-interactively.
+4. Release downloads are unpacked and validated as native executables, shebang scripts, or executable archive entries without being run.
+5. The command installs, updates, removes, or runs the binary.
+6. The config file is updated with the logical product and resolved archive path.
 
 ## Behavior worth knowing
 

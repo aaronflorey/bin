@@ -210,12 +210,13 @@ func getLatestVersion(b *config.Binary, p providers.Provider) (*updateInfo, erro
 		releaseInfo *providers.ReleaseInfo
 		err         error
 	)
-	if b.ReleaseTagPrefix != "" {
+	effectiveReleaseTagPrefix := providers.EffectiveReleaseTagPrefix(b.Version, b.ReleaseTagPrefix)
+	if effectiveReleaseTagPrefix != "" {
 		history, historyErr := providers.GetReleaseHistory(p, releaseHistoryPrefixLimit)
 		if historyErr != nil {
 			return nil, fmt.Errorf("Error checking updates for %s, %w", b.Path, historyErr)
 		}
-		releaseInfo = providers.SelectReleaseByPrefix(history, b.ReleaseTagPrefix)
+		releaseInfo = providers.SelectReleaseByPrefix(history, effectiveReleaseTagPrefix)
 	} else {
 		releaseInfo, err = p.GetLatestVersion()
 	}

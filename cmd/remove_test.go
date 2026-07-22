@@ -34,6 +34,34 @@ func TestRemoveAliases(t *testing.T) {
 	}
 }
 
+func TestRemoveResolvesManagedAliasWhenPATHMatchIsUnmanaged(t *testing.T) {
+	defaultPath := setupTestConfig(t)
+	trackedPath := filepath.Join(defaultPath, "wheel")
+	if err := config.UpsertBinary(&config.Binary{
+		Path:       trackedPath,
+		RemoteName: "WHEEL",
+		URL:        "https://example.test/wheel",
+		Provider:   "generic",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	shadowDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(shadowDir, "WHEEL"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", shadowDir)
+
+	root := newRemoveCmd()
+	targets, err := root.resolveTargets(root.cmd, config.Get().Bins, []string{"WHEEL"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(targets) != 1 || targets[0].configPath != trackedPath {
+		t.Fatalf("unexpected targets: %+v", targets)
+	}
+}
+
 func TestRemoveWithoutArgsRequiresInteractive(t *testing.T) {
 	defaultPath := setupTestConfig(t)
 

@@ -3,10 +3,10 @@ package cmd
 import (
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/aaronflorey/bin/pkg/assets"
+	"github.com/aaronflorey/bin/pkg/options"
 	"github.com/aaronflorey/bin/pkg/prompt"
 	"github.com/aaronflorey/bin/pkg/providers"
 )
@@ -18,6 +18,20 @@ type releasePrefixOption struct {
 	LatestTag    string
 	MatchedAsset string
 	Assets       []string
+}
+
+func (o releasePrefixOption) String() string {
+	if o.Prefix == "" {
+		return o.LatestTag
+	}
+	return fmt.Sprintf("%s (%s)", o.Prefix, o.LatestTag)
+}
+
+func releaseFetchPrefix(prefix string) string {
+	if prefix == "" {
+		return providers.BareReleaseTagPrefix
+	}
+	return prefix
 }
 
 func discoverInstallableReleasePrefixes(newProvider providerFactory, url, forcedProvider string, fetchOpts providers.FetchOpts) ([]releasePrefixOption, error) {
@@ -76,49 +90,47 @@ func compatibleReleaseAsset(release *providers.ReleaseInfo, fetchOpts providers.
 	}
 
 	f := assets.NewFilter(&assets.FilterOpts{
-		SkipScoring:    fetchOpts.All,
-		PackagePath:    fetchOpts.PackagePath,
-		SkipPathCheck:  fetchOpts.SkipPatchCheck,
-		PackageName:    fetchOpts.PackageName,
-		SystemPackage:  fetchOpts.SystemPackage,
-		PackageType:    fetchOpts.PackageType,
-		NonInteractive: true,
+		SkipScoring:   fetchOpts.All,
+		PackagePath:   fetchOpts.PackagePath,
+		SkipPathCheck: fetchOpts.SkipPatchCheck,
+		PackageName:   fetchOpts.PackageName,
+		SystemPackage: fetchOpts.SystemPackage,
+		PackageType:   fetchOpts.PackageType,
 	})
 	autoSelect := f.ParseAutoSelection(fetchOpts.AutoSelect)
-	selected, err := f.FilterAssets("", candidates, autoSelect)
-	if err != nil {
+	compatible := f.CompatibleAssets(candidates, autoSelect)
+	if len(compatible) == 0 {
 		return "", false
 	}
-	return selected.Name, true
+	return compatible[0].Name, true
 }
 
-func selectReleaseTagPrefixesInteractively(options []releasePrefixOption) ([]string, error) {
-	if len(options) == 0 {
+func selectReleaseTagPrefixesInteractively(releaseOptions []releasePrefixOption, nonInteractive bool) ([]string, error) {
+	if len(releaseOptions) == 0 {
 		return nil, nil
 	}
-	if len(options) == 1 || !prompt.IsInteractive() {
-		return []string{options[0].Prefix}, nil
+	if len(releaseOptions) == 1 {
+		return []string{releaseFetchPrefix(releaseOptions[0].Prefix)}, nil
 	}
-
-	opts := make([]prompt.MultiSelectOption, 0, len(options))
-	for _, option := range options {
-		label := option.LatestTag
-		if option.Prefix != "" {
-			label = fmt.Sprintf("%s (%s)", option.Prefix, option.LatestTag)
+	if nonInteractive || !prompt.IsInteractive() {
+		lanes := make([]string, 0, len(releaseOptions))
+		for _, option := range releaseOptions {
+			lanes = append(lanes, option.LatestTag)
 		}
-		opts = append(opts, prompt.MultiSelectOption{
-			Value: option.Prefix,
-			Label: label,
-		})
+		return nil, fmt.Errorf("multiple release lanes found: %s (use an explicit release URL)", strings.Join(lanes, ", "))
 	}
 
-	selected, err := prompt.SelectMultiple(
-		"Select release lanes to install",
+	opts := make([]fmt.Stringer, 0, len(releaseOptions))
+	for _, option := range releaseOptions {
+		opts = append(opts, option)
+	}
+
+	selected, err := options.Select(
+		"Select a release lane to install:",
 		opts,
 	)
 	if err != nil {
 		return nil, err
 	}
-	sort.Strings(selected)
-	return selected, nil
+	return []string{releaseFetchPrefix(selected.(releasePrefixOption).Prefix)}, nil
 }

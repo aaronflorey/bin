@@ -120,7 +120,7 @@ func (c *codeberg) Fetch(opts *FetchOpts) (*File, error) {
 		Data:             outFile.Source,
 		Name:             outFile.Name,
 		Version:          version,
-		ReleaseTagPrefix: ReleaseTagPrefix(version),
+		ReleaseTagPrefix: fetchedReleaseTagPrefix(version, opts.ReleaseTagPrefix),
 		ExpectedSHA:      finalExpectedSHA,
 		PackagePath:      outFile.PackagePath,
 		PublishedAt:      codebergPublishedAt(release),

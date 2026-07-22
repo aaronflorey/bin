@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -47,6 +48,9 @@ var (
 )
 
 func TestSanitizeName(t *testing.T) {
+	originalResolver := resolver
+	defer func() { resolver = originalResolver }()
+
 	cases := []struct {
 		in       string
 		v        string
@@ -62,6 +66,8 @@ func TestSanitizeName(t *testing.T) {
 		{"tool-win-x64.exe", "1.2.0-rc.1", "tool.exe", testWindowsAMDResolver},
 		{"bin_0.0.1_Windows_x86_64.exe", "0.0.1", "bin.exe", testWindowsAMDResolver},
 		{"tool-1.1.3-aarch64-apple-darwin", "v1.1.3", "tool", testDarwinARMResolver},
+		{"fff-mcp-x86_64-unknown-linux-gnu", "v0.10.1", "fff-mcp", testLinuxAMDResolver},
+		{"fff-mcp-aarch64-pc-windows-msvc.exe", "v0.10.1", "fff-mcp.exe", testWindowsAMDResolver},
 	}
 
 	for _, c := range cases {
@@ -74,7 +80,7 @@ func TestSanitizeName(t *testing.T) {
 }
 
 func TestProcessURLValidatesArchiveChecksum(t *testing.T) {
-	archiveData := buildTestZipArchive(t, map[string]string{"tool": "hello from archive"})
+	archiveData := buildTestZipArchive(t, map[string]string{"tool": "#!/bin/sh\nhello from archive"})
 	expectedHash := sha256.Sum256(archiveData)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -100,7 +106,7 @@ func TestProcessURLValidatesArchiveChecksum(t *testing.T) {
 		}
 	}
 
-	if string(data) != "hello from archive" {
+	if string(data) != "#!/bin/sh\nhello from archive" {
 		t.Fatalf("unexpected archive contents: %q", string(data))
 	}
 	if result.Name != "tool" {
@@ -174,7 +180,9 @@ func buildTestZipArchive(t *testing.T, files map[string]string) []byte {
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 	for name, contents := range files {
-		writer, err := zw.Create(name)
+		header := &zip.FileHeader{Name: name, Method: zip.Deflate}
+		header.SetMode(0o755)
+		writer, err := zw.CreateHeader(header)
 		if err != nil {
 			t.Fatalf("failed to create zip entry %s: %v", name, err)
 		}
@@ -331,12 +339,6 @@ func TestFilterAssets(t *testing.T) {
 			{Name: "cli-linux-amd64.gz", URL: "https://example.test/cli-linux-amd64.gz"},
 			{Name: "cli-linux-amd64-musl.gz", URL: "https://example.test/cli-linux-amd64-musl.gz"},
 		}}, "cli-linux-amd64.gz", testLinuxAMDResolver},
-		{args{"arrow-tools", []*Asset{
-			{Name: "csv2arrow-x86_64-unknown-linux-gnu.tar.xz", URL: "https://example.test/domoritz/arrow-tools/releases/download/v0.26.0/csv2arrow-x86_64-unknown-linux-gnu.tar.xz"},
-			{Name: "csv2parquet-x86_64-unknown-linux-gnu.tar.xz", URL: "https://example.test/domoritz/arrow-tools/releases/download/v0.26.0/csv2parquet-x86_64-unknown-linux-gnu.tar.xz"},
-			{Name: "json2arrow-x86_64-unknown-linux-gnu.tar.xz", URL: "https://example.test/domoritz/arrow-tools/releases/download/v0.26.0/json2arrow-x86_64-unknown-linux-gnu.tar.xz"},
-			{Name: "json2parquet-x86_64-unknown-linux-gnu.tar.xz", URL: "https://example.test/domoritz/arrow-tools/releases/download/v0.26.0/json2parquet-x86_64-unknown-linux-gnu.tar.xz"},
-		}}, "csv2arrow-x86_64-unknown-linux-gnu.tar.xz", testLinuxAMDResolver},
 		{args{"goreleaser", []*Asset{
 			{Name: "goreleaser_2.15.2_linux_amd64.flatpak", URL: "https://example.test/goreleaser/goreleaser/releases/download/v2.15.2/goreleaser_2.15.2_linux_amd64.flatpak"},
 			{Name: "goreleaser-2.15.2-1-x86_64.pkg.tar.zst", URL: "https://example.test/goreleaser/goreleaser/releases/download/v2.15.2/goreleaser-2.15.2-1-x86_64.pkg.tar.zst"},
@@ -394,6 +396,210 @@ func TestFilterAssetsSelect(t *testing.T) {
 	if result.Name != "tool-linux-amd64" {
 		t.Fatalf("expected tool-linux-amd64, got %s", result.Name)
 	}
+}
+
+func TestFilterAssetsSelectsFFFExecutableProduct(t *testing.T) {
+	originalResolver := resolver
+	defer func() { resolver = originalResolver }()
+	resolver = testDarwinARMResolver
+
+	assets := []*Asset{
+		{Name: "aarch64-apple-darwin.dylib"},
+		{Name: "aarch64-unknown-linux-gnu.so"},
+		{Name: "c-lib-aarch64-apple-darwin.dylib"},
+		{Name: "fff-mcp-aarch64-apple-darwin"},
+		{Name: "fff-mcp-x86_64-apple-darwin"},
+		{Name: "fff_search-0.10.1-cp310-abi3-macosx_11_0_arm64.whl"},
+		{Name: "fff_search-0.10.1.tar.gz"},
+		{Name: "x86_64-pc-windows-msvc.dll"},
+	}
+
+	f := NewFilter(&FilterOpts{NonInteractive: true})
+	result, err := f.FilterAssets("fff", assets, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Name != "fff-mcp-aarch64-apple-darwin" {
+		t.Fatalf("unexpected selected asset: %s", result.Name)
+	}
+
+	compatible := NewFilter(&FilterOpts{SkipScoring: true}).CompatibleAssets(assets, "")
+	if len(compatible) != 1 || compatible[0].Name != "fff-mcp-aarch64-apple-darwin" {
+		t.Fatalf("unexpected --all candidates: %+v", compatible)
+	}
+}
+
+func TestFilterAssetsFailsNonInteractiveForMultipleProducts(t *testing.T) {
+	originalResolver := resolver
+	defer func() { resolver = originalResolver }()
+	resolver = testLinuxAMDResolver
+
+	f := NewFilter(&FilterOpts{NonInteractive: true})
+	_, err := f.FilterAssets("arrow-tools", []*Asset{
+		{Name: "csv2arrow-x86_64-unknown-linux-gnu.tar.xz"},
+		{Name: "csv2parquet-x86_64-unknown-linux-gnu.tar.xz"},
+		{Name: "json2arrow-x86_64-unknown-linux-gnu.tar.xz"},
+	}, "")
+	if err == nil {
+		t.Fatal("expected multiple products to fail")
+	}
+	if !strings.Contains(err.Error(), "use --select") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestFilterAssetsExactSelectionPrecedesProductRanking(t *testing.T) {
+	originalResolver := resolver
+	defer func() { resolver = originalResolver }()
+	resolver = testLinuxAMDResolver
+
+	f := NewFilter(&FilterOpts{NonInteractive: true})
+	result, err := f.FilterAssets("tool", []*Asset{
+		{Name: "tool"},
+		{Name: "tool-linux-amd64"},
+	}, "tool")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Name != "tool" {
+		t.Fatalf("unexpected selected asset: %s", result.Name)
+	}
+}
+
+func TestFilterAssetsPrefersCLIProductAlias(t *testing.T) {
+	originalResolver := resolver
+	defer func() { resolver = originalResolver }()
+	resolver = testLinuxAMDResolver
+
+	f := NewFilter(&FilterOpts{PackageName: "weave", NonInteractive: true})
+	result, err := f.FilterAssets("weave", []*Asset{
+		{Name: "weave-cli-linux-amd64.tar.gz"},
+		{Name: "weave-driver-linux-amd64.tar.gz"},
+	}, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Name != "weave-cli-linux-amd64.tar.gz" {
+		t.Fatalf("unexpected selected asset: %s", result.Name)
+	}
+}
+
+func TestProcessURLRejectsWheelMetadata(t *testing.T) {
+	var archive bytes.Buffer
+	zw := zip.NewWriter(&archive)
+	header := &zip.FileHeader{Name: "fff_search-0.10.1.dist-info/WHEEL", Method: zip.Deflate}
+	header.SetMode(0o755)
+	w, err := zw.CreateHeader(header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte("Wheel-Version: 1.0\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(archive.Bytes())
+	}))
+	defer server.Close()
+
+	f := NewFilter(&FilterOpts{NonInteractive: true})
+	f.repoName = "fff"
+	_, err = f.ProcessURL(&FilteredAsset{Name: "fff_search-0.10.1.whl", URL: server.URL}, "", false)
+	if !errors.Is(err, ErrNoCompatibleFiles) {
+		t.Fatalf("expected no compatible executable, got %v", err)
+	}
+}
+
+func TestProcessURLRejectsExplicitLibrarySelection(t *testing.T) {
+	originalResolver := resolver
+	defer func() { resolver = originalResolver }()
+	resolver = testDarwinARMResolver
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("#!/bin/sh\n"))
+	}))
+	defer server.Close()
+
+	f := NewFilter(&FilterOpts{NonInteractive: true})
+	f.repoName = "tool"
+	_, err := f.ProcessURL(&FilteredAsset{Name: "tool-aarch64-apple-darwin.dylib", URL: server.URL}, "", false)
+	if !errors.Is(err, ErrNoCompatibleFiles) {
+		t.Fatalf("expected library selection to fail, got %v", err)
+	}
+}
+
+func TestProcessURLAcceptsUniversalMachOExecutable(t *testing.T) {
+	originalResolver := resolver
+	defer func() { resolver = originalResolver }()
+	resolver = testDarwinARMResolver
+
+	payload := buildTestFatMachO(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(payload)
+	}))
+	defer server.Close()
+
+	f := NewFilter(&FilterOpts{NonInteractive: true})
+	f.repoName = "tool"
+	result, err := f.ProcessURL(&FilteredAsset{Name: "tool-universal-apple-darwin", URL: server.URL}, "", false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_ = result.Source.(io.Closer).Close()
+}
+
+func buildTestFatMachO(t *testing.T) []byte {
+	t.Helper()
+
+	thinAMD64 := buildTestThinMachO(t, 0x01000007, 3)
+	thinARM64 := buildTestThinMachO(t, 0x0100000c, 0)
+
+	var fat bytes.Buffer
+	for _, value := range []uint32{
+		0xcafebabe, // fat Mach-O magic
+		2,
+		0x01000007,
+		3,
+		48,
+		uint32(len(thinAMD64)),
+		0,
+		0x0100000c,
+		0,
+		48 + uint32(len(thinAMD64)),
+		uint32(len(thinARM64)),
+		0,
+	} {
+		if err := binary.Write(&fat, binary.BigEndian, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := fat.Write(thinAMD64); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fat.Write(thinARM64); err != nil {
+		t.Fatal(err)
+	}
+	return fat.Bytes()
+}
+
+func buildTestThinMachO(t *testing.T, cpu, subtype uint32) []byte {
+	t.Helper()
+	var thin bytes.Buffer
+	for _, value := range []uint32{
+		0xfeedfacf,
+		cpu,
+		subtype,
+		2, // MH_EXECUTE
+		0, 0, 0, 0,
+	} {
+		if err := binary.Write(&thin, binary.LittleEndian, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return thin.Bytes()
 }
 
 func TestFilterAssetsPromptsWhenLibCRankingStillTies(t *testing.T) {
@@ -1018,7 +1224,7 @@ func TestFilterArchiveAssets(t *testing.T) {
 	as := []*Asset{
 		{Name: "mytool-1.0.0-darwin-arm64/LICENSE"},
 		{Name: "mytool-1.0.0-darwin-arm64/README.md"},
-		{Name: "mytool-1.0.0-darwin-arm64/mytool"},
+		{Name: "mytool-1.0.0-darwin-arm64/mytool", Executable: true},
 	}
 
 	filtered := filterArchiveAssets(as)
@@ -1041,7 +1247,7 @@ func TestFilterArchiveAssetsComplexLayout(t *testing.T) {
 		{Name: "mytool-v1.0.0-aarch64-apple-darwin/autocomplete/mytool.bash"},
 		{Name: "mytool-v1.0.0-aarch64-apple-darwin/autocomplete/mytool.fish"},
 		{Name: "mytool-v1.0.0-aarch64-apple-darwin/manpages/mytool.1.gz"},
-		{Name: "mytool-v1.0.0-aarch64-apple-darwin/mytool"},
+		{Name: "mytool-v1.0.0-aarch64-apple-darwin/mytool", Executable: true},
 		{Name: "mytool-v1.0.0-aarch64-apple-darwin/mytool.1"},
 	}
 
@@ -1061,8 +1267,8 @@ func TestFilterArchiveAssetsAllFiltered(t *testing.T) {
 	}
 
 	filtered := filterArchiveAssets(as)
-	if len(filtered) != len(as) {
-		t.Fatalf("expected fallback to original list (%d items), got %d", len(as), len(filtered))
+	if len(filtered) != 0 {
+		t.Fatalf("expected no archive candidates, got %d", len(filtered))
 	}
 }
 
@@ -1272,21 +1478,5 @@ func TestPreferArchiveExecutableCandidates(t *testing.T) {
 	}
 	if candidates[0].Name != "tool.exe" || candidates[1].Name != "tool" {
 		t.Fatalf("unexpected preferred archive candidates: %+v", candidates)
-	}
-}
-
-func TestRankByNameSimilarityHandlesNegativeScores(t *testing.T) {
-	matches := []*FilteredAsset{
-		{Name: "csv2arrow-linux-x86_64.tar.gz"},
-		{Name: "csv2parquet-linux-x86_64.tar.gz"},
-	}
-
-	ranked := rankByNameSimilarity("arrow-tools", matches)
-	if len(ranked) == 0 {
-		t.Fatal("expected at least one ranked match")
-	}
-
-	if ranked[0].Name != "csv2arrow-linux-x86_64.tar.gz" {
-		t.Fatalf("expected shortest negative-score match to win, got %s", ranked[0].Name)
 	}
 }

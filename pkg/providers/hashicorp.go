@@ -114,6 +114,7 @@ func (g *hashiCorp) Fetch(opts *FetchOpts) (*File, error) {
 		SkipScoring:    opts.All,
 		PackagePath:    opts.PackagePath,
 		SkipPathCheck:  opts.SkipPatchCheck,
+		PackageName:    opts.PackageName,
 		SystemPackage:  opts.SystemPackage,
 		PackageType:    opts.PackageType,
 		NonInteractive: opts.NonInteractive,
@@ -154,7 +155,14 @@ func (g *hashiCorp) Fetch(opts *FetchOpts) (*File, error) {
 
 	version := release.Version
 
-	file := &File{Data: outFile.Source, Name: outFile.Name, Version: version, ExpectedSHA: finalExpectedSHA}
+	file := &File{
+		Data:             outFile.Source,
+		Name:             outFile.Name,
+		Version:          version,
+		ReleaseTagPrefix: fetchedReleaseTagPrefix(version, opts.ReleaseTagPrefix),
+		ExpectedSHA:      finalExpectedSHA,
+		PackagePath:      outFile.PackagePath,
+	}
 
 	return file, nil
 }

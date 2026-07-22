@@ -156,8 +156,13 @@ func (root *removeCmd) resolveTargets(cmd *cobra.Command, bins map[string]*confi
 				}
 			}
 			if err != nil && strings.Contains(err.Error(), "not managed by bin") {
-				fmt.Fprintf(cmd.ErrOrStderr(), "binary %s is not managed by bin, skipping\n", p)
-				continue
+				if aliasPath := findManagedBinByAlias(bins, p); aliasPath != "" {
+					bp = aliasPath
+					err = nil
+				} else {
+					fmt.Fprintf(cmd.ErrOrStderr(), "binary %s is not managed by bin, skipping\n", p)
+					continue
+				}
 			}
 			if err != nil {
 				return nil, err
