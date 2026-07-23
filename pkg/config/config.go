@@ -2,6 +2,7 @@ package config
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -42,11 +43,15 @@ type config struct {
 	// DefaultPath might not be expanded so it's important that
 	// the caller expands this variable with os.ExpandEnv(string)
 	// if necessary
-	DefaultPath  string             `json:"default_path"`
-	DefaultChmod string             `json:"default_chmod,omitempty"`
-	UseGHAuth    bool               `json:"use_gh_for_github_token,omitempty"`
-	Bins         map[string]*Binary `json:"bins"`
-	Hooks        []RunHook          `json:"hooks,omitempty"`
+	DefaultPath  string `json:"default_path"`
+	DefaultChmod string `json:"default_chmod,omitempty"`
+	UseGHAuth    bool   `json:"use_gh_for_github_token,omitempty"`
+	// useGHAuthExplicit tracks whether use_gh_for_github_token was present in
+	// the JSON so we can default absent values to true while honoring an
+	// explicit false. It is not serialized.
+	useGHAuthExplicit bool               `json:"-"`
+	Bins              map[string]*Binary `json:"bins"`
+	Hooks             []RunHook          `json:"hooks,omitempty"`
 }
 
 // HookType represents lifecycle hook event names.
@@ -254,9 +259,26 @@ func loadConfigLocked(configPath string) (config, bool, error) {
 	}
 	defer f.Close()
 
+	// Read the raw JSON first so we can detect which keys were explicitly
+	// present. This lets us apply defaults (e.g. use_gh_for_github_token=true)
+	// only when the user did not set a value, while still honoring an explicit
+	// false.
+	rawBytes, err := io.ReadAll(f)
+	if err != nil {
+		return config{}, false, err
+	}
+
+	rawKeys := map[string]json.RawMessage{}
+	if len(bytes.TrimSpace(rawBytes)) > 0 {
+		if err := json.Unmarshal(rawBytes, &rawKeys); err != nil {
+			return config{}, false, err
+		}
+	}
+
 	loaded := config{}
-	if err := json.NewDecoder(f).Decode(&loaded); err != nil {
-		if err != io.EOF {
+	loaded.useGHAuthExplicit = jsonKeyPresent(rawKeys, "use_gh_for_github_token")
+	if len(rawBytes) > 0 {
+		if err := json.Unmarshal(rawBytes, &loaded); err != nil {
 			return config{}, false, err
 		}
 	}
@@ -268,7 +290,20 @@ func loadConfigLocked(configPath string) (config, bool, error) {
 		loaded.DefaultChmod = "0755"
 	}
 
+	// Default use_gh_for_github_token to true so an authenticated `gh` CLI is
+	// reused automatically without requiring `bin set-config`. An explicit
+	// `false` in the config file is honored via useGHAuthExplicit.
+	if !loaded.useGHAuthExplicit {
+		loaded.UseGHAuth = true
+	}
+
 	return loaded, created, nil
+}
+
+// jsonKeyPresent reports whether the given key appears in the raw JSON object.
+func jsonKeyPresent(rawKeys map[string]json.RawMessage, key string) bool {
+	_, ok := rawKeys[key]
+	return ok
 }
 
 func mutateConfigLocked(mutate func(*config) error) error {

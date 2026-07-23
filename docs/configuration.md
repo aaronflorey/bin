@@ -21,7 +21,7 @@ Defined in `pkg/config/config.go`:
 | --- | --- | --- |
 | `default_path` | string | Default install directory. |
 | `default_chmod` | string | Unix default is `0755` when unset (`pkg/config/config.go`). |
-| `use_gh_for_github_token` | bool | Enables `gh auth token` fallback for GitHub.com requests when no GitHub token env var is set. |
+| `use_gh_for_github_token` | bool | Enables `gh auth token` fallback for GitHub.com requests when no GitHub token env var is set. Defaults to `true`; set to `false` to disable. |
 | `bins` | object map | Managed binaries keyed by config path. |
 | `hooks` | array | Lifecycle hooks (`pre-install`, `post-install`, `pre-update`, `post-update`, `pre-remove`, `post-remove`). |
 
