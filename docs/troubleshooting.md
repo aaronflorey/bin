@@ -11,6 +11,7 @@
 
 - No GitHub token is configured, so `bin` makes anonymous requests (limited to 60/hour).
 - A token is set but the rate limit is exhausted.
+- `use_gh_for_github_token` was explicitly disabled and no env token is set.
 
 **Diagnose with debug logging**
 
@@ -22,14 +23,14 @@
 
 **Fix**
 
-Provide a token via one of:
+`use_gh_for_github_token` defaults to `true`, so an authenticated `gh` CLI is reused automatically. If it was disabled, re-enable it, or provide a token via env:
 
 ```bash
+bin set-config use_gh_for_github_token true
+# or
 export GITHUB_AUTH_TOKEN=ghp_xxx
 # or
 export GITHUB_TOKEN=ghp_xxx
-# or let bin reuse an authenticated gh CLI:
-bin set-config use_gh_for_github_token true
 ```
 
 The token needs no scopes for public repos; it only raises the rate limit. See the [GitHub provider configuration](../README.md#github-releases) for `GHES_*` enterprise variables.

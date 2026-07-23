@@ -230,7 +230,11 @@ You can also enable GitHub CLI token lookup with:
 bin set-config use_gh_for_github_token true
 ```
 
-When enabled, `bin` will run `gh auth token` for GitHub.com requests when no `GITHUB_AUTH_TOKEN`/`GITHUB_TOKEN` is set.
+When enabled, `bin` will run `gh auth token` for GitHub.com requests when no `GITHUB_AUTH_TOKEN`/`GITHUB_TOKEN` is set. This is enabled by default; set it to `false` to disable:
+
+```shell
+bin set-config use_gh_for_github_token false
+```
 
 #### Usage
 

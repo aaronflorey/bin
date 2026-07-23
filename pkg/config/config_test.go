@@ -415,3 +415,72 @@ func TestConfigHookHelperProcess(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckAndLoadDefaultsUseGHAuthToTrue(t *testing.T) {
+	t.Cleanup(func() {
+		cfg = config{}
+	})
+
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	defaultPath := filepath.Join(t.TempDir(), "bin")
+	t.Setenv("BIN_CONFIG", configPath)
+	t.Setenv("BIN_EXE_DIR", defaultPath)
+
+	if err := os.WriteFile(configPath, []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("failed to seed config file: %v", err)
+	}
+
+	if err := CheckAndLoad(); err != nil {
+		t.Fatalf("CheckAndLoad returned error: %v", err)
+	}
+
+	if !cfg.UseGHAuth {
+		t.Fatalf("expected UseGHAuth to default to true when key is absent, got false")
+	}
+}
+
+func TestCheckAndLoadHonorsExplicitUseGHAuthFalse(t *testing.T) {
+	t.Cleanup(func() {
+		cfg = config{}
+	})
+
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	defaultPath := filepath.Join(t.TempDir(), "bin")
+	t.Setenv("BIN_CONFIG", configPath)
+	t.Setenv("BIN_EXE_DIR", defaultPath)
+
+	if err := os.WriteFile(configPath, []byte(`{"use_gh_for_github_token": false}`+"\n"), 0o644); err != nil {
+		t.Fatalf("failed to seed config file: %v", err)
+	}
+
+	if err := CheckAndLoad(); err != nil {
+		t.Fatalf("CheckAndLoad returned error: %v", err)
+	}
+
+	if cfg.UseGHAuth {
+		t.Fatalf("expected UseGHAuth to stay false when explicitly set, got true")
+	}
+}
+
+func TestCheckAndLoadHonorsExplicitUseGHAuthTrue(t *testing.T) {
+	t.Cleanup(func() {
+		cfg = config{}
+	})
+
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	defaultPath := filepath.Join(t.TempDir(), "bin")
+	t.Setenv("BIN_CONFIG", configPath)
+	t.Setenv("BIN_EXE_DIR", defaultPath)
+
+	if err := os.WriteFile(configPath, []byte(`{"use_gh_for_github_token": true}`+"\n"), 0o644); err != nil {
+		t.Fatalf("failed to seed config file: %v", err)
+	}
+
+	if err := CheckAndLoad(); err != nil {
+		t.Fatalf("CheckAndLoad returned error: %v", err)
+	}
+
+	if !cfg.UseGHAuth {
+		t.Fatalf("expected UseGHAuth to be true when explicitly set, got false")
+	}
+}
