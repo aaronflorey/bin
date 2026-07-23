@@ -179,8 +179,14 @@ func (root *installCmd) installTarget(cmd *cobra.Command, target installTarget) 
 			log.Infof("Binary already exists in config (%s). Updating it instead", existing.Path)
 			strategy := lifecycleForMode(existing.InstallMode)
 			attemptFetchOpts := resolved.fetchOpts
+			requestedReleaseTagPrefix := attemptFetchOpts.ReleaseTagPrefix
 			if err := strategy.applyStoredFetch(existing, &attemptFetchOpts); err != nil {
 				return err
+			}
+			// Preserve stored asset metadata, but let an explicit release URL or a
+			// lane discovered for this install request select the release lane.
+			if strings.TrimSpace(requestedReleaseTagPrefix) != "" {
+				attemptFetchOpts.ReleaseTagPrefix = requestedReleaseTagPrefix
 			}
 
 			if root.opts.systemPackage {

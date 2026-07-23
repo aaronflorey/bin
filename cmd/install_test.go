@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -232,6 +233,117 @@ func TestInstallIgnoresReleaseLaneDiscoveryWhenHistoryUnsupported(t *testing.T) 
 	}
 	if attempts != 1 {
 		t.Fatalf("expected one install attempt, got %d", attempts)
+	}
+}
+
+func TestInstallExistingManagedBinaryReleaseLanePrecedence(t *testing.T) {
+	compatibleAsset := fmt.Sprintf("tool_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH)
+	tests := []struct {
+		name           string
+		installMode    string
+		packageType    string
+		newProvider    func() providers.Provider
+		wantPrefix     string
+		wantSystemPack bool
+	}{
+		{
+			name:        "binary uses the single discovered bare lane",
+			installMode: installModeBinary,
+			newProvider: func() providers.Provider {
+				return &staticProvider{history: []*providers.ReleaseInfo{{
+					Version: "1.1.0",
+					Assets:  []string{compatibleAsset},
+				}}}
+			},
+			wantPrefix: providers.BareReleaseTagPrefix,
+		},
+		{
+			name:        "system package uses the single discovered bare lane",
+			installMode: installModeSystemPackage,
+			packageType: "dmg",
+			newProvider: func() providers.Provider {
+				return &staticProvider{history: []*providers.ReleaseInfo{{
+					Version: "1.1.0",
+					Assets:  []string{compatibleAsset},
+				}}}
+			},
+			wantPrefix:     providers.BareReleaseTagPrefix,
+			wantSystemPack: true,
+		},
+		{
+			name:        "binary keeps stored lane when no lane is discovered",
+			installMode: installModeBinary,
+			newProvider: func() providers.Provider {
+				return &staticProvider{}
+			},
+			wantPrefix: "v",
+		},
+		{
+			name:           "system package keeps stored lane when history is unsupported",
+			installMode:    installModeSystemPackage,
+			packageType:    "dmg",
+			newProvider:    func() providers.Provider { return testFetchProvider{} },
+			wantPrefix:     "v",
+			wantSystemPack: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defaultPath := setupTestConfig(t)
+			existingPath := filepath.Join(defaultPath, "tool")
+			config.Get().Bins[existingPath] = &config.Binary{
+				Path:             existingPath,
+				RemoteName:       "tool",
+				URL:              "github.com/acme/tool",
+				Version:          "v1.0.0",
+				InstallMode:      tt.installMode,
+				PackageType:      tt.packageType,
+				PackagePath:      "nested/tool",
+				ReleaseTagPrefix: "v",
+			}
+
+			originalRegistry := lifecycleRegistry
+			originalProviderFactory := installProviderFactory
+			defer func() {
+				lifecycleRegistry = originalRegistry
+				installProviderFactory = originalProviderFactory
+			}()
+
+			installProviderFactory = func(string, string) (providers.Provider, error) {
+				return tt.newProvider(), nil
+			}
+
+			registry := make(map[string]lifecycleStrategy, len(originalRegistry))
+			for mode, strategy := range originalRegistry {
+				registry[mode] = strategy
+			}
+			strategy := registry[tt.installMode]
+			var got providers.FetchOpts
+			strategy.install = func(opts InstallOpts) (*InstallResult, error) {
+				got = opts.FetchOpts
+				return &InstallResult{Name: "tool", Version: "1.1.0", Path: existingPath}, nil
+			}
+			registry[tt.installMode] = strategy
+			lifecycleRegistry = registry
+
+			root := newInstallCmd()
+			if err := root.installTarget(root.cmd, installTarget{url: "github.com/acme/tool", path: existingPath}); err != nil {
+				t.Fatalf("unexpected install error: %v", err)
+			}
+			if got.ReleaseTagPrefix != tt.wantPrefix {
+				t.Fatalf("unexpected release tag prefix: got %q, want %q", got.ReleaseTagPrefix, tt.wantPrefix)
+			}
+			if got.PackagePath != "nested/tool" {
+				t.Fatalf("stored package path was not preserved: %q", got.PackagePath)
+			}
+			if got.SystemPackage != tt.wantSystemPack {
+				t.Fatalf("unexpected system-package fetch flag: got %t, want %t", got.SystemPackage, tt.wantSystemPack)
+			}
+			if tt.wantSystemPack && got.PackageType != tt.packageType {
+				t.Fatalf("stored package type was not preserved: got %q, want %q", got.PackageType, tt.packageType)
+			}
+		})
 	}
 }
 
