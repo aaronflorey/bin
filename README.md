@@ -431,7 +431,7 @@ There are some bugs, and the code has not been tested due to a lack of time, but
 
 ## 🛠️ Development
 
-Local setup, build, test, lint, and release commands are documented in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+Local setup, build, test, lint, and release commands are documented in [docs/development.md](docs/development.md).
 
 ## 📄 License
 
