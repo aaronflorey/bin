@@ -199,7 +199,7 @@ func isSystemPackageArchCompatible(name string) bool {
 func filterArchiveAssets(as []*Asset) []*Asset {
 	filtered := make([]*Asset, 0, len(as))
 	for _, a := range as {
-		if !a.Executable || looksLikeMetadataAsset(a.Name) || looksLikeArchiveJunk(a.Name) {
+		if looksLikeMetadataAsset(a.Name) || looksLikeArchiveJunk(a.Name) {
 			log.Debugf("Skipping non-binary archive asset %s", a.Name)
 			continue
 		}
