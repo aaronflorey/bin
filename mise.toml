@@ -24,7 +24,7 @@ run = "gofmt -w -s ./."
 
 [tasks.fmt-check]
 description = "Check Go source formatting without writing"
-run = "@files=$(gofmt -l -s ./.); if [ -n \"$files\" ]; then printf '%s\\n' \"$files\"; exit 1; fi"
+run = "files=$(gofmt -l -s ./.); if [ -n \"$files\" ]; then printf '%s\\n' \"$files\"; exit 1; fi"
 
 [tasks.mod-check]
 description = "Verify go.mod/go.sum are tidy"

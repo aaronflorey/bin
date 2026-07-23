@@ -356,6 +356,39 @@ func (f *Filter) FilterAssets(repoName string, as []*Asset, autoSelect string) (
 	return gf, nil
 }
 
+// CompatibleAssets returns installable assets compatible with the current
+// platform, without applying repository-name scoring or prompting.
+func (f *Filter) CompatibleAssets(as []*Asset, autoSelect string) []*FilteredAsset {
+	if f.opts == nil {
+		f.opts = &FilterOpts{}
+	}
+
+	as = filterInstallableAssets(f.opts, as)
+	as = filterTargetCompatibleAssets(as, true)
+
+	compatible := make([]*FilteredAsset, 0, len(as))
+	for _, a := range as {
+		if !f.supportsAssetExt(a.Name) {
+			continue
+		}
+		compatible = append(compatible, &FilteredAsset{
+			Name:        a.Name,
+			DisplayName: a.DisplayName,
+			URL:         a.URL,
+		})
+	}
+
+	if autoSelect == "" {
+		return compatible
+	}
+	for _, a := range compatible {
+		if a.String() == autoSelect {
+			return []*FilteredAsset{a}
+		}
+	}
+	return compatible
+}
+
 func osSpecificExtensionScore(extension string) int {
 	if strings.EqualFold(extension, "AppImage") {
 		// AppImages are Linux-compatible, but should not outrank native Linux binaries.

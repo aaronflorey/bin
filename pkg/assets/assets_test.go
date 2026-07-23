@@ -1224,7 +1224,7 @@ func TestFilterArchiveAssets(t *testing.T) {
 	as := []*Asset{
 		{Name: "mytool-1.0.0-darwin-arm64/LICENSE"},
 		{Name: "mytool-1.0.0-darwin-arm64/README.md"},
-		{Name: "mytool-1.0.0-darwin-arm64/mytool", Executable: true},
+		{Name: "mytool-1.0.0-darwin-arm64/mytool"},
 	}
 
 	filtered := filterArchiveAssets(as)
@@ -1247,7 +1247,7 @@ func TestFilterArchiveAssetsComplexLayout(t *testing.T) {
 		{Name: "mytool-v1.0.0-aarch64-apple-darwin/autocomplete/mytool.bash"},
 		{Name: "mytool-v1.0.0-aarch64-apple-darwin/autocomplete/mytool.fish"},
 		{Name: "mytool-v1.0.0-aarch64-apple-darwin/manpages/mytool.1.gz"},
-		{Name: "mytool-v1.0.0-aarch64-apple-darwin/mytool", Executable: true},
+		{Name: "mytool-v1.0.0-aarch64-apple-darwin/mytool"},
 		{Name: "mytool-v1.0.0-aarch64-apple-darwin/mytool.1"},
 	}
 
