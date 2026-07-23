@@ -309,6 +309,7 @@ func (f *Filter) FilterAssets(repoName string, as []*Asset, autoSelect string) (
 
 	var gf *FilteredAsset
 	if len(matches) == 0 {
+		log.Debugf("No compatible assets found for %q. Considered %d assets: %s", repoName, len(as), summarizeAssetNames(as))
 		return nil, fmt.Errorf("%w: Could not find any compatible files", ErrNoCompatibleFiles)
 	} else if len(matches) > 1 {
 		// If an auto-selection was provided, find the first match by name
@@ -1176,6 +1177,7 @@ func isSingleAppBundleArchive(entries map[string]string) (string, bool) {
 func (f *Filter) processTar(name string, r io.Reader, autoSelect string) (*finalFile, error) {
 	tr := tar.NewReader(r)
 	tarFiles := map[string]string{}
+	allEntries := []string{}
 	tempDir, err := os.MkdirTemp("", "bin-tar-*")
 	if err != nil {
 		return nil, err
@@ -1188,7 +1190,7 @@ func (f *Filter) processTar(name string, r io.Reader, autoSelect string) (*final
 	}()
 
 	if len(f.opts.PackagePath) > 0 {
-		log.Debugf("Processing tag with PackagePath %s\n", f.opts.PackagePath)
+		log.Debugf("Processing TAR archive with PackagePath %q", f.opts.PackagePath)
 	}
 	for {
 		header, err := tr.Next()
@@ -1200,7 +1202,10 @@ func (f *Filter) processTar(name string, r io.Reader, autoSelect string) (*final
 			continue
 		}
 
-		if !f.matchesPackagePath(header.Name) {
+		allEntries = append(allEntries, header.Name)
+		matchesPackagePath := f.matchesPackagePath(header.Name)
+		log.Debugf("TAR archive entry %q: PackagePath match=%t", header.Name, matchesPackagePath)
+		if !matchesPackagePath {
 			continue
 		}
 
@@ -1223,7 +1228,8 @@ func (f *Filter) processTar(name string, r io.Reader, autoSelect string) (*final
 		}
 	}
 	if len(tarFiles) == 0 {
-		return nil, fmt.Errorf("no files found in tar archive, use -p flag to manually select . PackagePath [%s]", f.opts.PackagePath)
+		log.Debugf("TAR archive %q contained %d entries: %s", name, len(allEntries), summarizeEntryNames(allEntries))
+		return nil, fmt.Errorf("no files found in tar archive, use -p flag to manually select . PackagePath [%s]. Archive contained %d entries: %s", f.opts.PackagePath, len(allEntries), summarizeEntryNames(allEntries))
 	}
 
 	if bundleName, ok := isSingleAppBundleArchive(tarFiles); ok {
@@ -1237,6 +1243,7 @@ func (f *Filter) processTar(name string, r io.Reader, autoSelect string) (*final
 	as = filterArchiveAssets(as)
 	choice, err := f.selectArchiveAsset(name, as, autoSelect)
 	if err != nil {
+		log.Debugf("TAR archive %q: no compatible entry selected. %d entries after filtering: %s", name, len(as), summarizeAssetNames(as))
 		return nil, err
 	}
 	selectedFile := choice.String()
@@ -1282,6 +1289,7 @@ func (f *Filter) processZip(name string, r io.Reader, autoSelect string) (*final
 	zr := zipstream.NewReader(r)
 
 	zipFiles := map[string]string{}
+	allEntries := []string{}
 	tempDir, err := os.MkdirTemp("", "bin-zip-*")
 	if err != nil {
 		return nil, err
@@ -1294,7 +1302,7 @@ func (f *Filter) processZip(name string, r io.Reader, autoSelect string) (*final
 	}()
 
 	if len(f.opts.PackagePath) > 0 {
-		log.Debugf("Processing tag with PackagePath %s\n", f.opts.PackagePath)
+		log.Debugf("Processing ZIP archive with PackagePath %q", f.opts.PackagePath)
 	}
 	for {
 		header, err := zr.Next()
@@ -1306,7 +1314,10 @@ func (f *Filter) processZip(name string, r io.Reader, autoSelect string) (*final
 			continue
 		}
 
-		if !f.matchesPackagePath(header.Name) {
+		allEntries = append(allEntries, header.Name)
+		matchesPackagePath := f.matchesPackagePath(header.Name)
+		log.Debugf("ZIP archive entry %q: PackagePath match=%t", header.Name, matchesPackagePath)
+		if !matchesPackagePath {
 			continue
 		}
 
@@ -1327,7 +1338,8 @@ func (f *Filter) processZip(name string, r io.Reader, autoSelect string) (*final
 		zipFiles[header.Name] = entryFile.Name()
 	}
 	if len(zipFiles) == 0 {
-		return nil, fmt.Errorf("No files found in zip archive. PackagePath [%s]", f.opts.PackagePath)
+		log.Debugf("ZIP archive %q contained %d entries: %s", name, len(allEntries), summarizeEntryNames(allEntries))
+		return nil, fmt.Errorf("No files found in zip archive. PackagePath [%s]. Archive contained %d entries: %s", f.opts.PackagePath, len(allEntries), summarizeEntryNames(allEntries))
 	}
 
 	if bundleName, ok := isSingleAppBundleArchive(zipFiles); ok {
@@ -1341,6 +1353,7 @@ func (f *Filter) processZip(name string, r io.Reader, autoSelect string) (*final
 	as = filterArchiveAssets(as)
 	choice, err := f.selectArchiveAsset(name, as, autoSelect)
 	if err != nil {
+		log.Debugf("ZIP archive %q: no compatible entry selected. %d entries after filtering: %s", name, len(as), summarizeAssetNames(as))
 		return nil, err
 	}
 	selectedFile := choice.String()
@@ -1489,4 +1502,39 @@ func filterAssetsBy(as []*Asset, skip func(name string) bool, label string) []*A
 		return as
 	}
 	return filtered
+}
+
+// summarizeEntryNames renders a capped, sorted, comma-separated list of entry
+// names for inclusion in error/debug output. At most maxSummaryEntries names
+// are shown, followed by an ellipsis and the total count when truncated.
+func summarizeEntryNames(names []string) string {
+	return summarizeNames(names, maxSummaryEntries)
+}
+
+// summarizeAssetNames renders a capped list of asset names from a slice of
+// *Asset, using each asset's String() representation.
+func summarizeAssetNames(as []*Asset) string {
+	names := make([]string, 0, len(as))
+	for _, a := range as {
+		if a == nil {
+			continue
+		}
+		names = append(names, a.String())
+	}
+	return summarizeNames(names, maxSummaryEntries)
+}
+
+const maxSummaryEntries = 50
+
+func summarizeNames(names []string, limit int) string {
+	if len(names) == 0 {
+		return "(none)"
+	}
+	sorted := make([]string, len(names))
+	copy(sorted, names)
+	sort.Strings(sorted)
+	if len(sorted) > limit {
+		return fmt.Sprintf("[%s, ...and %d more]", strings.Join(sorted[:limit], ", "), len(sorted)-limit)
+	}
+	return "[" + strings.Join(sorted, ", ") + "]"
 }

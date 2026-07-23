@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -41,8 +42,11 @@ func (g *gitHub) Fetch(opts *FetchOpts) (*File, error) {
 		}
 		log.Infof("Getting %s release for %s/%s", g.tag, g.owner, g.repo)
 		ctx, cancel := newProviderRequestContext()
-		release, _, err = g.client.Repositories.GetReleaseByTag(ctx, g.owner, g.repo, g.tag)
+		release, resp, err = g.client.Repositories.GetReleaseByTag(ctx, g.owner, g.repo, g.tag)
 		cancel()
+		if err != nil {
+			g.logGitHubResponse(resp, err, "GetReleaseByTag")
+		}
 	} else if opts.ReleaseTagPrefix != "" {
 		log.Infof("Getting latest %q release for %s/%s", opts.ReleaseTagPrefix, g.owner, g.repo)
 		history, historyErr := g.ListReleases(100)
@@ -54,15 +58,21 @@ func (g *gitHub) Fetch(opts *FetchOpts) (*File, error) {
 			return nil, fmt.Errorf("repository %s/%s does not have a release with prefix %q", g.owner, g.repo, opts.ReleaseTagPrefix)
 		}
 		ctx, cancel := newProviderRequestContext()
-		release, _, err = g.client.Repositories.GetReleaseByTag(ctx, g.owner, g.repo, selected.Version)
+		release, resp, err = g.client.Repositories.GetReleaseByTag(ctx, g.owner, g.repo, selected.Version)
 		cancel()
+		if err != nil {
+			g.logGitHubResponse(resp, err, "GetReleaseByTag")
+		}
 	} else {
 		log.Infof("Getting latest release for %s/%s", g.owner, g.repo)
 		ctx, cancel := newProviderRequestContext()
 		release, resp, err = g.client.Repositories.GetLatestRelease(ctx, g.owner, g.repo)
 		cancel()
-		if resp != nil && resp.StatusCode == http.StatusNotFound {
+		if err != nil {
+			g.logGitHubResponse(resp, err, "GetLatestRelease")
+		} else if resp != nil && resp.StatusCode == http.StatusNotFound {
 			err = fmt.Errorf("repository %s/%s does not have releases", g.owner, g.repo)
+			g.logGitHubResponse(resp, err, "GetLatestRelease")
 		}
 	}
 
@@ -150,8 +160,9 @@ func (g *gitHub) GetLatestVersion() (*ReleaseInfo, error) {
 	ctx, cancel := newProviderRequestContext()
 	defer cancel()
 
-	release, _, err := g.client.Repositories.GetLatestRelease(ctx, g.owner, g.repo)
+	release, resp, err := g.client.Repositories.GetLatestRelease(ctx, g.owner, g.repo)
 	if err != nil {
+		g.logGitHubResponse(resp, err, "GetLatestRelease")
 		return nil, err
 	}
 
@@ -166,8 +177,9 @@ func (g *gitHub) ListReleases(limit int) ([]*ReleaseInfo, error) {
 	ctx, cancel := newProviderRequestContext()
 	defer cancel()
 
-	releases, _, err := g.client.Repositories.ListReleases(ctx, g.owner, g.repo, &github.ListOptions{PerPage: limit})
+	releases, resp, err := g.client.Repositories.ListReleases(ctx, g.owner, g.repo, &github.ListOptions{PerPage: limit})
 	if err != nil {
+		g.logGitHubResponse(resp, err, "ListReleases")
 		return nil, err
 	}
 
@@ -234,26 +246,50 @@ func newGitHub(u *url.URL) (Provider, error) {
 	tag := releaseTagFromSegments(segments)
 
 	token := os.Getenv("GITHUB_AUTH_TOKEN")
+	tokenSource := ""
 	if len(token) == 0 {
 		token = os.Getenv("GITHUB_TOKEN")
+		if len(token) > 0 {
+			tokenSource = "GITHUB_TOKEN"
+		}
+	} else {
+		tokenSource = "GITHUB_AUTH_TOKEN"
 	}
 
 	// GHES client
 	gbu := os.Getenv("GHES_BASE_URL")
 	guu := os.Getenv("GHES_UPLOAD_URL")
 	gau := os.Getenv("GHES_AUTH_TOKEN")
+	ghesConfigured := len(gbu) > 0 && len(guu) > 0 && len(gau) > 0
 
-	if token == "" && (len(gbu) == 0 || len(guu) == 0 || len(gau) == 0) && config.Get().UseGHAuth {
+	if token == "" && !ghesConfigured && config.Get().UseGHAuth {
+		log.Debugf("GitHub token config: use_gh_for_github_token is enabled, attempting gh CLI token lookup")
 		if out, err := runGHAuthToken(); err == nil {
 			token = strings.TrimSpace(string(out))
+			if token != "" {
+				tokenSource = "gh CLI (gh auth token)"
+				log.Debugf("GitHub token acquired from gh CLI")
+			} else {
+				log.Debugf("gh auth token returned an empty token")
+			}
 		} else {
 			log.Debugf("Could not get GitHub token from gh CLI: %v", err)
 		}
+	} else if token == "" && !ghesConfigured && !config.Get().UseGHAuth {
+		log.Debugf("GitHub token config: use_gh_for_github_token is disabled; gh CLI token lookup skipped")
+	}
+
+	if ghesConfigured {
+		log.Debugf("GitHub token source: GHES_AUTH_TOKEN (base=%q upload=%q)", gbu, guu)
+	} else if token != "" {
+		log.Debugf("GitHub token source: %s", tokenSource)
+	} else {
+		log.Warnf("No GitHub token found (GITHUB_AUTH_TOKEN, GITHUB_TOKEN, or gh CLI via use_gh_for_github_token); using anonymous requests which are rate-limited to 60/hour. See `bin set-config use_gh_for_github_token true`")
 	}
 
 	tc := newProviderHTTPClient()
 
-	if len(gbu) > 0 && len(guu) > 0 && len(gau) > 0 {
+	if ghesConfigured {
 		tc = newProviderOAuthHTTPClient(gau)
 	} else if token != "" {
 		tc = newProviderOAuthHTTPClient(token)
@@ -262,7 +298,7 @@ func newGitHub(u *url.URL) (Provider, error) {
 	var client *github.Client
 	var err error
 
-	if len(gbu) > 0 && len(guu) > 0 && len(gau) > 0 {
+	if ghesConfigured {
 		if client, err = github.NewClient(tc).WithEnterpriseURLs(gbu, guu); err != nil {
 			return nil, fmt.Errorf("error initializing GHES client %v", err)
 		}
@@ -271,4 +307,55 @@ func newGitHub(u *url.URL) (Provider, error) {
 	}
 
 	return &gitHub{url: u, client: client, owner: segments[0], repo: segments[1], tag: tag, token: token}, nil
+}
+
+// logGitHubResponse logs the HTTP status and rate-limit state for a GitHub API
+// response. It is safe to call with a nil resp. When err is a known GitHub
+// error type (*github.RateLimitError or *github.ErrorResponse), the response
+// status and message are logged at warn level so rate-limit and auth problems
+// are visible even without --debug.
+func (g *gitHub) logGitHubResponse(resp *github.Response, err error, operation string) {
+	authed := g.token != ""
+	if resp == nil || resp.Response == nil {
+		if err != nil {
+			log.WithError(err).Warnf("GitHub %s failed for %s/%s (authenticated=%t) with no response", operation, g.owner, g.repo, authed)
+		}
+		return
+	}
+
+	status := resp.StatusCode
+	rate := resp.Rate
+	rateSummary := fmt.Sprintf("rate %d/%d remaining, resets %s", rate.Remaining, rate.Limit, formatRateResetTime(rate.Reset.Time))
+
+	if err != nil {
+		var rateLimitErr *github.RateLimitError
+		var errorResp *github.ErrorResponse
+		switch {
+		case errors.As(err, &rateLimitErr):
+			log.Warnf("GitHub %s for %s/%s returned rate-limit error %d (authenticated=%t): %s. %s",
+				operation, g.owner, g.repo, status, authed, rateLimitErr.Message, rateSummary)
+		case errors.As(err, &errorResp):
+			log.Warnf("GitHub %s for %s/%s failed with status %d (authenticated=%t): %s. %s",
+				operation, g.owner, g.repo, status, authed, errorResp.Message, rateSummary)
+		default:
+			log.WithError(err).Warnf("GitHub %s for %s/%s failed with status %d (authenticated=%t). %s",
+				operation, g.owner, g.repo, status, authed, rateSummary)
+		}
+		return
+	}
+
+	log.Debugf("GitHub %s for %s/%s: status %d (authenticated=%t). %s", operation, g.owner, g.repo, status, authed, rateSummary)
+	if rate.Remaining <= 5 && rate.Limit > 0 {
+		log.Warnf("GitHub rate limit almost exhausted for %s/%s: %d/%d remaining, resets %s (authenticated=%t)",
+			g.owner, g.repo, rate.Remaining, rate.Limit, formatRateResetTime(rate.Reset.Time), authed)
+	}
+}
+
+// formatRateResetTime renders a rate-limit reset time as a local clock time,
+// or "unknown" if it is the zero value.
+func formatRateResetTime(t time.Time) string {
+	if t.IsZero() {
+		return "unknown"
+	}
+	return t.Local().Format("15:04:05 MST")
 }
