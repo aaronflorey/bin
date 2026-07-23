@@ -50,6 +50,10 @@ This repository has a [code of conduct](CODE_OF_CONDUCT.md), This repository has
 
 ## Development
 
+### Prerequisites
+
+Install [`mise`](https://mise.jdx.dev/) and run `mise install` to pick up the Go version and `hk` Git hooks from `mise.toml`.
+
 ### Linting
 
 We use `golangci-lint` in order to maintain a good code quality and a consistent style.
@@ -65,3 +69,21 @@ Lint the source code by executing:
 ```shell
 golangci-lint run ./...
 ```
+
+Or via the `mise` task:
+
+```shell
+mise run lint
+```
+
+Use `mise run verify` for the full non-mutating check suite (`go mod download`, formatting, `go mod tidy -diff`, and `golangci-lint run`), and `mise run fix` to apply formatting and module tidy fixes.
+
+### Git hooks
+
+Install the repository hooks once per clone:
+
+```shell
+mise run hooks
+```
+
+This runs `hk install --mise`, wiring `hk.pkl` into `.git/hooks` with the `mise` environment active. Hooks enforce `gofmt` on staged files and [Conventional Commits](https://www.conventionalcommits.org/) on commit messages.

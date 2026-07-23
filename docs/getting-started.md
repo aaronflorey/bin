@@ -22,12 +22,15 @@ curl -fsSL https://raw.githubusercontent.com/aaronflorey/bin/master/install.sh |
 
 ### Build from source
 
+With [`mise`](https://mise.jdx.dev/) installed:
+
 ```bash
-just download
-just build
+mise install
+mise run download
+mise run build
 ```
 
-The binary is built from the repository root (`justfile`, `main.go`).
+The binary is built from the repository root (`mise.toml`, `main.go`).
 
 ## First run
 
@@ -49,7 +52,7 @@ bin install github.com/cli/cli
 ```bash
 bin version
 bin list
-just test
+mise run test
 ```
 
 If you built from source, `go test ./...` should also pass.

@@ -18,14 +18,14 @@ go test -coverprofile=coverage.out ./...
 ## Related checks
 
 ```bash
-just fmt
-just tidy
-just lint
-just verify
-just coverage
+mise run fmt
+mise run tidy
+mise run lint
+mise run verify
+mise run coverage
 ```
 
-`just fmt` runs `gofmt -w -s ./.` and `just tidy` runs `go mod tidy` when you need to fix local drift. `just lint` is non-mutating and runs `gofmt -l -s ./.` plus `go vet ./...`. `just verify` is also non-mutating: it adds `go mod download`, `go mod tidy -diff`, and `golangci-lint run`. `just coverage` writes `coverage.out` in the repo root.
+`mise run fmt` runs `gofmt -w -s ./.` and `mise run tidy` runs `go mod tidy` when you need to fix local drift. `mise run lint` is non-mutating and runs `gofmt -l -s ./.` plus `go vet ./...`. `mise run verify` is also non-mutating: it adds `go mod download`, `go mod tidy -diff`, and `golangci-lint run`. `mise run coverage` writes `coverage.out` in the repo root.
 
 ## What the test suite covers
 
