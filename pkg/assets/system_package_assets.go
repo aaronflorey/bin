@@ -205,6 +205,7 @@ func filterArchiveAssets(as []*Asset) []*Asset {
 		}
 		filtered = append(filtered, a)
 	}
+	log.Debugf("filterArchiveAssets: %d entries before, %d after removing metadata/junk", len(as), len(filtered))
 	return filtered
 }
 

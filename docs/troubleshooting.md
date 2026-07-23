@@ -1,5 +1,39 @@
 # Troubleshooting
 
+## GitHub rate limiting
+
+**Symptoms**
+
+- GitHub installs/updates fail with a `403` or rate-limit error.
+- `bin` works for some repos but fails after several requests.
+
+**Likely causes**
+
+- No GitHub token is configured, so `bin` makes anonymous requests (limited to 60/hour).
+- A token is set but the rate limit is exhausted.
+
+**Diagnose with debug logging**
+
+`bin --debug` now reports the GitHub auth resolution and every API response's rate-limit state:
+
+- Which token source was used: `GITHUB_AUTH_TOKEN`, `GITHUB_TOKEN`, `gh CLI (gh auth token)`, `GHES_AUTH_TOKEN`, or a warning that no token was found (anonymous mode).
+- Per-request lines like `GitHub GetLatestRelease for owner/repo: status 200 (authenticated=true). rate 4998/5000 remaining, resets 14:32:10 UTC`.
+- On errors: `GitHub GetLatestRelease for owner/repo returned rate-limit error 403 (authenticated=false): API rate limit exceeded. rate 0/60 remaining, resets 14:32:10 UTC`.
+
+**Fix**
+
+Provide a token via one of:
+
+```bash
+export GITHUB_AUTH_TOKEN=ghp_xxx
+# or
+export GITHUB_TOKEN=ghp_xxx
+# or let bin reuse an authenticated gh CLI:
+bin set-config use_gh_for_github_token true
+```
+
+The token needs no scopes for public repos; it only raises the rate limit. See the [GitHub provider configuration](../README.md#github-releases) for `GHES_*` enterprise variables.
+
 ## `error loading config file`
 
 **Symptoms**
@@ -93,6 +127,31 @@ Run with `--all` to inspect compatible choices, then pass the exact asset with `
 **Fix**
 
 Choose a native binary or binary archive from the release. `--select` does not bypass this validation.
+
+## `no files found in tar/zip archive` / `no compatible files`
+
+**Symptoms**
+
+- An archive is downloaded but `bin` reports it cannot find a binary inside it.
+
+**Cause**
+
+- The archive's entries were all filtered out as metadata/junk, or none matched the current platform.
+- A stored `PackagePath` no longer matches any entry in the new release's archive.
+
+**Diagnose**
+
+The error message now lists the archive's contents (capped at 50 entries), and `bin --debug` logs every archive entry with its `PackagePath` match result plus a `filterArchiveAssets: N entries before, M after` summary. Use this to see exactly what was in the archive and why nothing was selected:
+
+```bash
+bin --debug install github.com/owner/repo
+```
+
+**Fix**
+
+- Use `--select <archive:inner/path>` to pick a specific entry.
+- Use `--all` to skip scoring and inspect every candidate.
+- For updates where the archive layout changed, remove and reinstall the binary so the stale `PackagePath` is cleared.
 
 ## `update requires --yes or --dry-run in non-interactive mode`
 

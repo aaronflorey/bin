@@ -15,6 +15,8 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/caarlos0/log"
 )
 
 type mockOSResolver struct {
@@ -172,6 +174,73 @@ func TestProcessURLPreservesNameForTarGzArchives(t *testing.T) {
 	if string(data) != "rg binary" {
 		t.Fatalf("unexpected tar.gz contents: %q", string(data))
 	}
+}
+
+func TestProcessZipLogsEntriesRejectedByPackagePath(t *testing.T) {
+	archiveData := buildTestZipArchive(t, map[string]string{
+		"ast-grep": "binary",
+	})
+
+	logs := captureDebugLogs(t)
+	f := NewFilter(&FilterOpts{PackagePath: "pupdate"})
+	_, err := f.processZip("ast-grep", bytes.NewReader(archiveData), "")
+	if err == nil {
+		t.Fatal("expected stale PackagePath to reject all ZIP entries")
+	}
+	if !strings.Contains(err.Error(), "No files found in zip archive") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	output := logs.String()
+	if !strings.Contains(output, `ZIP archive entry "ast-grep": PackagePath match=false`) {
+		t.Fatalf("expected rejected ZIP entry to be logged, got %q", output)
+	}
+}
+
+func TestProcessTarLogsEntriesRejectedByPackagePath(t *testing.T) {
+	archiveData := buildTestTarGzArchive(t, map[string]string{
+		"ast-grep": "binary",
+	})
+
+	gr, err := gzip.NewReader(bytes.NewReader(archiveData))
+	if err != nil {
+		t.Fatalf("failed to open test gzip archive: %v", err)
+	}
+	defer func() {
+		if err := gr.Close(); err != nil {
+			t.Errorf("failed to close test gzip archive: %v", err)
+		}
+	}()
+
+	logs := captureDebugLogs(t)
+	f := NewFilter(&FilterOpts{PackagePath: "pupdate"})
+	_, err = f.processTar("ast-grep", gr, "")
+	if err == nil {
+		t.Fatal("expected stale PackagePath to reject all TAR entries")
+	}
+	if !strings.Contains(err.Error(), "no files found in tar archive") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	output := logs.String()
+	if !strings.Contains(output, `TAR archive entry "ast-grep": PackagePath match=false`) {
+		t.Fatalf("expected rejected TAR entry to be logged, got %q", output)
+	}
+}
+
+func captureDebugLogs(t *testing.T) *bytes.Buffer {
+	t.Helper()
+
+	previousLogger := log.Log
+	var logs bytes.Buffer
+	logger := log.New(&logs)
+	logger.Level = log.DebugLevel
+	log.Log = logger
+	t.Cleanup(func() {
+		log.Log = previousLogger
+	})
+
+	return &logs
 }
 
 func buildTestZipArchive(t *testing.T, files map[string]string) []byte {
