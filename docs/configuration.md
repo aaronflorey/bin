@@ -38,6 +38,7 @@ Hooks are executed directly with `exec.Command`, so shell features are not expan
     "/home/me/.local/bin/jq": {
       "path": "/home/me/.local/bin/jq",
       "remote_name": "jq",
+      "source_asset": "jq-linux-amd64.tar.gz",
       "version": "v1.7.1",
       "hash": "...",
       "url": "https://github.com/jqlang/jq",
@@ -53,6 +54,11 @@ Hooks are executed directly with `exec.Command`, so shell features are not expan
   ]
 }
 ```
+
+`remote_name` is the stable logical command name. `source_asset`, when present,
+records the raw outer release asset selected during the last successful install;
+`package_path` continues to identify the selected inner archive entry. Older
+configuration files without `source_asset` remain valid.
 
 ## Environment variables
 

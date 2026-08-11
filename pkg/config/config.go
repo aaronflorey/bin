@@ -130,6 +130,8 @@ type Binary struct {
 	// the package path in config so we don't ask the user to select
 	// the path again when upgrading
 	PackagePath string `json:"package_path"`
+	// SourceAsset stores the raw outer release asset selected for this binary.
+	SourceAsset string `json:"source_asset,omitempty"`
 	// ReleaseTagPrefix keeps the exact tag lane prefix for multi-track repos.
 	ReleaseTagPrefix string `json:"release_tag_prefix,omitempty"`
 	Pinned           bool   `json:"pinned"`

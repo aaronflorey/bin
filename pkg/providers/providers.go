@@ -25,7 +25,10 @@ type File struct {
 	ExpectedSHA      string
 	Length           int64
 	PackagePath      string
-	PublishedAt      *time.Time
+	// SourceAsset is the raw outer release asset name. PackagePath, when set,
+	// remains the selected inner archive entry.
+	SourceAsset string
+	PublishedAt *time.Time
 }
 
 type ReleaseInfo struct {

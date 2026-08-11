@@ -108,6 +108,7 @@ type portableBinary struct {
 	PackageType      string `json:"package_type,omitempty"`
 	AppBundle        string `json:"app_bundle,omitempty"`
 	PackagePath      string `json:"package_path"`
+	SourceAsset      string `json:"source_asset,omitempty"`
 	ReleaseTagPrefix string `json:"release_tag_prefix,omitempty"`
 	Pinned           bool   `json:"pinned"`
 	MinAgeDays       int    `json:"min_age_days,omitempty"`
@@ -155,6 +156,7 @@ func buildExportBins(bins map[string]*config.Binary) ([]*portableBinary, []*conf
 			PackageType:      binCfg.PackageType,
 			AppBundle:        binCfg.AppBundle,
 			PackagePath:      binCfg.PackagePath,
+			SourceAsset:      binCfg.SourceAsset,
 			ReleaseTagPrefix: binCfg.ReleaseTagPrefix,
 			Pinned:           binCfg.Pinned,
 			MinAgeDays:       binCfg.MinAgeDays,

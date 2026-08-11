@@ -13,11 +13,11 @@ func TestDiscoverInstallableReleasePrefixes(t *testing.T) {
 	newProvider := func(_, _ string) (providers.Provider, error) {
 		return &staticProvider{
 			history: []*providers.ReleaseInfo{
-				{Version: "v2.0.0", Assets: []string{"tool-linux-amd64.tar.gz"}},
-				{Version: "v2.18.0-eafb0ec6-nightly", Assets: []string{"tool-linux-amd64.tar.gz"}},
-				{Version: "nightly", Assets: []string{"tool-linux-amd64.tar.gz"}},
-				{Version: "pi-v1.1.0", Assets: []string{"tool-pi-linux-amd64.tar.gz"}},
-				{Version: "pi-v1.0.0", Assets: []string{"tool-pi-linux-amd64.tar.gz"}},
+				{Version: "v2.0.0", Assets: []string{"tool.tar.gz"}},
+				{Version: "v2.18.0-eafb0ec6-nightly", Assets: []string{"tool.tar.gz"}},
+				{Version: "nightly", Assets: []string{"tool.tar.gz"}},
+				{Version: "pi-v1.1.0", Assets: []string{"tool-pi.tar.gz"}},
+				{Version: "pi-v1.0.0", Assets: []string{"tool-pi.tar.gz"}},
 			},
 		}, nil
 	}

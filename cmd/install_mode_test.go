@@ -2,6 +2,9 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/aaronflorey/bin/pkg/assets"
@@ -88,6 +91,23 @@ func TestLifecycleForModeSystemPackageRequiresPackageType(t *testing.T) {
 	err := strategy.applyStoredFetch(&config.Binary{Path: "/tmp/tool"}, &providers.FetchOpts{})
 	if err == nil {
 		t.Fatal("expected missing package type error")
+	}
+}
+
+func TestStoredBinarySafetyValidation(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tool")
+	if err := os.WriteFile(path, []byte("BSDIFF40"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err := lifecycleForMode(installModeBinary).applyStoredFetch(&config.Binary{Path: path, RemoteName: "tool"}, &providers.FetchOpts{})
+	if err == nil || !strings.Contains(err.Error(), "remove the managed entry and reinstall") {
+		t.Fatalf("unexpected legacy safety error: %v", err)
+	}
+
+	err = lifecycleForMode(installModeBinary).applyStoredFetch(&config.Binary{Path: filepath.Join(dir, "missing"), RemoteName: "tool", SourceAsset: "tool.patch"}, &providers.FetchOpts{})
+	if err == nil || !strings.Contains(err.Error(), "unsafe artifact metadata") {
+		t.Fatalf("unexpected delta metadata error: %v", err)
 	}
 }
 

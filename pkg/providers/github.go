@@ -147,6 +147,7 @@ func (g *gitHub) Fetch(opts *FetchOpts) (*File, error) {
 		ReleaseTagPrefix: fetchedReleaseTagPrefix(version, opts.ReleaseTagPrefix),
 		ExpectedSHA:      finalExpectedSHA,
 		PackagePath:      outFile.PackagePath,
+		SourceAsset:      gf.Name,
 		PublishedAt:      githubPublishedAt(release),
 	}
 

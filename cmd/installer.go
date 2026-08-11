@@ -85,6 +85,10 @@ type InstallOpts struct {
 	// AllowProviderFallback retries with provider auto-detection when a stored
 	// provider no longer yields a compatible release asset.
 	AllowProviderFallback bool
+
+	// LogicalName is the stable command name. It is deliberately distinct from
+	// the provider's versioned source asset.
+	LogicalName string
 }
 
 // InstallResult holds the outcome of a successful installation.
@@ -110,7 +114,10 @@ func installBinary(opts InstallOpts) (*InstallResult, error) {
 		return nil, err
 	}
 
-	logicalName := assets.SanitizeName(pResult.Name, pResult.Version)
+	logicalName := opts.LogicalName
+	if logicalName == "" {
+		logicalName = assets.SanitizeName(pResult.Name, pResult.Version)
+	}
 	if logicalName == "" {
 		logicalName = pResult.Name
 	}
@@ -147,6 +154,7 @@ func installBinary(opts InstallOpts) (*InstallResult, error) {
 		PackageType:      "",
 		AppBundle:        "",
 		PackagePath:      pResult.PackagePath,
+		SourceAsset:      pResult.SourceAsset,
 		ReleaseTagPrefix: pResult.ReleaseTagPrefix,
 		Pinned:           pinned,
 		MinAgeDays:       minAgeDays,
@@ -355,16 +363,22 @@ func saveToDisk(f *providers.File, path string, overwrite bool) ([]byte, error) 
 		return nil, err
 	}
 
-	if err := applyChmod(file); err != nil {
-		return nil, err
-	}
-
 	actualHash := fmt.Sprintf("%x", h.Sum(nil))
 	if f.ExpectedSHA != "" && !strings.EqualFold(actualHash, f.ExpectedSHA) {
 		return nil, fmt.Errorf("sha256 mismatch for %s: expected %s, got %s", f.Name, f.ExpectedSHA, actualHash)
 	}
 
 	if err := file.Close(); err != nil {
+		return nil, err
+	}
+
+	if err := assets.ValidateRunnablePayload(tempPath, f.Name); err != nil {
+		return nil, err
+	}
+
+	// Only assign executable permissions after payload validation. A failed
+	// validation leaves both the destination and config untouched.
+	if err := applyChmodToPath(tempPath); err != nil {
 		return nil, err
 	}
 
@@ -386,6 +400,15 @@ func saveToDisk(f *providers.File, path string, overwrite bool) ([]byte, error) 
 	}
 
 	return h.Sum(nil), nil
+}
+
+func applyChmodToPath(path string) error {
+	file, err := os.OpenFile(path, os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	return applyChmod(file)
 }
 
 func warnDuplicateManagedHash(installedPath, hash string) {

@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -11,6 +12,13 @@ import (
 	"github.com/aaronflorey/bin/pkg/providers"
 	"github.com/aaronflorey/bin/pkg/systempackage"
 )
+
+func requestedLogicalName(requestedPath string) string {
+	if requestedPath == "" {
+		return ""
+	}
+	return filepath.Base(requestedPath)
+}
 
 const (
 	installModeBinary        = "binary"
@@ -45,11 +53,13 @@ var lifecycleRegistry = map[string]lifecycleStrategy{
 		install:   installBinary,
 		uninstall: nil,
 		applyStoredFetch: func(b *config.Binary, fetchOpts *providers.FetchOpts) error {
-			fetchOpts.PackagePath = b.PackagePath
-			fetchOpts.PackageName = assets.SanitizeName(b.RemoteName, b.Version)
-			if fetchOpts.PackageName == "" {
-				fetchOpts.PackageName = b.RemoteName
+			if err := validateStoredBinaryForReuse(b); err != nil {
+				return err
 			}
+			fetchOpts.PackagePath = b.PackagePath
+			// remote_name is the user-facing logical identity, not a versioned
+			// source asset hint.
+			fetchOpts.PackageName = b.RemoteName
 			fetchOpts.ReleaseTagPrefix = providers.EffectiveReleaseTagPrefix(b.Version, b.ReleaseTagPrefix)
 			return nil
 		},
@@ -88,6 +98,26 @@ var lifecycleRegistry = map[string]lifecycleStrategy{
 			return false
 		},
 	},
+}
+
+func validateStoredBinaryForReuse(b *config.Binary) error {
+	if b == nil {
+		return nil
+	}
+	if assets.IsKnownNonRunnableName(b.RemoteName) || assets.IsKnownNonRunnableName(b.SourceAsset) || assets.IsKnownNonRunnableName(b.PackagePath) {
+		return fmt.Errorf("stored entry %s has unsafe artifact metadata; remove the managed entry and reinstall it", b.Path)
+	}
+	ep := os.ExpandEnv(b.Path)
+	if _, err := os.Stat(ep); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if err := assets.ValidateRunnablePayload(ep, b.SourceAsset); err != nil {
+		return fmt.Errorf("stored entry %s is not a runnable binary and cannot be updated safely; remove the managed entry and reinstall it: %w", b.Path, err)
+	}
+	return nil
 }
 
 func lifecycleForMode(mode string) lifecycleStrategy {

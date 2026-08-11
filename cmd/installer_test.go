@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -108,11 +109,13 @@ func TestExistingConfigBinaryMatchesExpandedPath(t *testing.T) {
 func TestSaveToDiskValidatesExpectedSHA(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "tool")
+	payload := "#!/bin/sh\necho hello\n"
+	sum := sha256.Sum256([]byte(payload))
 
 	_, err := saveToDisk(&providers.File{
-		Data:        strings.NewReader("hello"),
+		Data:        strings.NewReader(payload),
 		Name:        "tool",
-		ExpectedSHA: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+		ExpectedSHA: fmt.Sprintf("%x", sum),
 	}, target, false)
 	if err != nil {
 		t.Fatalf("saveToDisk returned error: %v", err)
@@ -163,6 +166,26 @@ func TestSaveToDiskChecksumMismatchPreservesExistingFile(t *testing.T) {
 	}
 	if string(raw) != "existing" {
 		t.Fatalf("expected original file to remain untouched, got %q", string(raw))
+	}
+}
+
+func TestSaveToDiskRejectsInvalidPayloadWithoutReplacingDestination(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "tool")
+	if err := os.WriteFile(target, []byte("existing"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := saveToDisk(&providers.File{Data: strings.NewReader("BSDIFF40"), Name: "tool"}, target, true)
+	if !errors.Is(err, assets.ErrNotRunnablePayload) {
+		t.Fatalf("saveToDisk() error = %v, want ErrNotRunnablePayload", err)
+	}
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "existing" {
+		t.Fatalf("destination was replaced with %q", got)
 	}
 }
 

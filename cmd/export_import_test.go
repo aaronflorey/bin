@@ -658,6 +658,7 @@ func TestExportImportRoundTripsInstallMetadata(t *testing.T) {
 		InstallMode:      installModeSystemPackage,
 		PackageType:      "flatpak",
 		AppBundle:        "Flatpak Tool.app",
+		SourceAsset:      "flatpak-tool-linux-amd64.flatpak",
 		ReleaseTagPrefix: "pi-v",
 	}); err != nil {
 		t.Fatalf("failed to seed binary: %v", err)
@@ -690,6 +691,9 @@ func TestExportImportRoundTripsInstallMetadata(t *testing.T) {
 	if exported[0].ReleaseTagPrefix != "pi-v" {
 		t.Fatalf("unexpected release tag prefix: %s", exported[0].ReleaseTagPrefix)
 	}
+	if exported[0].SourceAsset != "flatpak-tool-linux-amd64.flatpak" {
+		t.Fatalf("unexpected source asset: %s", exported[0].SourceAsset)
+	}
 
 	setupTestConfig(t)
 	importPayload, err := json.Marshal(exported)
@@ -718,6 +722,9 @@ func TestExportImportRoundTripsInstallMetadata(t *testing.T) {
 	}
 	if binCfg.AppBundle != "Flatpak Tool.app" {
 		t.Fatalf("unexpected imported app bundle: %s", binCfg.AppBundle)
+	}
+	if binCfg.SourceAsset != "flatpak-tool-linux-amd64.flatpak" {
+		t.Fatalf("unexpected imported source asset: %s", binCfg.SourceAsset)
 	}
 	if binCfg.ReleaseTagPrefix != "pi-v" {
 		t.Fatalf("unexpected imported release tag prefix: %s", binCfg.ReleaseTagPrefix)

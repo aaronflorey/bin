@@ -51,6 +51,7 @@ func TestWriteListJSONIncludesInstallMetadata(t *testing.T) {
 			AppBundle:   "Tool.app",
 			Provider:    "github",
 			RemoteName:  "Tool",
+			SourceAsset: "tool-arm64.dmg",
 			Pinned:      true,
 		},
 	}
@@ -81,6 +82,9 @@ func TestWriteListJSONIncludesInstallMetadata(t *testing.T) {
 	}
 	if !entries[0].Pinned {
 		t.Fatal("expected pinned entry")
+	}
+	if entries[0].SourceAsset != "tool-arm64.dmg" {
+		t.Fatalf("expected source asset, got %q", entries[0].SourceAsset)
 	}
 }
 

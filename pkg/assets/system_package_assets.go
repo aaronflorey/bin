@@ -13,7 +13,7 @@ func filterInstallableAssets(opts *FilterOpts, as []*Asset) []*Asset {
 	if opts != nil && opts.SystemPackage {
 		packagesOnly := make([]*Asset, 0, len(as))
 		for _, a := range as {
-			if looksLikeMetadataAsset(a.Name) {
+			if IsKnownNonRunnableName(a.Name) {
 				continue
 			}
 			ptype, ok := systempackage.DetectType(a.Name)
@@ -31,9 +31,17 @@ func filterInstallableAssets(opts *FilterOpts, as []*Asset) []*Asset {
 		return packagesOnly
 	}
 
-	return filterAssetsBy(as, func(name string) bool {
-		return looksLikeMetadataAsset(name) || looksLikePackageArtifact(name)
-	}, "metadata/package")
+	// These classifications are safety boundaries, rather than heuristics. In
+	// particular, do not use filterAssetsBy here: its fallback would restore a
+	// delta-only release as an install candidate.
+	filtered := make([]*Asset, 0, len(as))
+	for _, asset := range as {
+		if asset == nil || IsKnownNonRunnableName(asset.Name) || looksLikePackageArtifact(asset.Name) {
+			continue
+		}
+		filtered = append(filtered, asset)
+	}
+	return filtered
 }
 
 type osRank int
@@ -199,7 +207,7 @@ func isSystemPackageArchCompatible(name string) bool {
 func filterArchiveAssets(as []*Asset) []*Asset {
 	filtered := make([]*Asset, 0, len(as))
 	for _, a := range as {
-		if looksLikeMetadataAsset(a.Name) || looksLikeArchiveJunk(a.Name) {
+		if IsKnownNonRunnableName(a.Name) || looksLikeArchiveJunk(a.Name) {
 			log.Debugf("Skipping non-binary archive asset %s", a.Name)
 			continue
 		}
@@ -207,6 +215,28 @@ func filterArchiveAssets(as []*Asset) []*Asset {
 	}
 	log.Debugf("filterArchiveAssets: %d entries before, %d after removing metadata/junk", len(as), len(filtered))
 	return filtered
+}
+
+// IsKnownNonRunnableName reports whether name identifies a release byproduct
+// which must never be treated as a runnable payload. It intentionally covers
+// compressed delta files as well as metadata, because neither can become safe
+// merely by being explicitly selected.
+func IsKnownNonRunnableName(name string) bool {
+	lower := strings.ToLower(normalizedAssetBasename(name))
+	if looksLikeMetadataAsset(lower) {
+		return true
+	}
+	for _, suffix := range []string{".bsdiff", ".bspatch", ".patch", ".diff", ".delta", ".zsync"} {
+		if strings.HasSuffix(lower, suffix) {
+			return true
+		}
+		for _, compression := range compressedArchiveSuffixes {
+			if strings.HasSuffix(lower, suffix+compression) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func looksLikeMetadataAsset(name string) bool {

@@ -162,6 +162,7 @@ func (g *hashiCorp) Fetch(opts *FetchOpts) (*File, error) {
 		ReleaseTagPrefix: fetchedReleaseTagPrefix(version, opts.ReleaseTagPrefix),
 		ExpectedSHA:      finalExpectedSHA,
 		PackagePath:      outFile.PackagePath,
+		SourceAsset:      gf.Name,
 	}
 
 	return file, nil

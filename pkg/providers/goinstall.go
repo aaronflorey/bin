@@ -181,6 +181,7 @@ func (g *goinstall) Fetch(opts *FetchOpts) (*File, error) {
 	return &File{
 		Data:        file,
 		Name:        g.name,
+		SourceAsset: g.name,
 		Version:     g.tag,
 		PublishedAt: PtrTime(versionInfo.Time),
 	}, nil

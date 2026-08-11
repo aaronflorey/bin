@@ -137,8 +137,12 @@ func TestProcessURLRejectsArchiveChecksumMismatch(t *testing.T) {
 }
 
 func TestProcessURLPreservesNameForTarGzArchives(t *testing.T) {
+	originalResolver := resolver
+	defer func() { resolver = originalResolver }()
+	resolver = testLinuxAMDResolver
+
 	archiveData := buildTestTarGzArchive(t, map[string]string{
-		"ripgrep-13.0.0-x86_64-unknown-linux-musl/rg": "rg binary",
+		"ripgrep-13.0.0-x86_64-unknown-linux-musl/rg": "#!/bin/sh\nexit 0\n",
 	})
 	expectedHash := sha256.Sum256(archiveData)
 
@@ -171,7 +175,7 @@ func TestProcessURLPreservesNameForTarGzArchives(t *testing.T) {
 			t.Fatalf("failed to close processed tar.gz entry: %v", err)
 		}
 	}
-	if string(data) != "rg binary" {
+	if string(data) != "#!/bin/sh\nexit 0\n" {
 		t.Fatalf("unexpected tar.gz contents: %q", string(data))
 	}
 }
@@ -1434,12 +1438,16 @@ func TestIsSupportedExt(t *testing.T) {
 }
 
 func TestProcessTarMatchesByBasename(t *testing.T) {
+	originalResolver := resolver
+	defer func() { resolver = originalResolver }()
+	resolver = testDarwinARMResolver
+
 	// Build a tar with a new version in directory name
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
 	files := map[string]string{
 		"tool-v2.0.0-aarch64-apple-darwin/LICENSE": "license text",
-		"tool-v2.0.0-aarch64-apple-darwin/tool":    "binary content",
+		"tool-v2.0.0-aarch64-apple-darwin/tool":    "#!/bin/sh\nexit 0\n",
 	}
 	for name, content := range files {
 		hdr := &tar.Header{Name: name, Mode: 0755, Size: int64(len(content))}
@@ -1473,7 +1481,7 @@ func TestProcessTarIgnoresCompressedManpages(t *testing.T) {
 		"completions/infisical.fish": "completion",
 		"completions/infisical.zsh":  "completion",
 		"manpages/infisical.1.gz":    "manpage",
-		"infisical":                  "binary content",
+		"infisical":                  "#!/bin/sh\nexit 0\n",
 	}
 	for name, content := range files {
 		hdr := &tar.Header{Name: name, Mode: 0755, Size: int64(len(content))}
@@ -1505,7 +1513,7 @@ func TestProcessTarPrefersExecutableWhenRepoNameDiffers(t *testing.T) {
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
 	files := map[string]string{
-		"infisical":  "binary content",
+		"infisical":  "#!/bin/sh\nexit 0\n",
 		"install.sh": "#!/bin/sh\nexit 0\n",
 	}
 	for name, content := range files {

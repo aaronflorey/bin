@@ -58,9 +58,10 @@ func (d *docker) Fetch(opts *FetchOpts) (*File, error) {
 	}
 
 	return &File{
-		Data:    strings.NewReader(dockerWrapperScript(d.repo, d.tag)),
-		Name:    getImageName(d.repo),
-		Version: d.tag,
+		Data:        strings.NewReader(dockerWrapperScript(d.repo, d.tag)),
+		Name:        getImageName(d.repo),
+		SourceAsset: getImageName(d.repo),
+		Version:     d.tag,
 	}, nil
 }
 

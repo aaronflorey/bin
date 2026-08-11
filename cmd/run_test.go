@@ -23,6 +23,8 @@ type runTestProvider struct {
 	err        error
 }
 
+const runnableRunScript = "#!/bin/sh\nexit 0\n"
+
 func (p *runTestProvider) Fetch(opts *providers.FetchOpts) (*providers.File, error) {
 	p.fetchCount++
 	if opts != nil {
@@ -69,7 +71,7 @@ func TestParseRunTargetSingleURL(t *testing.T) {
 func TestRunForwardsArgsAfterDash(t *testing.T) {
 	setupTestConfig(t)
 	cacheDir := t.TempDir()
-	provider := &runTestProvider{name: "tool", version: "1.2.3", content: "binary"}
+	provider := &runTestProvider{name: "tool", version: "1.2.3", content: runnableRunScript}
 	cmd := newRunCmd()
 	cmd.newProvider = func(_, _ string) (providers.Provider, error) { return provider, nil }
 	cmd.userCacheDir = func() (string, error) { return cacheDir, nil }
@@ -110,7 +112,7 @@ func TestRunForwardsArgsAfterDash(t *testing.T) {
 func TestRunForwardsArgsWithoutDashAfterURL(t *testing.T) {
 	setupTestConfig(t)
 	cacheDir := t.TempDir()
-	provider := &runTestProvider{name: "tool", version: "1.2.3", content: "binary"}
+	provider := &runTestProvider{name: "tool", version: "1.2.3", content: runnableRunScript}
 	cmd := newRunCmd()
 	cmd.newProvider = func(_, _ string) (providers.Provider, error) { return provider, nil }
 	cmd.userCacheDir = func() (string, error) { return cacheDir, nil }
@@ -133,7 +135,7 @@ func TestRunForwardsArgsWithoutDashAfterURL(t *testing.T) {
 func TestRunReusesCachedExecutableWhenVersionAlreadyExists(t *testing.T) {
 	setupTestConfig(t)
 	cacheDir := t.TempDir()
-	provider := &runTestProvider{name: "tool", version: "1.0.0", content: "new-binary"}
+	provider := &runTestProvider{name: "tool", version: "1.0.0", content: runnableRunScript}
 	cmd := newRunCmd()
 	cmd.newProvider = func(_, _ string) (providers.Provider, error) { return provider, nil }
 	cmd.userCacheDir = func() (string, error) { return cacheDir, nil }
@@ -143,7 +145,7 @@ func TestRunReusesCachedExecutableWhenVersionAlreadyExists(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(cachePath), 0o755); err != nil {
 		t.Fatalf("mkdir cache dir: %v", err)
 	}
-	if err := os.WriteFile(cachePath, []byte("cached-binary"), 0o755); err != nil {
+	if err := os.WriteFile(cachePath, []byte(runnableRunScript), 0o755); err != nil {
 		t.Fatalf("seed cache file: %v", err)
 	}
 
@@ -156,7 +158,7 @@ func TestRunReusesCachedExecutableWhenVersionAlreadyExists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read cache file: %v", err)
 	}
-	if string(raw) != "cached-binary" {
+	if string(raw) != runnableRunScript {
 		t.Fatalf("expected cached binary to be reused, got %q", string(raw))
 	}
 }
@@ -164,7 +166,7 @@ func TestRunReusesCachedExecutableWhenVersionAlreadyExists(t *testing.T) {
 func TestRunSkipsFetchWhenIndexedCacheExists(t *testing.T) {
 	setupTestConfig(t)
 	cacheDir := t.TempDir()
-	provider := &runTestProvider{name: "tool", version: "1.0.0", content: "new-binary"}
+	provider := &runTestProvider{name: "tool", version: "1.0.0", content: runnableRunScript}
 	cmd := newRunCmd()
 	cmd.newProvider = func(_, _ string) (providers.Provider, error) { return provider, nil }
 	cmd.userCacheDir = func() (string, error) { return cacheDir, nil }
@@ -173,7 +175,7 @@ func TestRunSkipsFetchWhenIndexedCacheExists(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(cachePath), 0o755); err != nil {
 		t.Fatalf("mkdir cache dir: %v", err)
 	}
-	if err := os.WriteFile(cachePath, []byte("cached-binary"), 0o755); err != nil {
+	if err := os.WriteFile(cachePath, []byte(runnableRunScript), 0o755); err != nil {
 		t.Fatalf("seed cache file: %v", err)
 	}
 
@@ -206,7 +208,7 @@ func TestRunSkipsFetchWhenIndexedCacheExists(t *testing.T) {
 func TestRunAutomaticallyPrunesOldCacheVersionsForURL(t *testing.T) {
 	setupTestConfig(t)
 	cacheDir := t.TempDir()
-	provider := &runTestProvider{name: "tool", version: "1.1.0", content: "new-binary"}
+	provider := &runTestProvider{name: "tool", version: "1.1.0", content: runnableRunScript}
 	cmd := newRunCmd()
 	cmd.newProvider = func(_, _ string) (providers.Provider, error) { return provider, nil }
 	cmd.userCacheDir = func() (string, error) { return cacheDir, nil }
@@ -222,10 +224,10 @@ func TestRunAutomaticallyPrunesOldCacheVersionsForURL(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(currentPath), 0o755); err != nil {
 		t.Fatalf("mkdir cache dir: %v", err)
 	}
-	if err := os.WriteFile(currentPath, []byte("current-binary"), 0o755); err != nil {
+	if err := os.WriteFile(currentPath, []byte(runnableRunScript), 0o755); err != nil {
 		t.Fatalf("seed current cache file: %v", err)
 	}
-	if err := os.WriteFile(oldPath, []byte("old-binary"), 0o755); err != nil {
+	if err := os.WriteFile(oldPath, []byte(runnableRunScript), 0o755); err != nil {
 		t.Fatalf("seed old cache file: %v", err)
 	}
 
@@ -267,7 +269,7 @@ func TestRunAutomaticallyPrunesOldCacheVersionsForURL(t *testing.T) {
 func TestRunDoesNotUpdateConfig(t *testing.T) {
 	setupTestConfig(t)
 	cacheDir := t.TempDir()
-	provider := &runTestProvider{name: "tool", version: "1.0.0", content: "binary"}
+	provider := &runTestProvider{name: "tool", version: "1.0.0", content: runnableRunScript}
 	cmd := newRunCmd()
 	cmd.newProvider = func(_, _ string) (providers.Provider, error) { return provider, nil }
 	cmd.userCacheDir = func() (string, error) { return cacheDir, nil }
@@ -299,7 +301,7 @@ func TestRunDoesNotUpdateConfig(t *testing.T) {
 func TestRunReturnsChildExitCode(t *testing.T) {
 	setupTestConfig(t)
 	cacheDir := t.TempDir()
-	provider := &runTestProvider{name: "tool", version: "1.0.0", content: "binary"}
+	provider := &runTestProvider{name: "tool", version: "1.0.0", content: runnableRunScript}
 	cmd := newRunCmd()
 	cmd.newProvider = func(_, _ string) (providers.Provider, error) { return provider, nil }
 	cmd.userCacheDir = func() (string, error) { return cacheDir, nil }

@@ -67,10 +67,11 @@ func (g *genericURL) Fetch(_ *FetchOpts) (*File, error) {
 	}
 
 	return &File{
-		Data:    resp.Body,
-		Name:    name,
-		Version: version,
-		Length:  resp.ContentLength,
+		Data:        resp.Body,
+		Name:        name,
+		SourceAsset: filename,
+		Version:     version,
+		Length:      resp.ContentLength,
 	}, nil
 }
 
