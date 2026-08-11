@@ -108,6 +108,7 @@ type listedBinary struct {
 	AppBundle   string `json:"app_bundle,omitempty"`
 	Provider    string `json:"provider,omitempty"`
 	RemoteName  string `json:"remote_name,omitempty"`
+	SourceAsset string `json:"source_asset,omitempty"`
 }
 
 func listStatus(path string) string {
@@ -139,6 +140,7 @@ func listEntries(bins map[string]*config.Binary) []listedBinary {
 			AppBundle:   bin.AppBundle,
 			Provider:    bin.Provider,
 			RemoteName:  bin.RemoteName,
+			SourceAsset: bin.SourceAsset,
 		})
 	}
 

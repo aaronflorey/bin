@@ -209,6 +209,7 @@ func (root *installCmd) installTarget(cmd *cobra.Command, target installTarget) 
 				FetchOpts:             attemptFetchOpts,
 				ResolvePath:           strategy.resolvePath(existing),
 				AllowProviderFallback: root.opts.provider == "" && existing.Provider != "",
+				LogicalName:           existing.RemoteName,
 			})
 			if err != nil {
 				log.WithError(err).Debugf("Failed to update existing install for %q", resolved.url)
@@ -248,6 +249,7 @@ func (root *installCmd) installTarget(cmd *cobra.Command, target installTarget) 
 				FetchOpts:             attemptFetchOpts,
 				ResolvePath:           strategy.resolvePath(nil),
 				AllowProviderFallback: false,
+				LogicalName:           requestedLogicalName(target.path),
 			})
 			if err == nil {
 				log.Infof("Done installing %s %s", res.Name, res.Version)

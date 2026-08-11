@@ -69,6 +69,9 @@ func installSystemPackage(opts InstallOpts) (*InstallResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	if opts.LogicalName != "" {
+		trackedName = opts.LogicalName
+	}
 
 	hashString, err := hashExecutableFile(resolvedPath)
 	if err != nil {
@@ -91,6 +94,7 @@ func installSystemPackage(opts InstallOpts) (*InstallResult, error) {
 		PackageType:      pkgType,
 		AppBundle:        appBundle,
 		PackagePath:      pResult.PackagePath,
+		SourceAsset:      pResult.SourceAsset,
 		ReleaseTagPrefix: pResult.ReleaseTagPrefix,
 		Pinned:           pinned,
 		MinAgeDays:       minAgeDays,

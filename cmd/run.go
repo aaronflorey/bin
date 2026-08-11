@@ -116,7 +116,7 @@ func newRunCmd() *runCmd {
 	root.cmd.Flags().BoolVarP(&root.opts.all, "all", "a", false, "Show all possible download options (skip scoring & filtering)")
 	root.cmd.Flags().StringVarP(&root.opts.provider, "provider", "p", "", "Forces to use a specific provider")
 	root.cmd.Flags().StringVarP(&root.opts.autoSelect, "select", "s", "", "Auto select installation file (skips interactive prompt)")
-	root.cmd.Flags().BoolVar(&root.opts.nonInteractive, "non-interactive", false, "Disable all interactive prompts (auto-select best option)")
+	root.cmd.Flags().BoolVar(&root.opts.nonInteractive, "non-interactive", false, "Disable prompts and fail on ambiguous choices")
 	return root
 }
 
@@ -166,6 +166,10 @@ func ensureCachedBinary(file *providers.File, cachePath string) error {
 		if info.IsDir() {
 			closeFetchedFile(file)
 			return fmt.Errorf("cache path %s is a directory", cachePath)
+		}
+		if err := assets.ValidateRunnablePayload(cachePath, file.Name); err != nil {
+			closeFetchedFile(file)
+			return fmt.Errorf("cached binary %s is unsafe; remove it and retry: %w", cachePath, err)
 		}
 		closeFetchedFile(file)
 		log.Infof("Reusing cached binary %s", cachePath)
@@ -370,6 +374,9 @@ func pruneOldCachedRunBinaries(userCacheDir func() (string, error), normalizedUR
 }
 
 func executeCachedBinary(cmd *cobra.Command, execCommand func(string, ...string) *exec.Cmd, path string, args []string) error {
+	if err := assets.ValidateRunnablePayload(path, filepath.Base(path)); err != nil {
+		return fmt.Errorf("cached binary %s is unsafe; remove it and retry: %w", path, err)
+	}
 	child := execCommand(path, args...)
 	child.Stdin = cmd.InOrStdin()
 	child.Stdout = cmd.OutOrStdout()

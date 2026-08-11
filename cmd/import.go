@@ -74,6 +74,7 @@ func newImportCmd() *importCmd {
 					PackageType:      b.PackageType,
 					AppBundle:        b.AppBundle,
 					PackagePath:      b.PackagePath,
+					SourceAsset:      b.SourceAsset,
 					ReleaseTagPrefix: b.ReleaseTagPrefix,
 					Pinned:           b.Pinned,
 					MinAgeDays:       b.MinAgeDays,
@@ -215,6 +216,7 @@ func equalBinaryConfig(a, b *config.Binary) bool {
 		a.PackageType == b.PackageType &&
 		a.AppBundle == b.AppBundle &&
 		a.PackagePath == b.PackagePath &&
+		a.SourceAsset == b.SourceAsset &&
 		a.ReleaseTagPrefix == b.ReleaseTagPrefix &&
 		a.Pinned == b.Pinned &&
 		a.MinAgeDays == b.MinAgeDays

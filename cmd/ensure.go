@@ -55,6 +55,11 @@ func runEnsure(args []string) error {
 		_, statErr := os.Stat(ep)
 
 		if statErr == nil {
+			if installMode == installModeBinary {
+				if err := validateStoredBinaryForReuse(binCfg); err != nil {
+					return err
+				}
+			}
 			hash, err := hashFile(ep)
 			if err != nil {
 				return err
@@ -86,6 +91,7 @@ func runEnsure(args []string) error {
 			ResolvePath:           strategy.resolvePath(binCfg),
 			ConfigPath:            binCfg.Path,
 			AllowProviderFallback: binCfg.Provider != "",
+			LogicalName:           binCfg.RemoteName,
 		}
 		res, err := strategy.install(opts)
 		if err != nil && installMode == installModeBinary && fetchOpts.PackagePath != "" && isPackagePathSelectionError(err) {

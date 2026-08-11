@@ -55,7 +55,7 @@ var (
 	}
 
 	packageArtifactSuffixes = []string{
-		".apk", ".deb", ".dmg", ".flatpak", ".msi", ".pkg.tar", ".pkg.tar.xz", ".pkg.tar.zst", ".rpm",
+		".apk", ".deb", ".dmg", ".flatpak", ".msi", ".pkg.tar", ".pkg.tar.xz", ".pkg.tar.zst", ".rpm", ".whl",
 	}
 
 	archiveJunkSuffixes = []string{
@@ -87,6 +87,41 @@ type Asset struct {
 	// outputs for bin
 	DisplayName string
 	URL         string
+}
+
+// artifactKind is intentionally name-based and conservative. It controls
+// selection safety and ranking; final payload validation remains byte-based.
+type artifactKind uint8
+
+const (
+	artifactStandalone artifactKind = iota
+	artifactArchive
+	artifactUnknown
+	artifactMetadata
+	artifactSystemPackage
+	artifactDelta
+)
+
+func classifyArtifactName(name string) artifactKind {
+	if IsKnownNonRunnableName(name) {
+		if looksLikeMetadataAsset(name) {
+			return artifactMetadata
+		}
+		return artifactDelta
+	}
+	if looksLikePackageArtifact(name) {
+		return artifactSystemPackage
+	}
+	lower := strings.ToLower(normalizedAssetBasename(name))
+	for _, suffix := range []string{".tar", ".tar.gz", ".tgz", ".tar.xz", ".tar.bz2", ".tar.zst", ".zip", ".gz", ".xz", ".bz2", ".zst"} {
+		if strings.HasSuffix(lower, suffix) {
+			return artifactArchive
+		}
+	}
+	if filepath.Ext(lower) == "" || strings.HasSuffix(lower, ".exe") || strings.HasSuffix(lower, ".appimage") {
+		return artifactStandalone
+	}
+	return artifactUnknown
 }
 
 func (g Asset) String() string {
@@ -161,8 +196,8 @@ type FilterOpts struct {
 	// type (deb, rpm, apk, flatpak, dmg).
 	PackageType string
 
-	// NonInteractive disables all interactive prompts and auto-selects
-	// the best option using tie-breaking heuristics
+	// NonInteractive disables all interactive prompts and fails when selection
+	// remains ambiguous.
 	NonInteractive bool
 }
 
@@ -229,8 +264,24 @@ func (f *Filter) ParseAutoSelection(autoSelect string) string {
 // in case it can't determine it
 func (f *Filter) FilterAssets(repoName string, as []*Asset, autoSelect string) (*FilteredAsset, error) {
 	f.repoName = repoName
+	if f.opts == nil {
+		f.opts = &FilterOpts{}
+	}
 	matchName := f.preferredMatchName(repoName)
 	as = filterInstallableAssets(f.opts, as)
+	// Generic assets remain compatible. Keep them through exact selection and
+	// scoring; target-specific candidates will naturally score higher.
+	as = filterTargetCompatibleAssets(as, false)
+
+	// Exact selection is an override of ranking, not compatibility or safety.
+	if autoSelect != "" {
+		for _, a := range as {
+			if a.String() == autoSelect || a.Name == autoSelect {
+				return &FilteredAsset{RepoName: repoName, Name: a.Name, DisplayName: a.DisplayName, URL: a.URL}, nil
+			}
+		}
+		return nil, fmt.Errorf("selected asset %q is not compatible or is not installable", autoSelect)
+	}
 
 	matches := []*FilteredAsset{}
 	if len(as) == 1 {
@@ -312,35 +363,26 @@ func (f *Filter) FilterAssets(repoName string, as []*Asset, autoSelect string) (
 		log.Debugf("No compatible assets found for %q. Considered %d assets: %s", repoName, len(as), summarizeAssetNames(as))
 		return nil, fmt.Errorf("%w: Could not find any compatible files", ErrNoCompatibleFiles)
 	} else if len(matches) > 1 {
-		// If an auto-selection was provided, find the first match by name
-		if autoSelect != "" {
-			for _, m := range matches {
-				if m.String() == autoSelect {
-					return m, nil
-				}
-			}
-		}
-
 		generic := make([]fmt.Stringer, 0)
 		for _, f := range matches {
 			generic = append(generic, f)
 		}
 
-		sort.SliceStable(generic, func(i, j int) bool {
-			return generic[i].String() < generic[j].String()
-		})
-
-		// If non-interactive mode is enabled, auto-select the first match
+		// Both --non-interactive and a missing TTY must fail closed: a stable
+		// alphabetic pick is still an arbitrary release asset.
 		if f.opts.NonInteractive {
-			log.Infof("Auto-selecting first match in non-interactive mode: %s", generic[0])
-			gf = generic[0].(*FilteredAsset)
+			opts := make([]string, 0, len(generic))
+			for _, candidate := range generic {
+				opts = append(opts, candidate.String())
+			}
+			return nil, fmt.Errorf("multiple matches found: %s (use --select to choose one)", strings.Join(opts, ", "))
 		} else if !isInteractive() {
 			opts := make([]string, 0, len(generic))
 			for _, candidate := range generic {
 				opts = append(opts, candidate.String())
 			}
 			return nil, fmt.Errorf(
-				"multiple matches found in non-interactive mode: %s (use --select to choose one or use --non-interactive flag)",
+				"multiple matches found without an interactive terminal: %s (use --select to choose one)",
 				strings.Join(opts, ", "),
 			)
 		} else {
@@ -383,11 +425,11 @@ func (f *Filter) CompatibleAssets(as []*Asset, autoSelect string) []*FilteredAss
 		return compatible
 	}
 	for _, a := range compatible {
-		if a.String() == autoSelect {
+		if a.String() == autoSelect || a.Name == autoSelect {
 			return []*FilteredAsset{a}
 		}
 	}
-	return compatible
+	return nil
 }
 
 func osSpecificExtensionScore(extension string) int {
@@ -675,13 +717,7 @@ func applyTieBreakers(repoName string, matches []*FilteredAsset) []*FilteredAsse
 		return matches
 	}
 
-	// Step 4: Alphabetical (deterministic fallback)
-	sort.Slice(matches, func(i, j int) bool {
-		return matches[i].Name < matches[j].Name
-	})
-	log.Debugf("Tie-breaker: selected first alphabetically: %s", matches[0].Name)
-
-	return matches[:1] // Return first after all tie-breaking
+	return matches
 }
 
 // archiveType represents the type of file/archive
@@ -694,6 +730,7 @@ const (
 	archiveTypeGz                            // .gz (standalone compressed)
 	archiveTypeZip                           // .zip
 	archiveTypeOther                         // Other archives
+	archiveTypeUnknown                       // Unrecognised extension
 )
 
 // getArchiveType determines what type of archive a file is
@@ -720,8 +757,13 @@ func getArchiveType(name string) archiveType {
 		return archiveTypeOther
 	}
 
-	// Standalone binary
-	return archiveTypeStandalone
+	if classifyArtifactName(name) == artifactStandalone {
+		return archiveTypeStandalone
+	}
+	if classifyArtifactName(name) == artifactUnknown {
+		return archiveTypeUnknown
+	}
+	return archiveTypeOther
 }
 
 // rankByArchiveType prefers standalone files over archives
@@ -737,7 +779,7 @@ func rankByArchiveType(matches []*FilteredAsset) []*FilteredAsset {
 		byType[aType] = append(byType[aType], match)
 	}
 
-	// Prefer in this order: standalone, .tar.gz, .tar.xz, .gz, .zip, other
+	// Prefer recognised runnable shapes and archives ahead of unknown files.
 	preferenceOrder := []archiveType{
 		archiveTypeStandalone,
 		archiveTypeTarGz,
@@ -745,6 +787,7 @@ func rankByArchiveType(matches []*FilteredAsset) []*FilteredAsset {
 		archiveTypeGz,
 		archiveTypeZip,
 		archiveTypeOther,
+		archiveTypeUnknown,
 	}
 
 	for _, preferred := range preferenceOrder {
@@ -791,6 +834,11 @@ func rankByNameSimilarity(repoName string, matches []*FilteredAsset) []*Filtered
 		if s.score > maxScore {
 			maxScore = s.score
 		}
+	}
+	// Do not turn unrelated products into a deterministic pick merely because
+	// one filename happens to be shorter. Those choices must remain ambiguous.
+	if maxScore <= 0 {
+		return matches
 	}
 
 	// Keep only matches with highest score
@@ -878,6 +926,21 @@ func SanitizeName(name, version string) string {
 		}
 	}
 
+	// Rust-style target triples are a single platform suffix. Remove the whole
+	// suffix before individual-token cleanup so x86_64-unknown-linux-gnu and
+	// aarch64-pc-windows-msvc do not leave misleading fragments behind.
+	for _, archName := range archNames {
+		for _, osName := range osNames {
+			for _, abi := range []string{"gnu", "musl", "msvc"} {
+				for _, vendor := range []string{"unknown", "pc", "apple"} {
+					for _, sep := range separators {
+						addReplacement(sep + archName + sep + vendor + sep + osName + sep + abi)
+					}
+				}
+			}
+		}
+	}
+
 	for _, archName := range archNames {
 		for _, sep := range separators {
 			addReplacement(sep + archName)
@@ -933,6 +996,9 @@ func appendUnique(values []string, additions ...string) []string {
 
 // ProcessURL processes a FilteredAsset by uncompressing/unarchiving the URL of the asset.
 func (f *Filter) ProcessURL(gf *FilteredAsset, expectedSHA string, verifyArchiveChecksum bool) (*finalFile, error) {
+	if IsKnownNonRunnableName(gf.Name) || looksLikeLibrary(gf.Name) {
+		return nil, fmt.Errorf("%w: %s is not an installable executable asset", ErrNoCompatibleFiles, gf.Name)
+	}
 	f.name = gf.Name
 	req, err := http.NewRequest(http.MethodGet, gf.URL, nil)
 	if err != nil {
@@ -1237,8 +1303,12 @@ func (f *Filter) processTar(name string, r io.Reader, autoSelect string) (*final
 	}
 
 	as := make([]*Asset, 0)
-	for f := range tarFiles {
-		as = append(as, &Asset{Name: f, URL: ""})
+	for entryName, entryPath := range tarFiles {
+		if err := ValidateRunnablePayload(entryPath, entryName); err != nil {
+			log.Debugf("Skipping non-runnable TAR entry %q: %v", entryName, err)
+			continue
+		}
+		as = append(as, &Asset{Name: entryName, URL: ""})
 	}
 	as = filterArchiveAssets(as)
 	choice, err := f.selectArchiveAsset(name, as, autoSelect)
@@ -1347,8 +1417,12 @@ func (f *Filter) processZip(name string, r io.Reader, autoSelect string) (*final
 	}
 
 	as := make([]*Asset, 0)
-	for f := range zipFiles {
-		as = append(as, &Asset{Name: f, URL: ""})
+	for entryName, entryPath := range zipFiles {
+		if err := ValidateRunnablePayload(entryPath, entryName); err != nil {
+			log.Debugf("Skipping non-runnable ZIP entry %q: %v", entryName, err)
+			continue
+		}
+		as = append(as, &Asset{Name: entryName, URL: ""})
 	}
 	as = filterArchiveAssets(as)
 	choice, err := f.selectArchiveAsset(name, as, autoSelect)
@@ -1386,14 +1460,14 @@ func (f *Filter) processZip(name string, r io.Reader, autoSelect string) (*final
 // dealing with this specific file extension
 func isSupportedExt(filename string) bool {
 	filename = normalizedAssetBasename(filename)
-
-	if looksLikePackageArtifact(filename) {
-		log.Debugf("Filename %s is a package-manager artifact", filename)
+	if looksLikeLibrary(filename) {
+		log.Debugf("Filename %s is a library, not an executable asset", filename)
 		return false
 	}
 
-	if looksLikeMetadataAsset(filename) {
-		log.Debugf("Filename %s is a metadata asset", filename)
+	switch classifyArtifactName(filename) {
+	case artifactDelta, artifactMetadata, artifactSystemPackage:
+		log.Debugf("Filename %s is a package-manager artifact", filename)
 		return false
 	}
 
@@ -1483,25 +1557,6 @@ func isArchiveExecutableCandidate(name string) bool {
 	ext := path.Ext(base)
 
 	return ext == "" || ext == ".exe" || ext == ".appimage"
-}
-
-// filterAssetsBy removes assets matching the skip predicate, falling back to
-// the original list if every asset would be removed.
-func filterAssetsBy(as []*Asset, skip func(name string) bool, label string) []*Asset {
-	filtered := make([]*Asset, 0, len(as))
-	for _, a := range as {
-		if skip(a.Name) {
-			log.Debugf("Skipping %s asset %s", label, a.Name)
-			continue
-		}
-		filtered = append(filtered, a)
-	}
-
-	if len(filtered) == 0 {
-		log.Debugf("All %d assets matched %s filter, keeping original list", len(as), label)
-		return as
-	}
-	return filtered
 }
 
 // summarizeEntryNames renders a capped, sorted, comma-separated list of entry
