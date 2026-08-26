@@ -3,6 +3,7 @@ package providers
 import (
 	"net/url"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/aaronflorey/bin/pkg/config"
@@ -130,5 +131,43 @@ func TestNewGitHubIgnoresGHTokenFailure(t *testing.T) {
 	}
 	if gh.token != "" {
 		t.Fatalf("expected empty token when gh auth token lookup fails, got %q", gh.token)
+	}
+}
+
+func TestNewGitHubMemoizesGHTokenLookup(t *testing.T) {
+	t.Setenv("GITHUB_AUTH_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("GHES_BASE_URL", "")
+	t.Setenv("GHES_UPLOAD_URL", "")
+	t.Setenv("GHES_AUTH_TOKEN", "")
+
+	prevUseGHAuth := config.Get().UseGHAuth
+	config.Get().UseGHAuth = true
+	t.Cleanup(func() {
+		config.Get().UseGHAuth = prevUseGHAuth
+	})
+
+	prevRunGHAuthToken := runGHAuthToken
+	calls := 0
+	runGHAuthToken = sync.OnceValues(func() ([]byte, error) {
+		calls++
+		return []byte("gh-token\n"), nil
+	})
+	t.Cleanup(func() {
+		runGHAuthToken = prevRunGHAuthToken
+	})
+
+	u, err := url.Parse("https://github.com/cli/cli")
+	if err != nil {
+		t.Fatalf("parse url: %v", err)
+	}
+	for range 2 {
+		if _, err := newGitHub(u); err != nil {
+			t.Fatalf("newGitHub returned error: %v", err)
+		}
+	}
+
+	if calls != 1 {
+		t.Fatalf("expected one gh auth token lookup, got %d", calls)
 	}
 }

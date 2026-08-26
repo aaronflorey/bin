@@ -1,13 +1,14 @@
 package providers
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
-	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aaronflorey/bin/pkg/assets"
@@ -16,17 +17,35 @@ import (
 	"github.com/google/go-github/v73/github"
 )
 
-var runGHAuthToken = func() ([]byte, error) {
+var runGHAuthToken = sync.OnceValues(func() ([]byte, error) {
 	return exec.Command("gh", "auth", "token").Output()
+})
+
+type githubReleaseCacheKey struct {
+	baseURL  string
+	owner    string
+	repo     string
+	selector string
+	auth     [sha256.Size]byte
 }
 
+type githubReleaseCacheEntry struct {
+	once     sync.Once
+	releases []*github.RepositoryRelease
+	err      error
+}
+
+// ponytail: process-lifetime cache; add eviction only if bin gains a long-running mode.
+var githubReleaseCache = &sync.Map{}
+
 type gitHub struct {
-	url    *url.URL
-	client *github.Client
-	owner  string
-	repo   string
-	tag    string
-	token  string
+	url             *url.URL
+	client          *github.Client
+	owner           string
+	repo            string
+	tag             string
+	token           string
+	authFingerprint [sha256.Size]byte
 }
 
 func (g *gitHub) Fetch(opts *FetchOpts) (*File, error) {
@@ -34,46 +53,19 @@ func (g *gitHub) Fetch(opts *FetchOpts) (*File, error) {
 
 	// If we have a tag, let's fetch from there
 	var err error
-	var resp *github.Response
 	if len(g.tag) > 0 || len(opts.Version) > 0 {
 		if len(opts.Version) > 0 {
 			// this is used by for the `ensure` command
 			g.tag = opts.Version
 		}
 		log.Infof("Getting %s release for %s/%s", g.tag, g.owner, g.repo)
-		ctx, cancel := newProviderRequestContext()
-		release, resp, err = g.client.Repositories.GetReleaseByTag(ctx, g.owner, g.repo, g.tag)
-		cancel()
-		if err != nil {
-			g.logGitHubResponse(resp, err, "GetReleaseByTag")
-		}
+		release, err = g.releaseByTag(g.tag)
 	} else if opts.ReleaseTagPrefix != "" {
 		log.Infof("Getting latest %q release for %s/%s", opts.ReleaseTagPrefix, g.owner, g.repo)
-		history, historyErr := g.ListReleases(100)
-		if historyErr != nil {
-			return nil, historyErr
-		}
-		selected := SelectReleaseByPrefix(history, opts.ReleaseTagPrefix)
-		if selected == nil {
-			return nil, fmt.Errorf("repository %s/%s does not have a release with prefix %q", g.owner, g.repo, opts.ReleaseTagPrefix)
-		}
-		ctx, cancel := newProviderRequestContext()
-		release, resp, err = g.client.Repositories.GetReleaseByTag(ctx, g.owner, g.repo, selected.Version)
-		cancel()
-		if err != nil {
-			g.logGitHubResponse(resp, err, "GetReleaseByTag")
-		}
+		release, err = g.releaseByPrefix(opts.ReleaseTagPrefix)
 	} else {
 		log.Infof("Getting latest release for %s/%s", g.owner, g.repo)
-		ctx, cancel := newProviderRequestContext()
-		release, resp, err = g.client.Repositories.GetLatestRelease(ctx, g.owner, g.repo)
-		cancel()
-		if err != nil {
-			g.logGitHubResponse(resp, err, "GetLatestRelease")
-		} else if resp != nil && resp.StatusCode == http.StatusNotFound {
-			err = fmt.Errorf("repository %s/%s does not have releases", g.owner, g.repo)
-			g.logGitHubResponse(resp, err, "GetLatestRelease")
-		}
+		release, err = g.latestRelease()
 	}
 
 	if err != nil {
@@ -158,12 +150,8 @@ func (g *gitHub) Fetch(opts *FetchOpts) (*File, error) {
 // returns the corresponding name and url to fetch the version
 func (g *gitHub) GetLatestVersion() (*ReleaseInfo, error) {
 	log.Debugf("Getting latest release for %s/%s", g.owner, g.repo)
-	ctx, cancel := newProviderRequestContext()
-	defer cancel()
-
-	release, resp, err := g.client.Repositories.GetLatestRelease(ctx, g.owner, g.repo)
+	release, err := g.latestRelease()
 	if err != nil {
-		g.logGitHubResponse(resp, err, "GetLatestRelease")
 		return nil, err
 	}
 
@@ -175,12 +163,8 @@ func (g *gitHub) ListReleases(limit int) ([]*ReleaseInfo, error) {
 		limit = 100
 	}
 
-	ctx, cancel := newProviderRequestContext()
-	defer cancel()
-
-	releases, resp, err := g.client.Repositories.ListReleases(ctx, g.owner, g.repo, &github.ListOptions{PerPage: limit})
+	releases, err := g.releases(limit)
 	if err != nil {
-		g.logGitHubResponse(resp, err, "ListReleases")
 		return nil, err
 	}
 
@@ -236,6 +220,147 @@ func githubReleaseAssets(release *github.RepositoryRelease) []string {
 		}
 	}
 	return assets
+}
+
+func (g *gitHub) latestRelease() (*github.RepositoryRelease, error) {
+	return g.cachedRelease("latest", "GetLatestRelease", func() (*github.RepositoryRelease, *github.Response, error) {
+		ctx, cancel := newProviderRequestContext()
+		defer cancel()
+		return g.client.Repositories.GetLatestRelease(ctx, g.owner, g.repo)
+	})
+}
+
+func (g *gitHub) releaseByTag(tag string) (*github.RepositoryRelease, error) {
+	return g.cachedRelease("tag:"+tag, "GetReleaseByTag", func() (*github.RepositoryRelease, *github.Response, error) {
+		ctx, cancel := newProviderRequestContext()
+		defer cancel()
+		return g.client.Repositories.GetReleaseByTag(ctx, g.owner, g.repo, tag)
+	})
+}
+
+func (g *gitHub) releaseByPrefix(prefix string) (*github.RepositoryRelease, error) {
+	key := g.releaseCacheKey("prefix:" + strings.TrimSpace(prefix))
+	if release, ok := cachedGitHubRelease(key); ok {
+		return release, nil
+	}
+
+	releases, err := g.releases(100)
+	if err != nil {
+		return nil, err
+	}
+	for _, release := range releases {
+		if release != nil && MatchesReleaseTagPrefix(release.GetTagName(), prefix) {
+			return release, nil
+		}
+	}
+
+	return nil, fmt.Errorf("repository %s/%s does not have a release with prefix %q", g.owner, g.repo, prefix)
+}
+
+func (g *gitHub) releases(limit int) ([]*github.RepositoryRelease, error) {
+	key := g.releaseCacheKey(fmt.Sprintf("list:%d", limit))
+	return loadCachedGitHubReleases(key, func() ([]*github.RepositoryRelease, error) {
+		ctx, cancel := newProviderRequestContext()
+		defer cancel()
+
+		releases, resp, err := g.client.Repositories.ListReleases(ctx, g.owner, g.repo, &github.ListOptions{PerPage: limit})
+		if err != nil {
+			g.logGitHubResponse(resp, err, "ListReleases")
+			return nil, err
+		}
+
+		seenPrefixes := map[string]struct{}{}
+		for _, release := range releases {
+			if release == nil {
+				continue
+			}
+			g.rememberRelease("tag:"+release.GetTagName(), release)
+			prefix := ReleaseTagPrefix(release.GetTagName())
+			if prefix == "" {
+				prefix = BareReleaseTagPrefix
+			}
+			if _, seen := seenPrefixes[prefix]; seen {
+				continue
+			}
+			seenPrefixes[prefix] = struct{}{}
+			g.rememberRelease("prefix:"+prefix, release)
+		}
+
+		return releases, nil
+	})
+}
+
+func (g *gitHub) cachedRelease(selector, operation string, load func() (*github.RepositoryRelease, *github.Response, error)) (*github.RepositoryRelease, error) {
+	key := g.releaseCacheKey(selector)
+	releases, err := loadCachedGitHubReleases(key, func() ([]*github.RepositoryRelease, error) {
+		release, resp, err := load()
+		if err != nil {
+			g.logGitHubResponse(resp, err, operation)
+			return nil, err
+		}
+		if release == nil {
+			return nil, fmt.Errorf("GitHub %s returned no release for %s/%s", operation, g.owner, g.repo)
+		}
+		g.rememberRelease("tag:"+release.GetTagName(), release)
+		return []*github.RepositoryRelease{release}, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(releases) == 0 {
+		return nil, fmt.Errorf("GitHub %s returned no release for %s/%s", operation, g.owner, g.repo)
+	}
+	return releases[0], nil
+}
+
+func (g *gitHub) rememberRelease(selector string, release *github.RepositoryRelease) {
+	if release == nil {
+		return
+	}
+	entry := &githubReleaseCacheEntry{}
+	entry.once.Do(func() {
+		entry.releases = []*github.RepositoryRelease{release}
+	})
+	githubReleaseCache.LoadOrStore(g.releaseCacheKey(selector), entry)
+}
+
+func (g *gitHub) releaseCacheKey(selector string) githubReleaseCacheKey {
+	baseURL := ""
+	if g.client != nil && g.client.BaseURL != nil {
+		baseURL = g.client.BaseURL.String()
+	}
+	return githubReleaseCacheKey{
+		baseURL:  baseURL,
+		owner:    strings.ToLower(g.owner),
+		repo:     strings.ToLower(g.repo),
+		selector: selector,
+		auth:     g.authFingerprint,
+	}
+}
+
+func loadCachedGitHubReleases(key githubReleaseCacheKey, load func() ([]*github.RepositoryRelease, error)) ([]*github.RepositoryRelease, error) {
+	cache := githubReleaseCache
+	value, _ := cache.LoadOrStore(key, &githubReleaseCacheEntry{})
+	entry := value.(*githubReleaseCacheEntry)
+	entry.once.Do(func() {
+		entry.releases, entry.err = load()
+		if entry.err != nil {
+			cache.Delete(key)
+		}
+	})
+	return entry.releases, entry.err
+}
+
+func cachedGitHubRelease(key githubReleaseCacheKey) (*github.RepositoryRelease, bool) {
+	value, ok := githubReleaseCache.Load(key)
+	if !ok {
+		return nil, false
+	}
+	entry := value.(*githubReleaseCacheEntry)
+	if entry.err != nil || len(entry.releases) == 0 {
+		return nil, false
+	}
+	return entry.releases[0], true
 }
 
 func newGitHub(u *url.URL) (Provider, error) {
@@ -307,7 +432,20 @@ func newGitHub(u *url.URL) (Provider, error) {
 		client = github.NewClient(tc)
 	}
 
-	return &gitHub{url: u, client: client, owner: segments[0], repo: segments[1], tag: tag, token: token}, nil
+	effectiveToken := token
+	if ghesConfigured {
+		effectiveToken = gau
+	}
+
+	return &gitHub{
+		url:             u,
+		client:          client,
+		owner:           segments[0],
+		repo:            segments[1],
+		tag:             tag,
+		token:           token,
+		authFingerprint: sha256.Sum256([]byte(effectiveToken)),
+	}, nil
 }
 
 // logGitHubResponse logs the HTTP status and rate-limit state for a GitHub API
