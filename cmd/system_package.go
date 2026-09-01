@@ -57,7 +57,7 @@ func installSystemPackage(opts InstallOpts) (*InstallResult, error) {
 
 	installedAppBundle := ""
 	if pkgType == "dmg" {
-		installedAppBundle, err = installDMGApp(artifactPath)
+		installedAppBundle, err = installDMGApp(artifactPath, opts.FetchOpts.NonInteractive)
 		if err != nil {
 			return nil, err
 		}
@@ -174,7 +174,7 @@ func installPackageArtifact(packageType, packagePath string) error {
 	return nil
 }
 
-func installDMGApp(packagePath string) (string, error) {
+func installDMGApp(packagePath string, nonInteractive bool) (string, error) {
 	mountPoint, err := os.MkdirTemp("", "bin-dmg-mount-*")
 	if err != nil {
 		return "", err
@@ -202,8 +202,35 @@ func installDMGApp(packagePath string) (string, error) {
 	if _, err := os.Stat(targetPath); err != nil {
 		return "", fmt.Errorf("app bundle %s was not installed to %s", bundleName, applicationsDir)
 	}
+	if err := offerToSignUnsignedApp(targetPath, nonInteractive); err != nil {
+		return "", err
+	}
 
 	return bundleName, nil
+}
+
+func offerToSignUnsignedApp(appPath string, nonInteractive bool) error {
+	if err := execCommand("codesign", "--verify", "--deep", "--strict", appPath).Run(); err == nil {
+		return nil
+	}
+
+	if nonInteractive || !isPromptInteractive() {
+		log.Warnf("Installed app %s is unsigned; leaving it unsigned because prompts are disabled", filepath.Base(appPath))
+		return nil
+	}
+	if err := confirmDefaultNoPrompt(fmt.Sprintf("%s is unsigned. Trust it by applying an ad-hoc signature?", filepath.Base(appPath))); err != nil {
+		if err.Error() == "command aborted" {
+			log.Warnf("Installed app %s remains unsigned", filepath.Base(appPath))
+			return nil
+		}
+		return err
+	}
+
+	out, err := execCommand("codesign", "--force", "--sign", "-", "--deep", appPath).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to sign app bundle %s: %v (%s)", filepath.Base(appPath), err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 func detachDMG(mountPoint string) {

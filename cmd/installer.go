@@ -23,6 +23,7 @@ import (
 
 var isPromptInteractive = prompt.IsInteractive
 var confirmPrompt = prompt.Confirm
+var confirmDefaultNoPrompt = prompt.ConfirmDefaultNo
 var installProviderFactory = newProviderWithPolicy
 
 // applyChmod applies the configured mode for installed binaries.
