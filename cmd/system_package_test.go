@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -54,6 +55,37 @@ func TestFindSingleAppBundleRejectsMultipleApps(t *testing.T) {
 	_, err := findSingleAppBundle(root)
 	if err == nil {
 		t.Fatal("expected multiple app bundles error")
+	}
+}
+
+func TestOfferToSignUnsignedAppWithConsent(t *testing.T) {
+	originalExec := execCommand
+	originalInteractive := isPromptInteractive
+	originalConfirm := confirmDefaultNoPrompt
+	defer func() {
+		execCommand = originalExec
+		isPromptInteractive = originalInteractive
+		confirmDefaultNoPrompt = originalConfirm
+	}()
+
+	isPromptInteractive = func() bool { return true }
+	confirmDefaultNoPrompt = func(string) error { return nil }
+	var signed bool
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		exitCode := 0
+		if len(args) > 0 && args[0] == "--verify" {
+			exitCode = 1
+		} else if name == "codesign" {
+			signed = true
+		}
+		return helperExecCommand(t, exitCode, nil)(name, args...)
+	}
+
+	if err := offerToSignUnsignedApp("/Applications/Test.app", false); err != nil {
+		t.Fatal(err)
+	}
+	if !signed {
+		t.Fatal("expected unsigned app to be signed")
 	}
 }
 

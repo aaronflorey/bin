@@ -92,10 +92,23 @@ func SelectMultiple(msg string, options []MultiSelectOption) ([]string, error) {
 // for the given message and waits for the
 // users input.
 func Confirm(message string) error {
+	return confirm(message, true)
+}
+
+// ConfirmDefaultNo asks for explicit confirmation.
+func ConfirmDefaultNo(message string) error {
+	return confirm(message, false)
+}
+
+func confirm(message string, defaultYes bool) error {
 	resume := spinner.Pause()
 	defer resume()
 
-	fmt.Printf("\n%s [Y/n] ", message)
+	choice := "[y/N]"
+	if defaultYes {
+		choice = "[Y/n]"
+	}
+	fmt.Printf("\n%s %s ", message, choice)
 	reader := bufio.NewReader(stdin)
 	var response string
 
@@ -108,10 +121,14 @@ func Confirm(message string) error {
 	}
 
 	switch strings.ToLower(strings.TrimSpace(response)) {
-	case "", "y", "yes":
+	case "y", "yes":
+		return nil
+	case "":
+		if defaultYes {
+			return nil
+		}
+		return fmt.Errorf("command aborted")
 	default:
 		return fmt.Errorf("command aborted")
 	}
-
-	return nil
 }

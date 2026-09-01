@@ -30,4 +30,16 @@ func TestConfirm(t *testing.T) {
 			t.Fail()
 		}
 	})
+
+	t.Run("Default no requires explicit confirmation", func(t *testing.T) {
+		stdin = bytes.NewReader([]byte("\n"))
+		if err := ConfirmDefaultNo("Trust this app?"); err == nil {
+			t.Fatal("expected empty response to decline")
+		}
+
+		stdin = bytes.NewReader([]byte("y\n"))
+		if err := ConfirmDefaultNo("Trust this app?"); err != nil {
+			t.Fatal(err)
+		}
+	})
 }
