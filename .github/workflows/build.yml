@@ -81,7 +81,7 @@ jobs:
       matrix:
         tool:
           - name: jq
-            repo: github.com/jqlang/jq
+            repo: github.com/jqlang/jq/releases/tag/jq-1.8.2
           - name: yq
             repo: github.com/mikefarah/yq
           - name: ripgrep
@@ -95,13 +95,14 @@ jobs:
           - name: shellcheck
             repo: github.com/koalaman/shellcheck
           - name: hadolint
-            repo: github.com/hadolint/hadolint
+            repo: github.com/hadolint/hadolint/releases/tag/v2.15.1
           - name: shfmt
             repo: github.com/mvdan/sh
           - name: trivy
             repo: github.com/aquasecurity/trivy
           - name: arrow
             repo: github.com/domoritz/arrow-tools
+            select: csv2arrow-x86_64-unknown-linux-gnu.tar.xz
     env:
       GITHUB_TOKEN: ${{ github.token }}
     steps:
@@ -120,7 +121,7 @@ jobs:
         BIN_EXE_DIR: ${{ runner.temp }}/bin-tools
       run: |
         mkdir -p "$HOME" "$BIN_EXE_DIR"
-        ./bin-test install --force "${{ matrix.tool.repo }}"
+        ./bin-test install --force --select "${{ matrix.tool.select }}" "${{ matrix.tool.repo }}"
   system-package-smoke:
     name: system package smoke (.deb)
     runs-on: ubuntu-latest
