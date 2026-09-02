@@ -207,7 +207,6 @@ func fetchChecksumFile(url string, headers map[string]string) (string, error) {
 }
 
 func parseSHA256Checksum(content, fileName, checksumFileName string, hashOrder []string) *expectedChecksum {
-	targetName := strings.ToLower(fileName)
 	targetBase := strings.ToLower(filepath.Base(fileName))
 	exactChecksumTarget := checksumFileDirectlyTargetsAsset(checksumFileName, fileName)
 
@@ -220,8 +219,7 @@ func parseSHA256Checksum(content, fileName, checksumFileName string, hashOrder [
 		}
 
 		fields := strings.Fields(line)
-		lowerLine := strings.ToLower(line)
-		if strings.Contains(lowerLine, targetName) || strings.Contains(lowerLine, targetBase) {
+		if checksumLineMatchesTarget(fields, targetBase) {
 			if hash := selectSHA256FromOrderedFields(fields, hashOrder); hash != "" {
 				return &expectedChecksum{Hash: hash, Scope: checksumScopeArchive}
 			}
@@ -248,6 +246,16 @@ func parseSHA256Checksum(content, fileName, checksumFileName string, hashOrder [
 	}
 
 	return nil
+}
+
+func checksumLineMatchesTarget(fields []string, target string) bool {
+	for _, field := range fields {
+		name := strings.Trim(strings.ToLower(field), "*()")
+		if name == target || filepath.Base(name) == target {
+			return true
+		}
+	}
+	return false
 }
 
 func checksumAssetMatchesTarget(checksumFileName, targetName string) bool {

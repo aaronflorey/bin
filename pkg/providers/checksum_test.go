@@ -36,6 +36,15 @@ func TestParseSHA256ChecksumUsesHashOrder(t *testing.T) {
 	}
 }
 
+func TestParseSHA256ChecksumMatchesExactFileName(t *testing.T) {
+	content := "tool.tar.gz aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n" +
+		"tool bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n"
+	expected := parseSHA256Checksum(content, "tool", "checksums.txt", []string{"sha256"})
+	if expected == nil || expected.Hash != "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" {
+		t.Fatalf("unexpected hash: %#v", expected)
+	}
+}
+
 func TestParseSHA256ChecksumIgnoresUnrelatedSingleHashFile(t *testing.T) {
 	content := "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC\n"
 	expected := parseSHA256Checksum(content, "tool.tar.gz", "other-tool.sha256sum", nil)
