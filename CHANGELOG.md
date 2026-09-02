@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.7.0](https://github.com/aaronflorey/bin/compare/v2.6.0...v2.7.0) (2026-09-02)
+
+
+### Features
+
+* add macos app signing ([cfd883f](https://github.com/aaronflorey/bin/commit/cfd883f59922946429c0c469f4f5c565b463e071))
+* **assets:** expose platform-compatible installable assets ([1471130](https://github.com/aaronflorey/bin/commit/147113080a1b0b66dcfa0aba98ba2b71e8d7ec9c))
+* cache github responses ([1c0a3cd](https://github.com/aaronflorey/bin/commit/1c0a3cd47112b76747fa2882cc9b3965506972b6))
+* **config:** default use_gh_for_github_token to true ([5da1914](https://github.com/aaronflorey/bin/commit/5da1914ab21c9ee3ad36c5b1c0929b89e2515216))
+* harden binary payload validation and selection ([4499d08](https://github.com/aaronflorey/bin/commit/4499d087a579b86923afeb08ccadc3a8d59bc845))
+* **install:** select compatible products and release lanes ([8322028](https://github.com/aaronflorey/bin/commit/8322028815fc2baa27a5dd462167dd2bada46ac6))
+* **logging:** expose GitHub auth/rate-limit state and archive contents in errors ([1a513e1](https://github.com/aaronflorey/bin/commit/1a513e19d4044907ca3aad77ac33089342d94101))
+
+
+### Bug Fixes
+
+* **assets:** log gzip inner name during decompression ([4c78b14](https://github.com/aaronflorey/bin/commit/4c78b14f4b854c8f177f176ea83c9ecf424f5d36))
+* **config:** recreate cached default path if missing ([16a0c67](https://github.com/aaronflorey/bin/commit/16a0c67d3a6574de4001ad14e04eaddee47619fd))
+* **install:** preserve requested release lane for existing binaries ([2ecd586](https://github.com/aaronflorey/bin/commit/2ecd5862b52e95ced5be2fb069c26b98f5838e2c))
+* smoketests failing ([5341066](https://github.com/aaronflorey/bin/commit/534106675b7860a0b6bf8bbc770840a8ade39a88))
+
 ## [2.6.0](https://github.com/aaronflorey/bin/compare/v2.5.4...v2.6.0) (2026-07-09)
 
 
