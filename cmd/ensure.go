@@ -1,10 +1,12 @@
 package cmd
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/aaronflorey/bin/pkg/assets"
 	"github.com/aaronflorey/bin/pkg/config"
 	"github.com/aaronflorey/bin/pkg/providers"
 	"github.com/aaronflorey/bin/pkg/systempackage"
@@ -114,6 +116,9 @@ func runEnsure(args []string) error {
 func isPackagePathSelectionError(err error) bool {
 	if err == nil {
 		return false
+	}
+	if errors.Is(err, assets.ErrNoEligibleArchiveMember) || errors.Is(err, assets.ErrInvalidArchiveMemberSelection) {
+		return true
 	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "no files found in tar archive") ||
