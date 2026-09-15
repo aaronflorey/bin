@@ -170,7 +170,7 @@ func TestProcessURLRejectsArchiveChecksumMismatch(t *testing.T) {
 }
 
 func TestProcessURLReportsByteTransformationEvidence(t *testing.T) {
-	plain := []byte("plain executable payload")
+	plain := []byte("#!/bin/sh\nexit 0\n")
 	archive := buildTestZipArchive(t, map[string]string{"tool": "#!/bin/sh\nexit 0\n"})
 
 	tests := []struct {

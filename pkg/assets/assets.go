@@ -47,6 +47,9 @@ var (
 		".sig", ".minisig", ".pem", ".crt", ".cer", ".asc",
 		".blockmap",
 		".bundle",
+		// A release JSON document is metadata, even when it does not carry one
+		// of the more specific provenance suffixes above.
+		".json",
 	}
 
 	metadataTokens = []string{
@@ -1106,9 +1109,16 @@ func (f *Filter) ProcessURL(gf *FilteredAsset, expectedSHA string, verifyArchive
 		}
 	}()
 
+	budgets := artifactProcessingBudgets
+	if err := budgets.validate(); err != nil {
+		return nil, err
+	}
+	if res.ContentLength > budgets.maxDownloadBytes {
+		return nil, fmt.Errorf("%w: download bytes exceeds %d", ErrArtifactLimitExceeded, budgets.maxDownloadBytes)
+	}
 	barReader := bar.NewProxyReader(res.Body)
 	h := sha256.New()
-	_, err = io.Copy(io.MultiWriter(tempFile, h), barReader)
+	_, err = copyDownloadWithLimit(io.MultiWriter(tempFile, h), barReader, budgets.maxDownloadBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -1122,13 +1132,35 @@ func (f *Filter) ProcessURL(gf *FilteredAsset, expectedSHA string, verifyArchive
 		return nil, err
 	}
 
-	final, err := f.processDownloadedFile(tempPath, actualSHA, false)
+	if f.opts != nil && f.opts.SystemPackage {
+		final, err := f.processDownloadedFile(tempPath, actualSHA, false)
+		if err != nil {
+			return nil, err
+		}
+		cleanupTempFile = false
+		return final, nil
+	}
+
+	result, err := f.processReleaseArtifact(tempPath, actualSHA)
 	if err != nil {
 		return nil, err
 	}
 	cleanupTempFile = false
+	final := *result.final
+	final.Source = &artifactResultReader{result: result, reader: result.final.Source}
+	return &final, nil
+}
 
-	return final, nil
+func copyDownloadWithLimit(dst io.Writer, src io.Reader, limit int64) (int64, error) {
+	reader := &io.LimitedReader{R: src, N: limit + 1}
+	n, err := io.Copy(dst, reader)
+	if err != nil {
+		return n, err
+	}
+	if n > limit {
+		return n, fmt.Errorf("%w: download bytes exceeds %d", ErrArtifactLimitExceeded, limit)
+	}
+	return n, nil
 }
 
 func (f *Filter) processDownloadedFile(tempPath, downloadSHA string, transformed bool) (*finalFile, error) {
@@ -1295,7 +1327,7 @@ func (f *Filter) processGz(name string, r io.Reader, _ string) (*finalFile, erro
 // PackagePath by comparing base filenames. This allows archive entries
 // to match even when the directory name changes between versions.
 func (f *Filter) matchesPackagePath(entryName string) bool {
-	if f.opts.SkipPathCheck || len(f.opts.PackagePath) == 0 {
+	if f.opts == nil || f.opts.SkipPathCheck || len(f.opts.PackagePath) == 0 {
 		return true
 	}
 	return filepath.Base(entryName) == filepath.Base(f.opts.PackagePath)
