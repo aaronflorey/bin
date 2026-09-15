@@ -525,3 +525,393 @@ func TestCheckAndLoadHonorsExplicitUseGHAuthTrue(t *testing.T) {
 		t.Fatalf("expected UseGHAuth to be true when explicitly set, got false")
 	}
 }
+
+func setupTransactionConfig(t *testing.T) (string, string) {
+	t.Helper()
+
+	cfg = config{}
+	t.Cleanup(func() { cfg = config{} })
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	binDir := t.TempDir()
+	t.Setenv("BIN_CONFIG", configPath)
+	t.Setenv("BIN_EXE_DIR", binDir)
+	if err := CheckAndLoad(); err != nil {
+		t.Fatalf("CheckAndLoad: %v", err)
+	}
+	return configPath, binDir
+}
+
+func TestCommitBinaryTransactionReloadsAndMergesCurrentConfig(t *testing.T) {
+	configPath, binDir := setupTransactionConfig(t)
+	diskBinary := &Binary{Path: filepath.Join(binDir, "from-disk"), Version: "1.0.0"}
+	seed := config{DefaultPath: binDir, Bins: map[string]*Binary{diskBinary.Path: diskBinary}}
+	raw, err := json.Marshal(seed)
+	if err != nil {
+		t.Fatalf("marshal seed config: %v", err)
+	}
+	if err := os.WriteFile(configPath, raw, configFileMode); err != nil {
+		t.Fatalf("write seed config: %v", err)
+	}
+
+	intended := &Binary{Path: filepath.Join(binDir, "new"), Version: "2.0.0"}
+	if err := CommitBinaryTransaction(BinaryTransaction{
+		ID: "transaction-new", Intended: intended,
+		Publish: func(previous *Binary) error {
+			if previous != nil {
+				t.Fatalf("publish previous = %#v, want nil", previous)
+			}
+			return nil
+		},
+		Rollback: func(*Binary) error { return nil },
+	}); err != nil {
+		t.Fatalf("CommitBinaryTransaction: %v", err)
+	}
+
+	var persisted config
+	persistedRaw, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read persisted config: %v", err)
+	}
+	if err := json.Unmarshal(persistedRaw, &persisted); err != nil {
+		t.Fatalf("unmarshal persisted config: %v", err)
+	}
+	if persisted.Bins[diskBinary.Path] == nil || persisted.Bins[intended.Path] == nil {
+		t.Fatalf("transaction discarded unrelated state: %#v", persisted.Bins)
+	}
+	if got, err := GetBinary(intended.Path); err != nil || got == nil || got.Version != intended.Version {
+		t.Fatalf("in-memory config not synchronized: binary=%#v err=%v", got, err)
+	}
+}
+
+func TestCommitBinaryTransactionKeepsConcurrentDifferentBinaries(t *testing.T) {
+	_, binDir := setupTransactionConfig(t)
+	paths := []string{filepath.Join(binDir, "one"), filepath.Join(binDir, "two")}
+	errs := make(chan error, len(paths))
+	var group sync.WaitGroup
+	for _, path := range paths {
+		group.Add(1)
+		go func(path string) {
+			defer group.Done()
+			errs <- CommitBinaryTransaction(BinaryTransaction{
+				ID: filepath.Base(path), Intended: &Binary{Path: path, Version: "1.0.0"},
+				Publish:  func(*Binary) error { return nil },
+				Rollback: func(*Binary) error { return nil },
+			})
+		}(path)
+	}
+	group.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent transaction: %v", err)
+		}
+	}
+	for _, path := range paths {
+		if got, err := GetBinary(path); err != nil || got == nil {
+			t.Fatalf("transaction for %q missing: binary=%#v err=%v", path, got, err)
+		}
+	}
+}
+
+func TestCommitBinaryTransactionSerializesSameBinaryPublication(t *testing.T) {
+	_, binDir := setupTransactionConfig(t)
+	path := filepath.Join(binDir, "tool")
+	entered := make(chan struct{}, 2)
+	release := make(chan struct{})
+	errs := make(chan error, 2)
+	for _, version := range []string{"1.0.0", "2.0.0"} {
+		go func(version string) {
+			errs <- CommitBinaryTransaction(BinaryTransaction{
+				ID: version, Intended: &Binary{Path: path, Version: version},
+				Publish: func(*Binary) error {
+					entered <- struct{}{}
+					<-release
+					return nil
+				},
+				Rollback: func(*Binary) error { return nil },
+			})
+		}(version)
+	}
+	<-entered
+	select {
+	case <-entered:
+		t.Fatal("same-path publication callbacks ran concurrently")
+	default:
+	}
+	close(release)
+	<-entered
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Fatalf("same-path transaction: %v", err)
+		}
+	}
+}
+
+func TestCommitBinaryTransactionConfigFailureRestoresPublishedExecutableAndRecord(t *testing.T) {
+	_, binDir := setupTransactionConfig(t)
+	path := filepath.Join(binDir, "tool")
+	if err := os.WriteFile(path, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	previous := &Binary{Path: path, Version: "1.0.0", Hash: "old-hash"}
+	if err := UpsertBinary(previous); err != nil {
+		t.Fatal(err)
+	}
+	backup := path + ".rollback"
+	originalWrite := writeConfig
+	writeConfig = func(string, config) error { return errors.New("config write failed") }
+	t.Cleanup(func() { writeConfig = originalWrite })
+
+	err := CommitBinaryTransaction(BinaryTransaction{
+		ID: "restore-old", Intended: &Binary{Path: path, Version: "2.0.0", Hash: "new-hash"},
+		Publish: func(*Binary) error {
+			if err := os.Rename(path, backup); err != nil {
+				return err
+			}
+			return os.WriteFile(path, []byte("new"), 0o755)
+		},
+		Rollback: func(*Binary) error {
+			if err := os.Remove(path); err != nil {
+				return err
+			}
+			return os.Rename(backup, path)
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "config write failed") {
+		t.Fatalf("transaction error = %v, want config write failure", err)
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil || string(contents) != "old" {
+		t.Fatalf("executable after rollback = %q, err=%v", contents, err)
+	}
+	stored, err := GetBinary(path)
+	if err != nil || stored == nil || stored.Version != previous.Version || stored.Hash != previous.Hash {
+		t.Fatalf("record after rollback = %#v, err=%v", stored, err)
+	}
+}
+
+func TestUnresolvedBinaryTransactionBlocksSameKeyAndPersists(t *testing.T) {
+	configPath, binDir := setupTransactionConfig(t)
+	path := filepath.Join(binDir, "tool")
+	writeErr := errors.New("write failed")
+	originalWrite := writeConfig
+	writes := 0
+	writeConfig = func(path string, current config) error {
+		writes++
+		if writes == 1 {
+			return writeErr
+		}
+		return originalWrite(path, current)
+	}
+	t.Cleanup(func() { writeConfig = originalWrite })
+
+	err := CommitBinaryTransaction(BinaryTransaction{
+		ID: "owner-a", Intended: &Binary{Path: path, Version: "2.0.0"},
+		Publish:          func(*Binary) error { return nil },
+		Rollback:         func(*Binary) error { return errors.New("rollback failed") },
+		RollbackArtifact: func() string { return filepath.Join(binDir, "tool.rollback-owner-a") },
+	})
+	if !errors.Is(err, writeErr) {
+		t.Fatalf("transaction error = %v, want config write failure", err)
+	}
+	if _, err := GetBinary(path); !errors.Is(err, ErrBinaryRecoveryRequired) {
+		t.Fatalf("GetBinary error = %v, want unresolved state", err)
+	}
+
+	called := false
+	err = CommitBinaryTransaction(BinaryTransaction{
+		ID: "owner-b", Intended: &Binary{Path: path, Version: "3.0.0"},
+		Publish:  func(*Binary) error { called = true; return nil },
+		Rollback: func(*Binary) error { return nil },
+	})
+	if !errors.Is(err, ErrBinaryRecoveryRequired) || called {
+		t.Fatalf("same-key transaction error=%v publish-called=%t", err, called)
+	}
+
+	persistedRaw, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read persisted config: %v", err)
+	}
+	var persisted config
+	if err := json.Unmarshal(persistedRaw, &persisted); err != nil {
+		t.Fatalf("unmarshal persisted config: %v", err)
+	}
+	if state := persisted.UnresolvedTransactions[path]; state == nil || state.ID != "owner-a" || state.ArtifactPath == "" || state.Intended.Version != "2.0.0" {
+		t.Fatalf("persisted unresolved state = %#v", state)
+	}
+	cfg = config{}
+	if err := CheckAndLoad(); err != nil {
+		t.Fatalf("CheckAndLoad must leave reconciliation available: %v", err)
+	}
+	if _, err := GetBinary(path); !errors.Is(err, ErrBinaryRecoveryRequired) {
+		t.Fatalf("reloaded unresolved record error = %v", err)
+	}
+}
+
+func TestRecoverBinaryTransactionUsesOwnedHashEvidence(t *testing.T) {
+	configPath, binDir := setupTransactionConfig(t)
+	path := filepath.Join(binDir, "tool")
+	backup := path + ".rollback-owner"
+	if err := os.WriteFile(path, []byte("new"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(backup, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	oldHash, _, err := transactionFileHash(backup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newHash, _, err := transactionFileHash(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := &Binary{Path: path, Version: "1.0.0", Hash: oldHash}
+	intended := &Binary{Path: path, Version: "2.0.0", Hash: newHash}
+	loaded := config{DefaultPath: binDir, Bins: map[string]*Binary{path: previous}, UnresolvedTransactions: map[string]*UnresolvedBinaryTransaction{path: {ID: "owner", DestinationPath: path, ArtifactPath: backup, Previous: previous, Intended: intended}}}
+	if err := writeConfig(configPath, loaded); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeTransactionJournal(configPath, path, loaded.UnresolvedTransactions[path], transactionJournalIntent); err != nil {
+		t.Fatal(err)
+	}
+	cfg = config{}
+	if err := CheckAndLoad(); err != nil {
+		t.Fatal(err)
+	}
+	if err := RecoverBinaryTransaction(path); err != nil {
+		t.Fatal(err)
+	}
+	cfg = config{}
+	if err := CheckAndLoad(); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := GetBinary(path); err != nil || got == nil || got.Version != intended.Version {
+		t.Fatalf("recovered binary = %#v, err=%v", got, err)
+	}
+	if _, err := os.Stat(backup); !os.IsNotExist(err) {
+		t.Fatalf("owned backup remains: %v", err)
+	}
+}
+
+func TestRecoverBinaryTransactionRestoresPreviousOrRemovesUnpublishedNewInstall(t *testing.T) {
+	t.Run("restore previous backup", func(t *testing.T) {
+		configPath, binDir := setupTransactionConfig(t)
+		path := filepath.Join(binDir, "tool")
+		backup := path + ".rollback-owner"
+		if err := os.WriteFile(backup, []byte("old"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		oldHash, _, err := transactionFileHash(backup)
+		if err != nil {
+			t.Fatal(err)
+		}
+		previous := &Binary{Path: path, Version: "1.0.0", Hash: oldHash}
+		seedRecoveryTransaction(t, configPath, binDir, path, &UnresolvedBinaryTransaction{ID: "owner", DestinationPath: path, ArtifactPath: backup, Previous: previous, Intended: &Binary{Path: path, Version: "2.0.0", Hash: "new-hash"}}, previous)
+		if err := RecoverBinaryTransaction(path); err != nil {
+			t.Fatal(err)
+		}
+		cfg = config{}
+		if err := CheckAndLoad(); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := GetBinary(path); err != nil || got == nil || got.Version != previous.Version {
+			t.Fatalf("recovered record = %#v err=%v", got, err)
+		}
+		if _, err := os.Stat(backup); !os.IsNotExist(err) {
+			t.Fatalf("owned backup remains: %v", err)
+		}
+	})
+
+	t.Run("new install was never published", func(t *testing.T) {
+		configPath, binDir := setupTransactionConfig(t)
+		path := filepath.Join(binDir, "tool")
+		unresolved := &UnresolvedBinaryTransaction{ID: "owner", DestinationPath: path, Intended: &Binary{Path: path, Version: "1.0.0", Hash: "new-hash"}}
+		seedRecoveryTransaction(t, configPath, binDir, path, unresolved, nil)
+		if err := RecoverBinaryTransaction(path); err != nil {
+			t.Fatal(err)
+		}
+		cfg = config{}
+		if err := CheckAndLoad(); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := GetBinary(path); err != nil || got != nil {
+			t.Fatalf("unpublished new install persisted: %#v err=%v", got, err)
+		}
+		if _, ok := cfg.UnresolvedTransactions[path]; ok {
+			t.Fatal("unpublished new install remained unresolved")
+		}
+	})
+}
+
+func seedRecoveryTransaction(t *testing.T, configPath, binDir, path string, unresolved *UnresolvedBinaryTransaction, current *Binary) {
+	t.Helper()
+	loaded := config{DefaultPath: binDir, Bins: map[string]*Binary{}, UnresolvedTransactions: map[string]*UnresolvedBinaryTransaction{path: unresolved}}
+	if current != nil {
+		loaded.Bins[path] = current
+	}
+	if err := writeConfig(configPath, loaded); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeTransactionJournal(configPath, path, unresolved, transactionJournalIntent); err != nil {
+		t.Fatal(err)
+	}
+	cfg = config{}
+	if err := CheckAndLoad(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCommitBinaryTransactionCleanupFailureKeepsRecoveryState(t *testing.T) {
+	configPath, binDir := setupTransactionConfig(t)
+	path := filepath.Join(binDir, "tool")
+	intended := &Binary{Path: path, Version: "2.0.0"}
+	transactionID := "intent-owner"
+	backup := path + ".rollback-" + transactionID
+	err := CommitBinaryTransaction(BinaryTransaction{
+		ID: transactionID, Intended: intended, DestinationPath: path,
+		ReserveRollbackArtifact: func() (string, error) { return backup, nil },
+		Publish: func(*Binary) error {
+			if _, err := os.Stat(transactionJournalPath(configPath, transactionID)); err != nil {
+				t.Fatalf("publish started without durable intent journal: %v", err)
+			}
+			data, err := os.ReadFile(transactionJournalPath(configPath, transactionID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var journal transactionJournal
+			if err := json.Unmarshal(data, &journal); err != nil || journal.Unresolved.ArtifactPath != backup {
+				t.Fatalf("intent journal did not reserve owned backup: %#v err=%v", journal, err)
+			}
+			return nil
+		},
+		Rollback: func(*Binary) error { return nil },
+		Cleanup:  func() error { return errors.New("backup cleanup failed") },
+	})
+	if err == nil || !strings.Contains(err.Error(), "backup cleanup failed") {
+		t.Fatalf("commit error = %v, want cleanup failure", err)
+	}
+	if _, err := os.Stat(transactionJournalPath(configPath, transactionID)); err != nil {
+		t.Fatalf("cleanup failure unexpectedly removed journal: %v", err)
+	}
+	cfg = config{}
+	if err := CheckAndLoad(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := GetBinary(path); !errors.Is(err, ErrBinaryRecoveryRequired) {
+		t.Fatalf("cleanup failure left ordinary state usable: %v", err)
+	}
+}
+
+func TestCommitBinaryTransactionRejectsUnsafeJournalOwner(t *testing.T) {
+	_, binDir := setupTransactionConfig(t)
+	err := CommitBinaryTransaction(BinaryTransaction{
+		ID:       "../outside",
+		Intended: &Binary{Path: filepath.Join(binDir, "tool")},
+		Publish:  func(*Binary) error { return nil },
+		Rollback: func(*Binary) error { return nil },
+	})
+	if err == nil || !strings.Contains(err.Error(), "invalid binary transaction owner") {
+		t.Fatalf("transaction error = %v, want unsafe owner rejection", err)
+	}
+}

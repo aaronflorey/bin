@@ -63,13 +63,29 @@ func newUpdateCmd() *updateCmd {
 			var updates []availableUpdate
 			updateFailures := map[*config.Binary]error{}
 			alreadyReportedFailures := map[*config.Binary]bool{}
+			for path, binary := range binsToProcess {
+				if binary == nil || effectiveInstallMode(binary.InstallMode) != installModeBinary {
+					continue
+				}
+				if err := config.CheckBinaryResolved(path); err != nil {
+					if !root.opts.continueOnError {
+						return err
+					}
+					updateFailures[binary] = wrapUpdateFailure(binary, err)
+					delete(binsToProcess, path)
+				}
+			}
 
 			if hasExplicitVersion {
 				updates = collectExplicitVersionUpdates(binsToProcess, explicitVersion)
 			} else {
-				updates, updateFailures, err = collectAvailableUpdates(binsToProcess, root.newProvider, root.opts.continueOnError, root.opts.parallelism)
+				var discoveryFailures map[*config.Binary]error
+				updates, discoveryFailures, err = collectAvailableUpdates(binsToProcess, root.newProvider, root.opts.continueOnError, root.opts.parallelism)
 				if err != nil {
 					return err
+				}
+				for binary, failure := range discoveryFailures {
+					updateFailures[binary] = failure
 				}
 			}
 
@@ -93,6 +109,12 @@ func newUpdateCmd() *updateCmd {
 			if len(updates) == 0 && len(updateFailures) == 0 {
 				log.Infof("All binaries are up to date")
 				return nil
+			}
+			if len(updates) == 0 {
+				for _, err := range updateFailures {
+					log.Warnf("%v", err)
+				}
+				return wrapErrorWithCode(fmt.Errorf("some updates failed"), 4, "")
 			}
 
 			for _, update := range updates {

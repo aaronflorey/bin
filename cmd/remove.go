@@ -58,6 +58,13 @@ func newRemoveCmd() *removeCmd {
 			if len(targets) == 0 {
 				return nil
 			}
+			selected := make(map[string]*config.Binary, len(targets))
+			for _, target := range targets {
+				selected[target.configPath] = target.binary
+			}
+			if err := ensureDirectBinariesResolved(selected); err != nil {
+				return err
+			}
 
 			// Execute pre-remove hooks before any changes
 			if err := config.ExecuteHooks(config.GetHooks(config.PreRemove)); err != nil {

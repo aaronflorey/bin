@@ -2,11 +2,142 @@ package providers
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
+
+func TestGoInstallFetchUsesIsolatedOutputOnBuildAndMetadataFailures(t *testing.T) {
+	previousCommand := goInstallCommand
+	t.Cleanup(func() { goInstallCommand = previousCommand })
+
+	normalBin := filepath.Join(t.TempDir(), "tool")
+	if err := os.WriteFile(normalBin, []byte("existing"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOBIN", filepath.Dir(normalBin))
+
+	t.Run("build failure", func(t *testing.T) {
+		goInstallCommand = func(string, ...string) *exec.Cmd {
+			return goInstallHelperCommand("fail")
+		}
+		g := &goinstall{repo: "example.test/tool", name: "tool", tag: "v1.0.0", httpClient: http.DefaultClient}
+		if _, err := g.Fetch(&FetchOpts{}); err == nil {
+			t.Fatal("Fetch succeeded after failed build")
+		}
+		contents, err := os.ReadFile(normalBin)
+		if err != nil || string(contents) != "existing" {
+			t.Fatalf("normal GOBIN executable = %q, err=%v", contents, err)
+		}
+	})
+
+	t.Run("metadata fetch failure cleans output", func(t *testing.T) {
+		goInstallCommand = func(string, ...string) *exec.Cmd {
+			return goInstallHelperCommand("write")
+		}
+		capture := filepath.Join(t.TempDir(), "output-dir")
+		t.Setenv("GO_INSTALL_CAPTURE", capture)
+		g := &goinstall{
+			repo: "example.test/tool", name: "tool", tag: "v1.0.0",
+			httpClient: &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				return nil, fmt.Errorf("metadata unavailable")
+			})},
+		}
+		if _, err := g.Fetch(&FetchOpts{}); err == nil {
+			t.Fatal("Fetch succeeded after metadata failure")
+		}
+		outputDir, err := os.ReadFile(capture)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(string(outputDir)); !os.IsNotExist(err) {
+			t.Fatalf("isolated output directory still exists: %v", err)
+		}
+		contents, err := os.ReadFile(normalBin)
+		if err != nil || string(contents) != "existing" {
+			t.Fatalf("normal GOBIN executable = %q, err=%v", contents, err)
+		}
+	})
+}
+
+func TestGoInstallOutputName(t *testing.T) {
+	for _, test := range []struct{ name, goos, want string }{
+		{name: "tool", goos: "windows", want: "tool.exe"},
+		{name: "tool.exe", goos: "windows", want: "tool.exe"},
+		{name: "tool", goos: "linux", want: "tool"},
+	} {
+		if got := goInstallOutputName(test.name, test.goos); got != test.want {
+			t.Fatalf("goInstallOutputName(%q, %q) = %q, want %q", test.name, test.goos, got, test.want)
+		}
+	}
+}
+
+func TestGoInstallFetchCleansIsolatedOutputWhenStreamCloses(t *testing.T) {
+	previousCommand := goInstallCommand
+	t.Cleanup(func() { goInstallCommand = previousCommand })
+	var outputDir string
+	goInstallCommand = func(string, ...string) *exec.Cmd {
+		return goInstallHelperCommand("write")
+	}
+	capture := filepath.Join(t.TempDir(), "output-dir")
+	t.Setenv("GO_INSTALL_CAPTURE", capture)
+	g := &goinstall{repo: "example.test/tool", name: "tool", tag: "v1.0.0", httpClient: versionInfoClient()}
+	file, err := g.Fetch(&FetchOpts{})
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	output, err := os.ReadFile(capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputDir = string(output)
+	if _, err := io.ReadAll(file.Data); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Data.(io.Closer).Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(outputDir); !os.IsNotExist(err) {
+		t.Fatalf("isolated output directory still exists: %v", err)
+	}
+}
+
+func goInstallHelperCommand(mode string) *exec.Cmd {
+	command := exec.Command(os.Args[0], "-test.run=TestGoInstallHelperProcess", "--", mode)
+	command.Env = append(os.Environ(), "GO_WANT_GO_INSTALL_HELPER=1")
+	return command
+}
+
+func TestGoInstallHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_GO_INSTALL_HELPER") != "1" {
+		return
+	}
+	if len(os.Args) == 0 || os.Args[len(os.Args)-1] == "fail" {
+		os.Exit(1)
+	}
+	outputDir := os.Getenv("GOBIN")
+	if err := os.WriteFile(filepath.Join(outputDir, goInstallOutputName("tool", runtime.GOOS)), []byte("built"), 0o755); err != nil {
+		os.Exit(2)
+	}
+	if capture := os.Getenv("GO_INSTALL_CAPTURE"); capture != "" {
+		if err := os.WriteFile(capture, []byte(outputDir), 0o600); err != nil {
+			os.Exit(3)
+		}
+	}
+	os.Exit(0)
+}
+
+func versionInfoClient() *http.Client {
+	return &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"Version":"v1.0.0","Time":"2024-01-01T00:00:00Z"}`)), Header: make(http.Header)}, nil
+	})}
+}
 
 func TestModuleRemoveVersion(t *testing.T) {
 	cases := []struct {
