@@ -178,6 +178,7 @@ func newUpdateCmd() *updateCmd {
 					ConfigPath:            b.Path,
 					AllowProviderFallback: b.Provider != "",
 					LogicalName:           b.RemoteName,
+					AppBundle:             b.AppBundle,
 				})
 				if err != nil {
 					compatibilityFailure := effectiveInstallMode(b.InstallMode) == installModeSystemPackage && (errors.Is(err, assets.ErrNoCompatibleFiles) || errors.Is(err, systempackage.ErrIncompatible))

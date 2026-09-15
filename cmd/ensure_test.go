@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -93,5 +94,49 @@ func TestEnsureAppliesPersistedSelectionIntent(t *testing.T) {
 	}
 	if ensured.SelectionIntent == nil || ensured.SelectionIntent.LogicalProduct != "tool" || ensured.SelectionIntent.ArchiveMember != "bin/tool" {
 		t.Fatalf("ensure did not persist derived selection intent: %#v", ensured.SelectionIntent)
+	}
+}
+
+func TestEnsureUsesPersistedDMGExecutablePath(t *testing.T) {
+	setupTestConfig(t)
+	applications := t.TempDir()
+	previousApplicationsDir := applicationsDir
+	applicationsDir = applications
+	t.Cleanup(func() { applicationsDir = previousApplicationsDir })
+
+	actualPath := filepath.Join(applications, "Fastpotify.app", "Contents", "MacOS", "Fastpotify-bin")
+	if err := os.MkdirAll(filepath.Dir(actualPath), 0o755); err != nil {
+		t.Fatalf("create app executable directory: %v", err)
+	}
+	writeTestBinary(t, actualPath)
+	if err := config.UpsertBinary(&config.Binary{
+		Path: actualPath, RemoteName: "spotify", Version: "1.0.0", Hash: "different", URL: "https://example.test/fastpotify", Provider: "github",
+		InstallMode: installModeSystemPackage, PackageType: "dmg", AppBundle: "Fastpotify.app",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	originalRegistry := lifecycleRegistry
+	t.Cleanup(func() { lifecycleRegistry = originalRegistry })
+	installed := false
+	lifecycleRegistry = map[string]lifecycleStrategy{
+		installModeSystemPackage: {
+			applyStoredFetch: originalRegistry[installModeSystemPackage].applyStoredFetch,
+			install: func(opts InstallOpts) (*InstallResult, error) {
+				installed = true
+				if opts.Path != actualPath || opts.AppBundle != "Fastpotify.app" || opts.FetchOpts.PackageName != "spotify" {
+					t.Fatalf("ensure install options = %#v, want persisted executable and bundle", opts)
+				}
+				return &InstallResult{Version: opts.FetchOpts.Version, Path: opts.Path}, nil
+			},
+			resolvePath: originalRegistry[installModeSystemPackage].resolvePath,
+		},
+	}
+
+	if err := runEnsure(nil); err != nil {
+		t.Fatalf("runEnsure() error = %v", err)
+	}
+	if !installed {
+		t.Fatal("expected ensure to reinstall the mismatched executable")
 	}
 }

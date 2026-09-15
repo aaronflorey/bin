@@ -5,13 +5,13 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 
+	"github.com/aaronflorey/bin/pkg/assets"
 	"github.com/aaronflorey/bin/pkg/config"
 	"github.com/aaronflorey/bin/pkg/systempackage"
 	"github.com/caarlos0/log"
@@ -62,9 +62,9 @@ func installSystemPackage(opts InstallOpts) (*InstallResult, error) {
 	}
 	defer os.Remove(artifactPath)
 
-	installedAppBundle := ""
+	var installedApp dmgInstalledApp
 	if pkgType == "dmg" {
-		installedAppBundle, err = installDMGApp(artifactPath, opts.FetchOpts.NonInteractive)
+		installedApp, err = installDMGApp(artifactPath, opts.FetchOpts.NonInteractive, opts.RequestedAppBundle, opts.AppBundle, opts.LogicalName)
 		if err != nil {
 			return nil, err
 		}
@@ -72,7 +72,7 @@ func installSystemPackage(opts InstallOpts) (*InstallResult, error) {
 		return nil, err
 	}
 
-	resolvedPath, trackedName, appBundle, err := resolveTrackedSystemInstall(pkgType, opts.FetchOpts.PackageName, installedAppBundle, before)
+	resolvedPath, trackedName, appBundle, err := resolveTrackedSystemInstall(pkgType, opts.FetchOpts.PackageName, installedApp, before)
 	if err != nil {
 		return nil, err
 	}
@@ -114,18 +114,12 @@ func installSystemPackage(opts InstallOpts) (*InstallResult, error) {
 	return &InstallResult{Name: trackedName, Version: pResult.Version, Path: configPath}, nil
 }
 
-func resolveTrackedSystemInstall(packageType, packageName, installedAppBundle string, before map[string]string) (string, string, string, error) {
+func resolveTrackedSystemInstall(packageType, packageName string, installedApp dmgInstalledApp, before map[string]string) (string, string, string, error) {
 	if packageType == "dmg" {
-		bundleName, err := findInstalledAppBundleName(packageName, installedAppBundle)
-		if err != nil {
-			return "", "", "", err
+		if installedApp.bundleName == "" || installedApp.executablePath == "" {
+			return "", "", "", fmt.Errorf("missing installed app bundle metadata")
 		}
-		bundlePath := filepath.Join(applicationsDir, bundleName)
-		resolvedPath, err := resolveAppBundleExecutable(bundlePath)
-		if err != nil {
-			return "", "", "", err
-		}
-		return resolvedPath, strings.TrimSuffix(bundleName, ".app"), bundleName, nil
+		return installedApp.executablePath, strings.TrimSuffix(installedApp.bundleName, ".app"), installedApp.bundleName, nil
 	}
 
 	resolvedPath, trackedName, err := resolveTrackedSystemCommand(packageName, before)
@@ -206,39 +200,85 @@ func installPackageArtifact(packageType, packagePath string) error {
 	return nil
 }
 
-func installDMGApp(packagePath string, nonInteractive bool) (string, error) {
+type dmgInstalledApp struct {
+	bundleName     string
+	executablePath string
+}
+
+func installDMGApp(packagePath string, nonInteractive bool, requestedIdentity, storedIdentity, legacyName string) (dmgInstalledApp, error) {
 	mountPoint, err := os.MkdirTemp("", "bin-dmg-mount-*")
 	if err != nil {
-		return "", err
+		return dmgInstalledApp{}, err
 	}
 	defer os.RemoveAll(mountPoint)
 
 	out, err := execCommand("hdiutil", "attach", "-nobrowse", "-readonly", "-mountpoint", mountPoint, packagePath).CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("failed to mount dmg: %v (%s)", err, strings.TrimSpace(string(out)))
+		return dmgInstalledApp{}, fmt.Errorf("failed to mount dmg: %v (%s)", err, strings.TrimSpace(string(out)))
 	}
 	defer detachDMG(mountPoint)
 
-	bundlePath, err := findSingleAppBundle(mountPoint)
+	bundlePath, err := resolveDMGAppBundle(mountPoint, requestedIdentity, storedIdentity, legacyName)
 	if err != nil {
-		return "", err
+		return dmgInstalledApp{}, err
+	}
+	sourceExecutable, err := resolveDMGSourceExecutable(mountPoint, bundlePath)
+	if err != nil {
+		return dmgInstalledApp{}, err
 	}
 
 	bundleName := filepath.Base(bundlePath)
 	targetPath := filepath.Join(applicationsDir, bundleName)
+	relativeExecutable, err := filepath.Rel(bundlePath, sourceExecutable)
+	if err != nil {
+		return dmgInstalledApp{}, fmt.Errorf("resolve app executable path: %w", err)
+	}
+	targetExecutable := filepath.Join(targetPath, relativeExecutable)
 	out, err = execCommand("ditto", bundlePath, targetPath).CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("failed to install app bundle %s: %v (%s)", bundleName, err, strings.TrimSpace(string(out)))
+		return dmgInstalledApp{}, fmt.Errorf("failed to install app bundle %s: %v (%s)", bundleName, err, strings.TrimSpace(string(out)))
 	}
 
 	if _, err := os.Stat(targetPath); err != nil {
-		return "", fmt.Errorf("app bundle %s was not installed to %s", bundleName, applicationsDir)
+		return dmgInstalledApp{}, fmt.Errorf("app bundle %s was not installed to %s", bundleName, applicationsDir)
 	}
 	if err := offerToSignUnsignedApp(targetPath, nonInteractive); err != nil {
-		return "", err
+		return dmgInstalledApp{}, err
 	}
 
-	return bundleName, nil
+	return dmgInstalledApp{bundleName: bundleName, executablePath: targetExecutable}, nil
+}
+
+// resolveDMGSourceExecutable validates the executable before any copy or
+// signing side effect. Both the bundle and executable must remain inside the
+// mounted image and selected bundle after symlink resolution.
+func resolveDMGSourceExecutable(mountPoint, bundlePath string) (string, error) {
+	canonicalMount, err := filepath.EvalSymlinks(mountPoint)
+	if err != nil {
+		return "", fmt.Errorf("resolve dmg mount root: %w", err)
+	}
+	canonicalBundle, err := filepath.EvalSymlinks(bundlePath)
+	if err != nil {
+		return "", fmt.Errorf("resolve dmg app bundle: %w", err)
+	}
+	if !pathWithin(canonicalMount, canonicalBundle) {
+		return "", fmt.Errorf("dmg app bundle %q escapes mount root", filepath.Base(bundlePath))
+	}
+	executable, err := resolveAppBundleExecutable(canonicalBundle)
+	if err != nil {
+		return "", err
+	}
+	canonicalExecutable, err := filepath.EvalSymlinks(executable)
+	if err != nil {
+		return "", fmt.Errorf("resolve app executable %q: %w", filepath.Base(executable), err)
+	}
+	if !pathWithin(canonicalBundle, canonicalExecutable) {
+		return "", fmt.Errorf("app bundle %q executable escapes bundle", filepath.Base(bundlePath))
+	}
+	if err := assets.ValidateRunnablePayload(executable, filepath.Base(executable)); err != nil {
+		return "", fmt.Errorf("app bundle %q contains an invalid executable: %w", filepath.Base(bundlePath), err)
+	}
+	return executable, nil
 }
 
 func offerToSignUnsignedApp(appPath string, nonInteractive bool) error {
@@ -272,59 +312,130 @@ func detachDMG(mountPoint string) {
 	}
 }
 
-func findSingleAppBundle(root string) (string, error) {
-	var bundles []string
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if !d.IsDir() {
-			return nil
-		}
-		if strings.HasSuffix(strings.ToLower(d.Name()), ".app") {
-			bundles = append(bundles, path)
-			return filepath.SkipDir
-		}
-		return nil
-	})
+type dmgAppBundleCandidate struct {
+	path     string
+	name     string
+	identity string
+}
+
+// resolveDMGAppBundle selects a top-level application bundle from a mounted image.
+// A managed identity takes precedence over the legacy name and an unnamed image may
+// only be used when it has one eligible application bundle.
+func resolveDMGAppBundle(root, requestedIdentity, storedIdentity, legacyName string) (string, error) {
+	candidates, err := eligibleDMGAppBundles(root)
 	if err != nil {
 		return "", err
 	}
-	if len(bundles) == 0 {
-		return "", fmt.Errorf("dmg did not contain an app bundle")
+
+	identity, source, err := firstDMGAppIdentity(requestedIdentity, storedIdentity, legacyName)
+	if err != nil {
+		return "", err
 	}
-	if len(bundles) > 1 {
-		return "", fmt.Errorf("dmg contained multiple app bundles (%s)", strings.Join(appBundleBaseNames(bundles), ", "))
+	if identity == "" {
+		if len(candidates) == 0 {
+			return "", fmt.Errorf("dmg did not contain an eligible top-level app bundle")
+		}
+		if len(candidates) > 1 {
+			return "", fmt.Errorf("dmg contained multiple eligible app bundles (%s)", dmgAppBundleNames(candidates))
+		}
+		return candidates[0].path, nil
 	}
-	return bundles[0], nil
+
+	for _, candidate := range candidates {
+		if candidate.identity == identity {
+			return candidate.path, nil
+		}
+	}
+	return "", fmt.Errorf("dmg did not contain %s app bundle %q", source, identity)
 }
 
-func appBundleBaseNames(paths []string) []string {
-	names := make([]string, 0, len(paths))
-	for _, path := range paths {
-		names = append(names, filepath.Base(path))
+func eligibleDMGAppBundles(root string) ([]dmgAppBundleCandidate, error) {
+	canonicalRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return nil, fmt.Errorf("resolve dmg mount root: %w", err)
 	}
-	sort.Strings(names)
-	return names
+	entries, err := os.ReadDir(canonicalRoot)
+	if err != nil {
+		return nil, fmt.Errorf("read dmg mount root: %w", err)
+	}
+
+	byIdentity := make(map[string]dmgAppBundleCandidate)
+	for _, entry := range entries {
+		if entry.Type()&os.ModeSymlink != 0 || !entry.IsDir() || !strings.HasSuffix(strings.ToLower(entry.Name()), ".app") {
+			continue
+		}
+		candidatePath, err := filepath.EvalSymlinks(filepath.Join(canonicalRoot, entry.Name()))
+		if err != nil {
+			return nil, fmt.Errorf("resolve dmg app bundle %q: %w", entry.Name(), err)
+		}
+		if !pathWithin(canonicalRoot, candidatePath) {
+			return nil, fmt.Errorf("dmg app bundle %q escapes mount root", entry.Name())
+		}
+		identity, err := normalizedDMGAppIdentity(entry.Name())
+		if err != nil {
+			return nil, err
+		}
+		candidate := dmgAppBundleCandidate{path: candidatePath, name: entry.Name(), identity: identity}
+		if existing, ok := byIdentity[identity]; ok {
+			names := []string{existing.name, candidate.name}
+			sort.Strings(names)
+			return nil, fmt.Errorf("dmg contained colliding app bundle identities (%s)", strings.Join(names, ", "))
+		}
+		byIdentity[identity] = candidate
+	}
+
+	candidates := make([]dmgAppBundleCandidate, 0, len(byIdentity))
+	for _, candidate := range byIdentity {
+		candidates = append(candidates, candidate)
+	}
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].name < candidates[j].name })
+	return candidates, nil
 }
 
-func findInstalledAppBundleName(expectedName, installedAppBundle string) (string, error) {
-	if installedAppBundle != "" {
-		if expectedName != "" && !strings.EqualFold(strings.TrimSuffix(installedAppBundle, ".app"), expectedName) {
-			return "", fmt.Errorf("installed app bundle %q did not match requested app name %q", strings.TrimSuffix(installedAppBundle, ".app"), expectedName)
+func firstDMGAppIdentity(requestedIdentity, storedIdentity, legacyName string) (string, string, error) {
+	for _, selection := range []struct {
+		value  string
+		source string
+	}{
+		{requestedIdentity, "requested"},
+		{storedIdentity, "stored"},
+		{legacyName, "legacy"},
+	} {
+		if strings.TrimSpace(selection.value) == "" {
+			continue
 		}
-		return installedAppBundle, nil
-	}
-
-	if expectedName != "" {
-		bundleName := expectedName + ".app"
-		if _, err := os.Stat(filepath.Join(applicationsDir, bundleName)); err == nil {
-			return bundleName, nil
+		identity, err := normalizedDMGAppIdentity(selection.value)
+		if err != nil {
+			return "", "", fmt.Errorf("invalid %s app bundle identity: %w", selection.source, err)
 		}
-		return "", fmt.Errorf("app bundle %q was not found in %s", expectedName+".app", applicationsDir)
+		return identity, selection.source, nil
 	}
+	return "", "", nil
+}
 
-	return "", fmt.Errorf("missing installed app bundle metadata")
+func normalizedDMGAppIdentity(name string) (string, error) {
+	identity := strings.TrimSpace(name)
+	if len(identity) >= len(".app") && strings.EqualFold(identity[len(identity)-len(".app"):], ".app") {
+		identity = identity[:len(identity)-len(".app")]
+	}
+	identity = strings.TrimSpace(identity)
+	if identity == "" {
+		return "", fmt.Errorf("app bundle name is empty")
+	}
+	return strings.ToLower(identity), nil
+}
+
+func pathWithin(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
+}
+
+func dmgAppBundleNames(candidates []dmgAppBundleCandidate) string {
+	names := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		names = append(names, candidate.name)
+	}
+	return strings.Join(names, ", ")
 }
 
 func resolveAppBundleExecutable(appPath string) (string, error) {
@@ -557,13 +668,30 @@ func resolveInstalledPackageID(b *config.Binary, packageType string) (string, er
 		}
 		return "", fmt.Errorf("failed to resolve flatpak app id for %s", b.Path)
 	case "dmg":
-		if b.AppBundle == "" {
-			return "", fmt.Errorf("missing app bundle metadata for %s", b.Path)
+		bundlePath, err := managedDMGBundlePath(b.AppBundle)
+		if err != nil {
+			return "", fmt.Errorf("%w for %s", err, b.Path)
 		}
-		return filepath.Join(applicationsDir, b.AppBundle), nil
+		if !pathWithin(bundlePath, path) {
+			return "", fmt.Errorf("tracked executable %q does not belong to app bundle %q", b.Path, b.AppBundle)
+		}
+		return bundlePath, nil
 	default:
 		return "", fmt.Errorf("unsupported package type %q", packageType)
 	}
+}
+
+func managedDMGBundlePath(bundleName string) (string, error) {
+	trimmed := strings.TrimSpace(bundleName)
+	if trimmed == "" {
+		return "", fmt.Errorf("missing app bundle metadata")
+	}
+	if trimmed != bundleName || trimmed == "." || trimmed == ".." ||
+		filepath.IsAbs(trimmed) || filepath.Base(trimmed) != trimmed ||
+		strings.ContainsAny(trimmed, `/\\`) || !strings.HasSuffix(strings.ToLower(trimmed), ".app") {
+		return "", fmt.Errorf("invalid app bundle metadata %q", bundleName)
+	}
+	return filepath.Join(applicationsDir, trimmed), nil
 }
 
 func firstLine(value string) string {

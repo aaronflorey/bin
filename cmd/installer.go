@@ -91,6 +91,15 @@ type InstallOpts struct {
 	// LogicalName is the stable command name. It is deliberately distinct from
 	// the provider's versioned source asset.
 	LogicalName string
+
+	// AppBundle is the persisted DMG bundle identity for a managed system
+	// package. It is distinct from a requested package command name.
+	AppBundle string
+
+	// RequestedAppBundle is the optional system-package name supplied for this
+	// install, interpreted as an explicit DMG bundle identity. PackageName still
+	// reaches providers as the release-product selection hint.
+	RequestedAppBundle string
 }
 
 // InstallResult holds the outcome of a successful installation.

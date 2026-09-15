@@ -263,9 +263,11 @@ func (root *installCmd) installTarget(cmd *cobra.Command, target installTarget) 
 				attemptFetchOpts.ReleaseTagPrefix = requestedReleaseTagPrefix
 			}
 
+			requestedAppBundle := ""
 			if root.opts.systemPackage {
 				attemptFetchOpts.PackageName = target.path
 				logSystemPackageSelected(attemptFetchOpts.PackageType, target.path)
+				requestedAppBundle = target.path
 			}
 
 			if attemptFetchOpts.SystemPackage {
@@ -284,6 +286,8 @@ func (root *installCmd) installTarget(cmd *cobra.Command, target installTarget) 
 				ResolvePath:           strategy.resolvePath(existing),
 				AllowProviderFallback: root.opts.provider == "" && existing.Provider != "",
 				LogicalName:           existing.RemoteName,
+				AppBundle:             existing.AppBundle,
+				RequestedAppBundle:    requestedAppBundle,
 			})
 			if err != nil {
 				log.WithError(err).Debugf("Failed to update existing install for %q", resolved.url)
@@ -306,6 +310,10 @@ func (root *installCmd) installTarget(cmd *cobra.Command, target installTarget) 
 			if mode == installModeSystemPackage {
 				logSystemPackageSelected(attemptFetchOpts.PackageType, requestedName)
 			}
+			requestedAppBundle := ""
+			if mode == installModeSystemPackage {
+				requestedAppBundle = requestedName
+			}
 
 			attemptPath := resolvedPath
 			if !strategy.resolvePath(nil) {
@@ -324,6 +332,7 @@ func (root *installCmd) installTarget(cmd *cobra.Command, target installTarget) 
 				ResolvePath:           strategy.resolvePath(nil),
 				AllowProviderFallback: false,
 				LogicalName:           requestedLogicalName(target.path),
+				RequestedAppBundle:    requestedAppBundle,
 			})
 			if err == nil {
 				log.Infof("Done installing %s %s", res.Name, res.Version)
