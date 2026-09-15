@@ -1,12 +1,20 @@
 package providers
 
 import (
+	"archive/tar"
+	"archive/zip"
+	"bytes"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/aaronflorey/bin/pkg/assets"
+	"github.com/aaronflorey/bin/pkg/config"
 )
 
 func TestGenericURLGetLatestVersionFromRedirect(t *testing.T) {
@@ -148,14 +156,11 @@ func TestGenericURLGetLatestVersionNoVersionReturnsError(t *testing.T) {
 }
 
 func TestGenericURLFetchReturnsFileNameVersionAndData(t *testing.T) {
-	payload := "binary-bytes"
+	payload := genericRunnablePayload(t)
+	filename := genericArtifactName("", "")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Disposition", `attachment; filename="tool_0.16.0_linux_amd64"`)
-		if r.Method == http.MethodHead {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-		_, _ = w.Write([]byte(payload))
+		w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+		_, _ = w.Write(payload)
 	}))
 	defer server.Close()
 
@@ -178,7 +183,7 @@ func TestGenericURLFetchReturnsFileNameVersionAndData(t *testing.T) {
 		}
 	}()
 
-	if file.Name != "tool" {
+	if file.Name != "tool"+genericScriptExtension() {
 		t.Fatalf("unexpected name: %s", file.Name)
 	}
 	if file.Version != "0.16.0" {
@@ -189,8 +194,11 @@ func TestGenericURLFetchReturnsFileNameVersionAndData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read file content failed: %v", err)
 	}
-	if string(content) != payload {
+	if string(content) != string(payload) {
 		t.Fatalf("unexpected payload: %q", string(content))
+	}
+	if file.SourceAsset != filename || !file.ProcessingUnchanged || file.DownloadIntegrity != nil || file.InstalledIntegrity != nil || file.ExpectedSHA != "" {
+		t.Fatalf("unexpected generic provenance/integrity: %#v", file)
 	}
 }
 
@@ -220,6 +228,312 @@ func TestGenericURLFetchRejectsUnsafeFilenameBeforeSanitizing(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGenericURLFetchProcessesArchivesAndResolvesMembers(t *testing.T) {
+	filename := genericArtifactName("", ".zip")
+	archive := genericZip(t, map[string][]byte{
+		"bin/alpha" + genericScriptExtension(): genericRunnablePayload(t),
+		"bin/beta" + genericScriptExtension():  genericRunnablePayload(t),
+	})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+		_, _ = w.Write(archive)
+	}))
+	defer server.Close()
+
+	p := newGenericProvider(t, server.URL)
+	file, err := p.Fetch(&FetchOpts{AutoSelect: filename + ":bin/beta" + genericScriptExtension(), NonInteractive: true})
+	if err != nil {
+		t.Fatalf("Fetch explicit member: %v", err)
+	}
+	explicitData := file.Data
+	t.Cleanup(func() {
+		if err := closeFileData(explicitData); err != nil {
+			t.Errorf("close fetched file: %v", err)
+		}
+	})
+	if file.Name != "beta"+genericScriptExtension() || file.PackagePath != "bin/beta"+genericScriptExtension() || file.SourceAsset != filename {
+		t.Fatalf("explicit archive resolution = %#v", file)
+	}
+
+	file, err = p.Fetch(&FetchOpts{NonInteractive: true, SelectionIntent: &config.SelectionDescriptor{ArchiveMember: "bin/alpha" + genericScriptExtension()}})
+	if err != nil {
+		t.Fatalf("Fetch persisted member: %v", err)
+	}
+	persistedData := file.Data
+	t.Cleanup(func() {
+		if err := closeFileData(persistedData); err != nil {
+			t.Errorf("close fetched file: %v", err)
+		}
+	})
+	if file.Name != "alpha"+genericScriptExtension() || file.SelectionIntent == nil || file.SelectionIntent.ArchiveMember != "bin/alpha"+genericScriptExtension() {
+		t.Fatalf("persisted archive resolution = %#v", file)
+	}
+}
+
+func TestGenericURLFetchProcessesTarAndRejectsNonRunnablePayload(t *testing.T) {
+	t.Run("tar", func(t *testing.T) {
+		filename := genericArtifactName("", ".tar")
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+			_, _ = w.Write(genericTar(t, "tool"+genericScriptExtension(), genericRunnablePayload(t)))
+		}))
+		defer server.Close()
+
+		file, err := newGenericProvider(t, server.URL).Fetch(&FetchOpts{NonInteractive: true})
+		if err != nil {
+			t.Fatalf("Fetch tar: %v", err)
+		}
+		tarData := file.Data
+		t.Cleanup(func() {
+			if err := closeFileData(tarData); err != nil {
+				t.Errorf("close fetched file: %v", err)
+			}
+		})
+		if file.Name != "tool"+genericScriptExtension() || file.PackagePath != "tool"+genericScriptExtension() {
+			t.Fatalf("tar resolution = %#v", file)
+		}
+	})
+
+	t.Run("non runnable", func(t *testing.T) {
+		filename := genericArtifactName("", "")
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+			_, _ = io.WriteString(w, "not executable")
+		}))
+		defer server.Close()
+
+		_, err := newGenericProvider(t, server.URL).Fetch(&FetchOpts{NonInteractive: true})
+		if !errors.Is(err, assets.ErrNoCompatibleFiles) {
+			t.Fatalf("Fetch non-runnable error = %v", err)
+		}
+	})
+}
+
+func TestGenericURLFetchUsesResponseMetadataAndOneDownload(t *testing.T) {
+	filename := genericArtifactName("content", "")
+	var getCalls, sidecarCalls int
+	mux := http.NewServeMux()
+	mux.HandleFunc("/download", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("request method = %s, want GET", r.Method)
+		}
+		getCalls++
+		http.Redirect(w, r, "/redirected/"+genericArtifactName("redirect", ""), http.StatusFound)
+	})
+	mux.HandleFunc("/redirected/", func(w http.ResponseWriter, r *http.Request) {
+		getCalls++
+		w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+		_, _ = w.Write(genericRunnablePayload(t))
+	})
+	mux.HandleFunc("/download.sha256", func(w http.ResponseWriter, r *http.Request) { sidecarCalls++ })
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	file, err := newGenericProvider(t, server.URL+"/download").Fetch(&FetchOpts{NonInteractive: true})
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	fileData := file.Data
+	t.Cleanup(func() {
+		if err := closeFileData(fileData); err != nil {
+			t.Errorf("close fetched file: %v", err)
+		}
+	})
+	if getCalls != 2 || sidecarCalls != 0 || file.SourceAsset != filename || file.Name != "content"+genericScriptExtension() {
+		t.Fatalf("GETs=%d sidecars=%d file=%#v", getCalls, sidecarCalls, file)
+	}
+}
+
+func TestGenericURLFetchDoesNotForwardBasicAuthAcrossRedirect(t *testing.T) {
+	filename := genericArtifactName("redirected", "")
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if authorization := r.Header.Get("Authorization"); authorization != "" {
+			t.Fatalf("redirected request Authorization = %q, want empty", authorization)
+		}
+		w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+		_, _ = w.Write(genericRunnablePayload(t))
+	}))
+	defer target.Close()
+
+	targetURL, err := url.Parse(target.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetURL.Host = "localhost:" + targetURL.Port()
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, password, ok := r.BasicAuth()
+		if !ok || user != "user" || password != "pass" {
+			t.Fatalf("source request basic auth = %q:%q present=%t", user, password, ok)
+		}
+		http.Redirect(w, r, targetURL.String(), http.StatusFound)
+	}))
+	defer source.Close()
+
+	sourceURL, err := url.Parse(source.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceURL.User = url.UserPassword("user", "pass")
+	file, err := newGenericProvider(t, sourceURL.String()).Fetch(&FetchOpts{NonInteractive: true})
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	fileData := file.Data
+	t.Cleanup(func() {
+		if err := closeFileData(fileData); err != nil {
+			t.Errorf("close fetched file: %v", err)
+		}
+	})
+	if file.SourceAsset != filename {
+		t.Fatalf("SourceAsset = %q, want %q", file.SourceAsset, filename)
+	}
+}
+
+func TestGenericURLFetchFilenamePrecedence(t *testing.T) {
+	contentName := genericArtifactName("content", "")
+	redirectName := genericArtifactName("redirect", "")
+	originalName := genericArtifactName("original", "")
+
+	for _, test := range []struct {
+		name       string
+		redirect   bool
+		content    string
+		wantSource string
+	}{
+		{name: "content disposition", redirect: true, content: contentName, wantSource: contentName},
+		{name: "redirect URL", redirect: true, wantSource: redirectName},
+		{name: "original URL", wantSource: originalName},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/"+originalName && test.redirect {
+					http.Redirect(w, r, "/"+redirectName, http.StatusFound)
+					return
+				}
+				if test.content != "" {
+					w.Header().Set("Content-Disposition", `attachment; filename="`+test.content+`"`)
+				}
+				_, _ = w.Write(genericRunnablePayload(t))
+			}))
+			defer server.Close()
+
+			file, err := newGenericProvider(t, server.URL+"/"+originalName).Fetch(&FetchOpts{NonInteractive: true})
+			if err != nil {
+				t.Fatalf("Fetch: %v", err)
+			}
+			fileData := file.Data
+			t.Cleanup(func() {
+				if err := closeFileData(fileData); err != nil {
+					t.Errorf("close fetched file: %v", err)
+				}
+			})
+			if file.SourceAsset != test.wantSource {
+				t.Fatalf("SourceAsset = %q, want %q", file.SourceAsset, test.wantSource)
+			}
+		})
+	}
+}
+
+func TestGenericURLFetchExplicitVersionAndSelectionIntent(t *testing.T) {
+	filename := "tool_" + genericOS() + "_" + runtime.GOARCH + genericScriptExtension()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+		_, _ = w.Write(genericRunnablePayload(t))
+	}))
+	defer server.Close()
+
+	file, err := newGenericProvider(t, server.URL).Fetch(&FetchOpts{Version: "9.8.7", PackageName: "tool", NonInteractive: true, SelectionIntent: &config.SelectionDescriptor{LogicalProduct: "tool"}})
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	fileData := file.Data
+	t.Cleanup(func() {
+		if err := closeFileData(fileData); err != nil {
+			t.Errorf("close fetched file: %v", err)
+		}
+	})
+	if file.Version != "9.8.7" || file.SelectionIntent == nil || file.SelectionIntent.LogicalProduct != "tool" || file.SelectionIntent.Target == nil {
+		t.Fatalf("version or selection intent not propagated: %#v", file)
+	}
+}
+
+func newGenericProvider(t *testing.T, rawURL string) Provider {
+	t.Helper()
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := newGenericURL(u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func genericArtifactName(prefix, extension string) string {
+	if prefix == "" {
+		prefix = "tool"
+	}
+	return prefix + "_0.16.0_" + genericOS() + "_" + runtime.GOARCH + extension
+}
+
+func genericOS() string {
+	if runtime.GOOS == "darwin" {
+		return "darwin"
+	}
+	return runtime.GOOS
+}
+
+func genericScriptExtension() string {
+	if runtime.GOOS == "windows" {
+		return ".cmd"
+	}
+	return ""
+}
+
+func genericRunnablePayload(t *testing.T) []byte {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		return []byte("@echo off\r\n")
+	}
+	return []byte("#!/bin/sh\nexit 0\n")
+}
+
+func genericZip(t *testing.T, files map[string][]byte) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+	for name, contents := range files {
+		entry, err := w.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := entry.Write(contents); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func genericTar(t *testing.T, name string, contents []byte) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	w := tar.NewWriter(&buf)
+	if err := w.WriteHeader(&tar.Header{Name: name, Mode: 0o755, Size: int64(len(contents))}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write(contents); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
 }
 
 func TestExtractVersionFromFilenamePicksHighest(t *testing.T) {

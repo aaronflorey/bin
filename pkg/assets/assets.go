@@ -826,10 +826,9 @@ func appendUnique(values []string, additions ...string) []string {
 
 // ProcessURL processes a FilteredAsset by uncompressing/unarchiving the URL of the asset.
 func (f *Filter) ProcessURL(gf *FilteredAsset, expectedSHA string, verifyArchiveChecksum bool) (*finalFile, error) {
-	if IsKnownNonRunnableName(gf.Name) || looksLikeLibrary(gf.Name) {
-		return nil, fmt.Errorf("%w: %s is not an installable executable asset", ErrNoCompatibleFiles, gf.Name)
+	if err := validateProcessArtifactName(gf.Name); err != nil {
+		return nil, err
 	}
-	f.name = gf.Name
 	req, err := http.NewRequest(http.MethodGet, gf.URL, nil)
 	if err != nil {
 		return nil, err
@@ -849,7 +848,18 @@ func (f *Filter) ProcessURL(gf *FilteredAsset, expectedSHA string, verifyArchive
 	}
 
 	log.Infof("Starting download of %s", gf.URL)
-	bar := pb.Full.Start64(res.ContentLength)
+	return f.ProcessReader(gf.Name, res.ContentLength, res.Body, expectedSHA, verifyArchiveChecksum)
+}
+
+// ProcessReader processes an already-open artifact stream. The caller retains
+// ownership of reader; the returned source owns all temporary artifact files.
+func (f *Filter) ProcessReader(name string, contentLength int64, reader io.Reader, expectedSHA string, verifyArchiveChecksum bool) (*finalFile, error) {
+	if err := validateProcessArtifactName(name); err != nil {
+		return nil, err
+	}
+	f.name = name
+
+	bar := pb.Full.Start64(contentLength)
 	defer bar.Finish()
 
 	tempFile, err := os.CreateTemp("", "bin-download-*")
@@ -869,10 +879,10 @@ func (f *Filter) ProcessURL(gf *FilteredAsset, expectedSHA string, verifyArchive
 	if err := budgets.validate(); err != nil {
 		return nil, err
 	}
-	if res.ContentLength > budgets.maxDownloadBytes {
+	if contentLength > budgets.maxDownloadBytes {
 		return nil, fmt.Errorf("%w: download bytes exceeds %d", ErrArtifactLimitExceeded, budgets.maxDownloadBytes)
 	}
-	barReader := bar.NewProxyReader(res.Body)
+	barReader := bar.NewProxyReader(reader)
 	h := sha256.New()
 	_, err = copyDownloadWithLimit(io.MultiWriter(tempFile, h), barReader, budgets.maxDownloadBytes)
 	if err != nil {
@@ -881,7 +891,7 @@ func (f *Filter) ProcessURL(gf *FilteredAsset, expectedSHA string, verifyArchive
 
 	actualSHA := fmt.Sprintf("%x", h.Sum(nil))
 	if verifyArchiveChecksum && expectedSHA != "" && !strings.EqualFold(actualSHA, expectedSHA) {
-		return nil, fmt.Errorf("sha256 mismatch: %w for %s: expected %s, got %s", ErrChecksumMismatch, gf.Name, expectedSHA, actualSHA)
+		return nil, fmt.Errorf("sha256 mismatch: %w for %s: expected %s, got %s", ErrChecksumMismatch, name, expectedSHA, actualSHA)
 	}
 
 	if err := tempFile.Close(); err != nil {
@@ -905,6 +915,13 @@ func (f *Filter) ProcessURL(gf *FilteredAsset, expectedSHA string, verifyArchive
 	final := *result.final
 	final.Source = &artifactResultReader{result: result, reader: result.final.Source}
 	return &final, nil
+}
+
+func validateProcessArtifactName(name string) error {
+	if IsKnownNonRunnableName(name) || looksLikeLibrary(name) {
+		return fmt.Errorf("%w: %s is not an installable executable asset", ErrNoCompatibleFiles, name)
+	}
+	return nil
 }
 
 func copyDownloadWithLimit(dst io.Writer, src io.Reader, limit int64) (int64, error) {

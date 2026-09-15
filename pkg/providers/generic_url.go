@@ -35,17 +35,37 @@ func newGenericURL(u *url.URL) (Provider, error) {
 	}, nil
 }
 
-func (g *genericURL) Fetch(_ *FetchOpts) (*File, error) {
-	metadata, err := g.probeMetadata()
+func (g *genericURL) Fetch(opts *FetchOpts) (*File, error) {
+	if opts == nil {
+		opts = &FetchOpts{}
+	}
+
+	req, err := http.NewRequest(http.MethodGet, g.url.String(), nil)
 	if err != nil {
 		return nil, err
 	}
+	resp, err := g.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
 
-	filename := resolvedFilename(metadata.contentDisposition, metadata.finalURL, g.url.String())
+	if resp.StatusCode < http.StatusOK || resp.StatusCode > http.StatusMultipleChoices-1 {
+		return nil, fmt.Errorf("downloading %s failed with status %d", g.url.String(), resp.StatusCode)
+	}
+
+	finalURL := ""
+	if resp.Request != nil && resp.Request.URL != nil {
+		finalURL = resp.Request.URL.String()
+	}
+	filename := resolvedFilename(resp.Header.Get("Content-Disposition"), finalURL, g.url.String())
 	if err := assets.ValidatePortableName(filename); err != nil {
 		return nil, fmt.Errorf("invalid provider filename %q: %w", filename, err)
 	}
-	version := extractVersionFromFilename(filename)
+	version := opts.Version
+	if version == "" {
+		version = extractVersionFromFilename(filename)
+	}
 	if version == "" {
 		return nil, fmt.Errorf("unable to infer version from filename %q", filename)
 	}
@@ -57,27 +77,35 @@ func (g *genericURL) Fetch(_ *FetchOpts) (*File, error) {
 		return nil, fmt.Errorf("invalid provider filename %q: %w", name, err)
 	}
 
-	req, err := http.NewRequest(http.MethodGet, g.url.String(), nil)
-	if err != nil {
+	f := assets.NewFilter(&assets.FilterOpts{
+		SkipScoring:     opts.All,
+		SkipPathCheck:   opts.SkipPatchCheck,
+		PackageName:     opts.PackageName,
+		PackagePath:     opts.PackagePath,
+		SystemPackage:   opts.SystemPackage,
+		PackageType:     opts.PackageType,
+		NonInteractive:  opts.NonInteractive,
+		SelectionIntent: opts.SelectionIntent,
+	})
+	autoSelect := f.ParseAutoSelection(opts.AutoSelect)
+	if _, err := f.FilterAssets(name, []*assets.Asset{{Name: filename}}, autoSelect); err != nil {
 		return nil, err
 	}
 
-	resp, err := g.client.Do(req)
+	outFile, err := f.ProcessReader(name, resp.ContentLength, resp.Body, "", false)
 	if err != nil {
 		return nil, err
-	}
-
-	if resp.StatusCode >= http.StatusBadRequest {
-		resp.Body.Close()
-		return nil, fmt.Errorf("downloading %s failed with status %d", g.url.String(), resp.StatusCode)
 	}
 
 	return &File{
-		Data:        resp.Body,
-		Name:        name,
-		SourceAsset: filename,
-		Version:     version,
-		Length:      resp.ContentLength,
+		Data:                outFile.Source,
+		Name:                outFile.Name,
+		SourceAsset:         filename,
+		Version:             version,
+		Length:              resp.ContentLength,
+		PackagePath:         outFile.PackagePath,
+		ProcessingUnchanged: outFile.UnchangedBytes,
+		SelectionIntent:     f.SelectionIntent(),
 	}, nil
 }
 
