@@ -5,6 +5,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -246,6 +247,87 @@ func TestProcessURLBoundsStreamingDownloadWithoutContentLength(t *testing.T) {
 	_, err := f.ProcessURL(&FilteredAsset{Name: "tool", URL: server.URL}, "", false)
 	if !errors.Is(err, ErrArtifactLimitExceeded) {
 		t.Fatalf("ProcessURL() error = %v, want download limit", err)
+	}
+}
+
+func TestProcessReaderProcessesPlainAndArchiveArtifacts(t *testing.T) {
+	archive := buildTestZipArchive(t, map[string]string{"tool": "#!/bin/sh\nexit 0\n"})
+
+	for _, test := range []struct {
+		name          string
+		artifactName  string
+		payload       []byte
+		wantUnchanged bool
+	}{
+		{name: "plain", artifactName: "tool", payload: []byte("#!/bin/sh\nexit 0\n"), wantUnchanged: true},
+		{name: "archive", artifactName: "tool.zip", payload: archive, wantUnchanged: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := NewFilter(&FilterOpts{NonInteractive: true})
+			f.repoName = "tool"
+			expected := sha256.Sum256(test.payload)
+			result, err := f.ProcessReader(test.artifactName, int64(len(test.payload)), bytes.NewReader(test.payload), fmt.Sprintf("%x", expected), true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer result.Source.(io.Closer).Close()
+
+			contents, err := io.ReadAll(result.Source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(contents) != "#!/bin/sh\nexit 0\n" {
+				t.Fatalf("processed contents = %q", contents)
+			}
+			if result.Name != "tool" || result.UnchangedBytes != test.wantUnchanged {
+				t.Fatalf("result = name:%q unchanged:%v", result.Name, result.UnchangedBytes)
+			}
+			if result.DownloadSHA256 != fmt.Sprintf("%x", expected) || result.InstalledSHA256 == "" {
+				t.Fatalf("result digests = download:%q installed:%q", result.DownloadSHA256, result.InstalledSHA256)
+			}
+		})
+	}
+}
+
+func TestProcessReaderBoundsStreamingDownload(t *testing.T) {
+	original := artifactProcessingBudgets
+	artifactProcessingBudgets = artifactBudgets{maxDownloadBytes: 4, maxArchiveEntries: 10, maxEntryBytes: 10, maxExpandedBytes: 10, maxNesting: 2}
+	t.Cleanup(func() { artifactProcessingBudgets = original })
+
+	f := NewFilter(&FilterOpts{NonInteractive: true})
+	f.repoName = "tool"
+	_, err := f.ProcessReader("tool", -1, strings.NewReader("12345"), "", false)
+	if !errors.Is(err, ErrArtifactLimitExceeded) {
+		t.Fatalf("ProcessReader() error = %v, want download limit", err)
+	}
+}
+
+func TestProcessURLDelegatesAfterSingleRequest(t *testing.T) {
+	originalClient := httpClient
+	requests := 0
+	httpClient = &http.Client{Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		requests++
+		if got := req.Header.Get("Accept"); got != "application/octet-stream" {
+			t.Fatalf("Accept header = %q", got)
+		}
+		return &http.Response{
+			StatusCode:    http.StatusOK,
+			ContentLength: int64(len("#!/bin/sh\nexit 0\n")),
+			Body:          io.NopCloser(strings.NewReader("#!/bin/sh\nexit 0\n")),
+			Request:       req,
+		}, nil
+	})}
+	t.Cleanup(func() { httpClient = originalClient })
+
+	f := NewFilter(&FilterOpts{NonInteractive: true})
+	f.repoName = "tool"
+	result, err := f.ProcessURL(&FilteredAsset{Name: "tool", URL: "https://example.test/tool", ExtraHeaders: map[string]string{"Accept": "application/octet-stream"}}, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer result.Source.(io.Closer).Close()
+	if requests != 1 {
+		t.Fatalf("requests = %d, want 1", requests)
 	}
 }
 
