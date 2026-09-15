@@ -100,3 +100,17 @@ Typical install flow: root loads config, the command normalizes the request, pro
 4. After Action changes, run `node --test action/setup.test.js` in addition to Go checks if Go code also changed.
 5. Before final handoff, run `mise run test` and `mise run verify`; add `mise run build` for CLI/build-metadata changes.
 6. Do not run deploy/release commands or system-package/live-install smoke tests unless explicitly required and an isolated environment is available.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live as markdown files under `.scratch/<feature>/`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Five canonical roles, each mapped to a default label string. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.

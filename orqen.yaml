@@ -1,20 +1,33 @@
 scope: project
 agent:
-  - opencode
   - codex
+  - opencode
+
 skills:
-  - source: https://github.com/aaronflorey/agent-skills
+  - source: https://github.com/Jeffallan/claude-skills
     skills:
-      - charmbracelet
-      - go-cobra
-      - go-viper
-      - release-please
-      - goreleaser
-  - source: https://github.com/jeffallan/claude-skills
-    skills:
-      - cli-developer
-      - golang-pro
-      - spec-miner
-      - code-reviewer
+      - api-designer
+      - architecture-designer
       - code-documenter
-      - cli-developer
+      - fullstack-guardian
+      - golang-pro
+      - test-master
+      - the-fool
+  - source: https://github.com/mattpocock/skills
+    skills:
+      - ask-matt
+      - code-review
+      - codebase-design
+      - grill-with-docs
+      - implement
+      - improve-codebase-architecture
+      - resolving-merge-conflicts
+      - setup-matt-pocock-skills
+      - tdd
+      - to-spec
+      - to-tickets
+      - to-questionnaire
+      - wait-what
+      - wayfinder
+      - wizard
+      - grilling
