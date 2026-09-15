@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -523,6 +524,142 @@ func TestReleaseArtifactInventoryStagesCompletionsAndCleansUp(t *testing.T) {
 	if _, err := os.Stat(root); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("staging root remains after Close: %v", err)
 	}
+}
+
+func TestProcessReleaseArtifactResolvesArchiveMembersSafely(t *testing.T) {
+	originalResolver := resolver
+	resolver = testLinuxAMDResolver
+	t.Cleanup(func() { resolver = originalResolver })
+
+	process := func(t *testing.T, files []archiveTestFile, filter *Filter) (*artifactProcessingResult, error) {
+		t.Helper()
+		download, err := os.CreateTemp(t.TempDir(), "artifact-download-*")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := download.Write(buildOrderedTestZipArchive(t, files)); err != nil {
+			t.Fatal(err)
+		}
+		if err := download.Close(); err != nil {
+			t.Fatal(err)
+		}
+		filter.repoName, filter.name = "tool", "tool.zip"
+		return filter.processReleaseArtifact(download.Name(), "download")
+	}
+
+	t.Run("stored member identity outranks helper", func(t *testing.T) {
+		result, err := process(t, []archiveTestFile{
+			{name: "helpers/tool", body: "#!/bin/sh\nexit 0\n"},
+			{name: "release/bin/tool", body: "#!/bin/sh\nexit 0\n"},
+		}, NewFilter(&FilterOpts{NonInteractive: true, PackagePath: "release/bin/tool"}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer result.Close()
+		if result.final.PackagePath != "release/bin/tool" {
+			t.Fatalf("PackagePath = %q", result.final.PackagePath)
+		}
+	})
+
+	t.Run("logical package name outranks repository identity", func(t *testing.T) {
+		result, err := process(t, []archiveTestFile{
+			{name: "tool", body: "#!/bin/sh\nexit 0\n"},
+			{name: "alternate", body: "#!/bin/sh\nexit 0\n"},
+		}, NewFilter(&FilterOpts{NonInteractive: true, PackageName: "alternate"}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer result.Close()
+		if result.final.PackagePath != "alternate" {
+			t.Fatalf("PackagePath = %q, want alternate", result.final.PackagePath)
+		}
+	})
+
+	t.Run("explicit member validates identity target and payload", func(t *testing.T) {
+		files := []archiveTestFile{
+			{name: "bin/tool", body: "#!/bin/sh\nexit 0\n"},
+			{name: "bin/tool-windows.exe", body: "#!/bin/sh\nexit 0\n"},
+			{name: "bin/not-runnable", body: "data"},
+		}
+		result, err := process(t, files, &Filter{opts: &FilterOpts{NonInteractive: true}, containedFile: `bin\tool`})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := result.Close(); err != nil {
+			t.Fatal(err)
+		}
+		for _, containedFile := range []string{"../tool", "bin/tool-windows.exe", "bin/not-runnable"} {
+			_, err := process(t, files, &Filter{opts: &FilterOpts{NonInteractive: true}, containedFile: containedFile})
+			if containedFile == "../tool" {
+				assertArchiveResolutionReason(t, err, ErrInvalidArchiveMemberSelection, ArchiveMemberInvalidSelection)
+			} else {
+				assertArchiveResolutionReason(t, err, ErrIncompatibleArchiveMemberSelection, ArchiveMemberIncompatibleSelection)
+			}
+		}
+	})
+
+	t.Run("empty explicit member is invalid", func(t *testing.T) {
+		filter := NewFilter(&FilterOpts{NonInteractive: true})
+		if outer := filter.ParseAutoSelection("tool.zip:"); outer != "tool.zip" {
+			t.Fatalf("outer selection = %q, want tool.zip", outer)
+		}
+		_, err := process(t, []archiveTestFile{{name: "tool", body: "#!/bin/sh\nexit 0\n"}}, filter)
+		assertArchiveResolutionReason(t, err, ErrInvalidArchiveMemberSelection, ArchiveMemberInvalidSelection)
+	})
+
+	t.Run("duplicate basenames remain ambiguous in either archive order", func(t *testing.T) {
+		for _, files := range [][]archiveTestFile{
+			{{name: "one/tool", body: "#!/bin/sh\nexit 0\n"}, {name: "two/tool", body: "#!/bin/sh\nexit 0\n"}},
+			{{name: "two/tool", body: "#!/bin/sh\nexit 0\n"}, {name: "one/tool", body: "#!/bin/sh\nexit 0\n"}},
+		} {
+			_, err := process(t, files, NewFilter(&FilterOpts{NonInteractive: true}))
+			assertArchiveResolutionReason(t, err, ErrAmbiguousArchiveMember, ArchiveMemberAmbiguous)
+		}
+	})
+
+	t.Run("interactive ambiguity prompts with stable candidates", func(t *testing.T) {
+		originalInteractive, originalSelect := isInteractive, selectOption
+		isInteractive = func() bool { return true }
+		selectOption = func(_ string, options []fmt.Stringer) (interface{}, error) {
+			if options[0].String() != "one/tool" || options[1].String() != "two/tool" {
+				t.Fatalf("options = %v, %v", options[0], options[1])
+			}
+			return options[1], nil
+		}
+		t.Cleanup(func() { isInteractive, selectOption = originalInteractive, originalSelect })
+		result, err := process(t, []archiveTestFile{{name: "two/tool", body: "#!/bin/sh\nexit 0\n"}, {name: "one/tool", body: "#!/bin/sh\nexit 0\n"}}, NewFilter(&FilterOpts{}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer result.Close()
+		if result.final.PackagePath != "two/tool" {
+			t.Fatalf("PackagePath = %q, want two/tool", result.final.PackagePath)
+		}
+	})
+}
+
+type archiveTestFile struct {
+	name string
+	body string
+}
+
+func buildOrderedTestZipArchive(t *testing.T, files []archiveTestFile) []byte {
+	t.Helper()
+	var archive bytes.Buffer
+	writer := zip.NewWriter(&archive)
+	for _, file := range files {
+		entry, err := writer.Create(file.name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := io.WriteString(entry, file.body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return archive.Bytes()
 }
 
 func TestProcessURLRejectsMetadataSidecarsBeforeSelection(t *testing.T) {

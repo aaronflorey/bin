@@ -3,6 +3,8 @@ package cmd
 import (
 	"errors"
 	"testing"
+
+	"github.com/aaronflorey/bin/pkg/assets"
 )
 
 func TestIsPackagePathSelectionError(t *testing.T) {
@@ -11,6 +13,16 @@ func TestIsPackagePathSelectionError(t *testing.T) {
 		err  error
 		want bool
 	}{
+		{
+			name: "typed missing archive member",
+			err:  &assets.ArchiveMemberResolutionError{Reason: assets.ArchiveMemberNoEligible},
+			want: true,
+		},
+		{
+			name: "typed invalid stored archive member",
+			err:  &assets.ArchiveMemberResolutionError{Reason: assets.ArchiveMemberInvalidSelection},
+			want: true,
+		},
 		{
 			name: "nil error",
 			err:  nil,

@@ -74,6 +74,66 @@ func (p fetchBinaryTestProvider) GetLatestVersion() (*providers.ReleaseInfo, err
 func (p fetchBinaryTestProvider) Cleanup(*providers.CleanupOpts) error              { return nil }
 func (p fetchBinaryTestProvider) GetID() string                                     { return p.id }
 
+func TestInstallBinaryPreservesArchiveMemberResolutionOutcomes(t *testing.T) {
+	installDir := setupTestConfig(t)
+	previousFactory := installProviderFactory
+	t.Cleanup(func() { installProviderFactory = previousFactory })
+
+	t.Run("accepts an interactively resolved member", func(t *testing.T) {
+		installProviderFactory = func(string, string) (providers.Provider, error) {
+			return fetchBinaryTestProvider{id: "test", fetchFn: func(opts *providers.FetchOpts) (*providers.File, error) {
+				if opts.NonInteractive {
+					t.Fatal("interactive install unexpectedly requested non-interactive fetch")
+				}
+				return &providers.File{
+					Data:        strings.NewReader("#!/bin/sh\nexit 0\n"),
+					Name:        "tool",
+					Version:     "1.0.0",
+					PackagePath: "two/tool",
+				}, nil
+			}}, nil
+		}
+
+		path := filepath.Join(installDir, "tool")
+		if _, err := installBinary(InstallOpts{URL: "https://example.test/tool", Path: path, ConfigPath: path, LogicalName: "tool", Force: true}); err != nil {
+			t.Fatalf("installBinary() error = %v", err)
+		}
+		if got := config.Get().Bins[path].PackagePath; got != "two/tool" {
+			t.Fatalf("stored package path = %q, want selected archive member", got)
+		}
+	})
+
+	t.Run("surfaces non-interactive ambiguity as typed error", func(t *testing.T) {
+		resolutionErr := &assets.ArchiveMemberResolutionError{
+			Reason:     assets.ArchiveMemberAmbiguous,
+			Candidates: []string{"one/tool", "two/tool"},
+		}
+		installProviderFactory = func(string, string) (providers.Provider, error) {
+			return fetchBinaryTestProvider{id: "test", fetchFn: func(opts *providers.FetchOpts) (*providers.File, error) {
+				if !opts.NonInteractive {
+					t.Fatal("non-interactive install did not preserve fetch option")
+				}
+				return nil, resolutionErr
+			}}, nil
+		}
+
+		_, err := installBinary(InstallOpts{
+			URL:         "https://example.test/tool",
+			Path:        filepath.Join(installDir, "other-tool"),
+			LogicalName: "tool",
+			Force:       true,
+			FetchOpts:   providers.FetchOpts{NonInteractive: true},
+		})
+		if !errors.Is(err, assets.ErrAmbiguousArchiveMember) {
+			t.Fatalf("installBinary() error = %v, want typed archive ambiguity", err)
+		}
+		var got *assets.ArchiveMemberResolutionError
+		if !errors.As(err, &got) || got.Reason != assets.ArchiveMemberAmbiguous {
+			t.Fatalf("installBinary() resolution error = %#v", got)
+		}
+	})
+}
+
 func TestAbsExpandedPath(t *testing.T) {
 	homeDir := t.TempDir()
 	workDir := t.TempDir()

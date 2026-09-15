@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/caarlos0/log"
 	"github.com/krolaw/zipstream"
 	"github.com/xi2/xz"
 )
@@ -237,9 +236,11 @@ const (
 )
 
 type artifactInventoryEntry struct {
-	identity   string
-	class      artifactEntryClass
-	stagedPath string
+	identity         string
+	class            artifactEntryClass
+	stagedPath       string
+	targetCompatible bool
+	runnable         bool
 }
 
 type artifactInventory struct {
@@ -381,59 +382,108 @@ func (f *Filter) processReleaseArtifact(downloadPath, downloadSHA string) (*arti
 		_ = result.Close()
 		return nil, fmt.Errorf("archive contains a macOS app bundle (%s) instead of a standalone binary: %w", bundleName, ErrNoCompatibleFiles)
 	}
-	candidates := make([]*Asset, 0, len(result.inventory.entries))
-	paths := make(map[string]string)
-	for _, entry := range result.inventory.entries {
-		if entry.class != artifactEntryExecutable || entry.stagedPath == "" {
-			continue
+	recordArchiveMemberEligibility(result.inventory)
+	selectedEntry, err := f.resolveReleaseArchiveMember(result.inventory)
+	if err != nil {
+		_ = result.Close()
+		if errors.Is(err, ErrNoEligibleArchiveMember) {
+			return nil, fmt.Errorf("%w: %w", ErrNoCompatibleFiles, err)
 		}
-		matchesPackagePath := f.matchesPackagePath(entry.identity)
-		log.Debugf("artifact inventory entry %q: PackagePath match=%t", entry.identity, matchesPackagePath)
-		if !matchesPackagePath {
-			continue
-		}
-		if err := ValidateRunnablePayload(entry.stagedPath, entry.identity); err != nil {
-			log.Debugf("Skipping non-runnable archive entry %q: %v", entry.identity, err)
-			continue
-		}
-		candidates = append(candidates, &Asset{Name: entry.identity})
-		paths[entry.identity] = entry.stagedPath
+		return nil, err
 	}
-	choice, err := f.selectArchiveAsset(f.repoName, filterArchiveAssets(candidates), f.containedFile)
+	file, err := os.Open(selectedEntry.stagedPath)
 	if err != nil {
 		_ = result.Close()
 		return nil, err
 	}
-	selected := choice.String()
-	selectedPath, ok := paths[selected]
-	if !ok {
-		_ = result.Close()
-		return nil, fmt.Errorf("selected file %s not found in artifact inventory", selected)
-	}
-	file, err := os.Open(selectedPath)
-	if err != nil {
-		_ = result.Close()
-		return nil, err
-	}
-	leaf, err := archiveMemberLeaf(selected)
+	leaf, err := archiveMemberLeaf(selectedEntry.identity)
 	if err != nil {
 		_ = file.Close()
 		_ = result.Close()
 		return nil, err
 	}
-	installedSHA, err := fileSHA256(selectedPath)
+	installedSHA, err := fileSHA256(selectedEntry.stagedPath)
 	if err != nil {
 		_ = file.Close()
 		_ = result.Close()
 		return nil, err
 	}
-	packagePath := selected
+	packagePath := selectedEntry.identity
 	if !result.transformed {
 		packagePath = f.packagePath
 	}
 	result.final = &finalFile{Name: leaf, PackagePath: packagePath, Source: file, DownloadSHA256: downloadSHA, InstalledSHA256: installedSHA, UnchangedBytes: !result.transformed}
 	return result, nil
 }
+
+// recordArchiveMemberEligibility captures runtime-dependent and staged-payload
+// checks at the artifact-processing boundary. Resolution then operates only on
+// this owned inventory metadata.
+func recordArchiveMemberEligibility(inventory *artifactInventory) {
+	for index := range inventory.entries {
+		entry := &inventory.entries[index]
+		entry.targetCompatible = len(filterTargetCompatibleAssets([]*Asset{{Name: entry.identity}}, false)) > 0
+		entry.runnable = entry.stagedPath != "" && ValidateRunnablePayload(entry.stagedPath, entry.identity) == nil
+	}
+}
+
+func (f *Filter) resolveReleaseArchiveMember(inventory *artifactInventory) (*artifactInventoryEntry, error) {
+	packagePath, logicalName := "", f.repoName
+	if f.opts != nil {
+		if !f.opts.SkipPathCheck {
+			packagePath = f.opts.PackagePath
+		}
+		if f.opts.PackageName != "" && !looksLikeMetadataAsset(f.opts.PackageName) && !looksLikePackageArtifact(f.opts.PackageName) {
+			logicalName = f.opts.PackageName
+		}
+	}
+	entry, err := resolveArchiveMember(inventory, archiveMemberResolutionRequest{
+		packagePath:       packagePath,
+		logicalName:       logicalName,
+		explicit:          f.containedFile,
+		explicitSelection: f.containedFileSelected,
+	})
+	if !errors.Is(err, ErrAmbiguousArchiveMember) {
+		return entry, err
+	}
+
+	var resolutionErr *ArchiveMemberResolutionError
+	if !errors.As(err, &resolutionErr) || len(resolutionErr.Candidates) == 0 {
+		return nil, err
+	}
+	return f.promptForArchiveMember(inventory, resolutionErr)
+}
+
+func (f *Filter) promptForArchiveMember(inventory *artifactInventory, resolutionErr *ArchiveMemberResolutionError) (*artifactInventoryEntry, error) {
+	if f.opts != nil && f.opts.NonInteractive {
+		return nil, fmt.Errorf("multiple matches found: %s (use --select to choose one): %w", strings.Join(resolutionErr.Candidates, ", "), resolutionErr)
+	}
+	if !isInteractive() {
+		return nil, fmt.Errorf("multiple matches found without an interactive terminal: %s (use --select to choose one): %w", strings.Join(resolutionErr.Candidates, ", "), resolutionErr)
+	}
+	options := make([]fmt.Stringer, 0, len(resolutionErr.Candidates))
+	for _, candidate := range resolutionErr.Candidates {
+		options = append(options, archiveMemberOption(candidate))
+	}
+	choice, err := selectOption("Multiple matches found, please select one:", options)
+	if err != nil {
+		return nil, err
+	}
+	selected, ok := choice.(archiveMemberOption)
+	if !ok {
+		return nil, fmt.Errorf("invalid archive member selection %v", choice)
+	}
+	for index := range inventory.entries {
+		if inventory.entries[index].identity == string(selected) {
+			return &inventory.entries[index], nil
+		}
+	}
+	return nil, fmt.Errorf("selected file %s not found in artifact inventory", selected)
+}
+
+type archiveMemberOption string
+
+func (o archiveMemberOption) String() string { return string(o) }
 
 func inventoryAppBundle(inventory *artifactInventory) (string, bool) {
 	entries := make(map[string]string)

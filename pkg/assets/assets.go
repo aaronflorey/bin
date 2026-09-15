@@ -177,11 +177,12 @@ type platformResolver interface {
 }
 
 type Filter struct {
-	opts          *FilterOpts
-	repoName      string
-	name          string
-	packagePath   string
-	containedFile string
+	opts                  *FilterOpts
+	repoName              string
+	name                  string
+	packagePath           string
+	containedFile         string
+	containedFileSelected bool
 }
 
 type FilterOpts struct {
@@ -261,7 +262,7 @@ func (f *Filter) ParseAutoSelection(autoSelect string) string {
 	}
 	parts := strings.SplitN(autoSelect, ":", 2)
 	if len(parts) == 2 {
-		f.containedFile = parts[1]
+		f.containedFile, f.containedFileSelected = parts[1], true
 		return parts[0]
 	}
 	return autoSelect
