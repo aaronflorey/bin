@@ -87,7 +87,7 @@ func newRunCmd() *runCmd {
 			if err != nil {
 				return err
 			}
-			defer closeFetchedFile(file)
+			defer func() { _ = closeFetchedFile(file) }()
 
 			cachePath, err := runCachePath(root.userCacheDir, file.Name, file.Version)
 			if err != nil {
@@ -205,17 +205,19 @@ func ensureCachedBinary(file *providers.File, cachePath string) error {
 	return nil
 }
 
-func closeFetchedFile(file *providers.File) {
+func closeFetchedFile(file *providers.File) error {
 	if file == nil {
-		return
+		return nil
 	}
 	closer, ok := file.Data.(io.Closer)
 	if !ok {
-		return
+		return nil
 	}
 	if err := closer.Close(); err != nil {
 		log.Debugf("Error closing fetched binary stream: %v", err)
+		return err
 	}
+	return nil
 }
 
 func runVersionKey(newProvider providerFactory, normalizedURL, forcedProvider, requestedVersion string) (string, error) {

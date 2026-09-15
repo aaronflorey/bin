@@ -101,14 +101,22 @@ type InstallResult struct {
 
 // installBinary fetches a binary from a provider, saves it to disk,
 // and updates the config.
-func installBinary(opts InstallOpts) (*InstallResult, error) {
+func installBinary(opts InstallOpts) (result *InstallResult, err error) {
 	log.Debugf("Installing %q with provider=%q path=%q resolvePath=%t", opts.URL, opts.Provider, opts.Path, opts.ResolvePath)
 
 	p, pResult, err := fetchBinary(installProviderFactory, opts.URL, opts.Provider, opts.FetchOpts, opts.AllowProviderFallback)
 	if err != nil {
 		return nil, err
 	}
-	defer closeFetchedFile(pResult)
+	inputClosed := false
+	defer func() {
+		if inputClosed {
+			return
+		}
+		if closeErr := closeFetchedFile(pResult); closeErr != nil {
+			err = errors.Join(err, closeErr)
+		}
+	}()
 	log.Debugf("Fetched %s version %s from provider %q", pResult.Name, pResult.Version, p.GetID())
 
 	_, minAgeDays, pinned := resolveInstallState(opts)
@@ -147,7 +155,8 @@ func installBinary(opts InstallOpts) (*InstallResult, error) {
 	}
 	log.Debugf("Resolved final install path to %q (overwrite=%t)", resolvedPath, overwrite)
 
-	hash, err := saveToDisk(pResult, resolvedPath, overwrite)
+	hash, err := saveToDiskAndCloseInput(pResult, resolvedPath, overwrite)
+	inputClosed = true
 	if err != nil {
 		return nil, fmt.Errorf("error installing binary: %w", err)
 	}
@@ -380,6 +389,27 @@ func checkFinalPath(path, fileName string, overwrite bool) (string, bool, error)
 // and makes it executable. It also checks if any other binary
 // has the same hash and exists if so.
 func saveToDisk(f *providers.File, path string, overwrite bool) ([]byte, error) {
+	return saveToDiskWithInputClose(f, path, overwrite, false)
+}
+
+// saveToDiskAndCloseInput prepares and publishes a direct-binary candidate.
+// Its input must be closed before publication so a close failure preserves the
+// existing destination.
+func saveToDiskAndCloseInput(f *providers.File, path string, overwrite bool) ([]byte, error) {
+	return saveToDiskWithInputClose(f, path, overwrite, true)
+}
+
+func saveToDiskWithInputClose(f *providers.File, path string, overwrite, closeInput bool) (hash []byte, err error) {
+	inputClosed := false
+	defer func() {
+		if !closeInput || inputClosed {
+			return
+		}
+		if closeErr := closeFetchedFile(f); closeErr != nil {
+			err = errors.Join(err, closeErr)
+		}
+	}()
+
 	epath := path
 
 	if err := os.MkdirAll(filepath.Dir(epath), 0o755); err != nil {
@@ -404,9 +434,14 @@ func saveToDisk(f *providers.File, path string, overwrite bool) ([]byte, error) 
 	tr := io.TeeReader(f.Data, h)
 
 	log.Infof("Copying for %s@%s into %s", f.Name, f.Version, epath)
-	_, err = io.Copy(file, tr)
-	if err != nil {
-		return nil, err
+	_, copyErr := io.Copy(file, tr)
+	var inputCloseErr error
+	if closeInput {
+		inputCloseErr = closeFetchedFile(f)
+		inputClosed = true
+	}
+	if copyErr != nil || inputCloseErr != nil {
+		return nil, errors.Join(copyErr, inputCloseErr)
 	}
 
 	actualHash := fmt.Sprintf("%x", h.Sum(nil))
@@ -430,20 +465,7 @@ func saveToDisk(f *providers.File, path string, overwrite bool) ([]byte, error) 
 		return nil, err
 	}
 
-	if !overwrite {
-		if _, err := os.Stat(epath); err == nil {
-			return nil, fmt.Errorf("path %s already exists, use --force to overwrite", path)
-		} else if err != nil && !os.IsNotExist(err) {
-			return nil, err
-		}
-	} else {
-		log.Debugf("Overwrite flag set, removing file %s", epath)
-		if err := os.Remove(epath); err != nil && !os.IsNotExist(err) {
-			return nil, err
-		}
-	}
-
-	if err := os.Rename(tempPath, epath); err != nil {
+	if err := publishStagedBinary(tempPath, epath, overwrite); err != nil {
 		return nil, err
 	}
 
@@ -455,8 +477,10 @@ func applyChmodToPath(path string) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
-	return applyChmod(file)
+
+	chmodErr := applyChmod(file)
+	closeErr := file.Close()
+	return errors.Join(chmodErr, closeErr)
 }
 
 func warnDuplicateManagedHash(installedPath, hash string) {

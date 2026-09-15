@@ -1,16 +1,15 @@
 # Local Issue State
 
-Generated: 2026-09-15T03:58:04Z
+Generated: 2026-09-15T04:23:16Z
 
 NOTE: This file is auto-generated. Do not edit manually.
 
-Tickets: 15 active, 3 resolved
+Tickets: 14 active, 4 resolved
 
 ## Active Tickets
 
 | Effort | Ticket | Type | Mode | Status | Blocked by |
 | --- | --- | --- | --- | --- | --- |
-| [reliability-managed-completions](reliability-managed-completions/spec.md) | [04-safe-binary-replacement](reliability-managed-completions/issues/04-safe-binary-replacement.md) | — | — | ready-for-agent | 01 / Contain remote names and clean failed fetches; 03 / Verify download and installed-byte integrity |
 | [reliability-managed-completions](reliability-managed-completions/spec.md) | [05-recoverable-install-commit](reliability-managed-completions/issues/05-recoverable-install-commit.md) | — | — | ready-for-agent | 04 / Replace direct binaries without deleting the working version |
 | [reliability-managed-completions](reliability-managed-completions/spec.md) | [06-bounded-artifact-inventory](reliability-managed-completions/issues/06-bounded-artifact-inventory.md) | — | — | ready-for-agent | 05 / Commit executable and config state recoverably |
 | [reliability-managed-completions](reliability-managed-completions/spec.md) | [07-resolve-archive-members](reliability-managed-completions/issues/07-resolve-archive-members.md) | — | — | ready-for-agent | 06 / Process artifacts through a bounded owned inventory |
@@ -33,3 +32,4 @@ Tickets: 15 active, 3 resolved
 | [reliability-managed-completions](reliability-managed-completions/spec.md) | [01-contain-remote-names](reliability-managed-completions/issues/01-contain-remote-names.md) | — | — | resolved | None (can start immediately) |
 | [reliability-managed-completions](reliability-managed-completions/spec.md) | [02-bind-checksums](reliability-managed-completions/issues/02-bind-checksums.md) | — | — | resolved | None (can start immediately) |
 | [reliability-managed-completions](reliability-managed-completions/spec.md) | [03-verify-integrity](reliability-managed-completions/issues/03-verify-integrity.md) | — | — | resolved | 02 / Bind checksum records to exact artifacts |
+| [reliability-managed-completions](reliability-managed-completions/spec.md) | [04-safe-binary-replacement](reliability-managed-completions/issues/04-safe-binary-replacement.md) | — | — | resolved | 01 / Contain remote names and clean failed fetches; 03 / Verify download and installed-byte integrity |
