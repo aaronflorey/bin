@@ -14,17 +14,24 @@ Keep nearby checksum behavior documentation accurate when this stricter applicab
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] GNU, BSD, and explicitly declared column/hash-order manifests parse only their supported forms while retaining exact case-sensitive filename and relative-path identity.
-- [ ] A named digest binds only to its exact artifact; a record for another artifact cannot be reinterpreted as a bare digest or associated through an archive-stem guess.
-- [ ] A bare SHA-256 verifies only when an exact sidecar association establishes the target and download/final-file scope.
-- [ ] Unambiguous basename fallback works only where the manifest form and candidate set prove a single target; case/path collisions and ambiguous basenames fail.
-- [ ] Duplicate or conflicting records, malformed applicable records, unsupported algorithms, oversized manifests or lines, truncated input, and scanner/read errors produce explicit failed outcomes.
-- [ ] Not-supplied, verified, and failed outcomes remain distinct, with structured reasons for retrieval, parsing, unsupported algorithm, and mismatch; an unverified expected digest is never reported as verified.
-- [ ] Existing payload validation, provider interfaces, and the installed-byte SHA-256 `hash` contract remain intact.
+**Implementation slices:**
+
+- [x] Define strict checksum applicability, parsing/binding, limits, and explicit outcome types with focused regressions.
+- [x] Integrate strict outcomes into provider fetch flows while preserving provider and installed-hash contracts.
+- [x] Update nearby documentation and run targeted/full verification.
+- [x] Complete independent code review and address all findings.
+
+- [x] GNU, BSD, and explicitly declared column/hash-order manifests parse only their supported forms while retaining exact case-sensitive filename and relative-path identity.
+- [x] A named digest binds only to its exact artifact; a record for another artifact cannot be reinterpreted as a bare digest or associated through an archive-stem guess.
+- [x] A bare SHA-256 verifies only when an exact sidecar association establishes the target and download/final-file scope.
+- [x] Unambiguous basename fallback works only where the manifest form and candidate set prove a single target; case/path collisions and ambiguous basenames fail.
+- [x] Duplicate or conflicting records, malformed applicable records, unsupported algorithms, oversized manifests or lines, truncated input, and scanner/read errors produce explicit failed outcomes.
+- [x] Not-supplied, verified, and failed outcomes remain distinct, with structured reasons for retrieval, parsing, unsupported algorithm, and mismatch; an unverified expected digest is never reported as verified.
+- [x] Existing payload validation, provider interfaces, and the installed-byte SHA-256 `hash` contract remain intact.
 
 
-- [ ] Add behavioral checksum regressions for supported manifest forms, correctly bound bare digests, wrong named targets, unrelated sidecars, path/case collisions, duplicate/conflicting records, unsupported algorithms, oversized content/lines, and scanner errors.
-- [ ] Run `mise exec -- go test ./pkg/providers -run 'Checksum|SHA256'`.
-- [ ] Run `mise run lint`.
+- [x] Add behavioral checksum regressions for supported manifest forms, correctly bound bare digests, wrong named targets, unrelated sidecars, path/case collisions, duplicate/conflicting records, unsupported algorithms, oversized content/lines, and scanner errors.
+- [x] Run `mise exec -- go test ./pkg/providers -run 'Checksum|SHA256'`.
+- [x] Run `mise run lint`.

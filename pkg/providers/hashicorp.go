@@ -128,11 +128,12 @@ func (g *hashiCorp) Fetch(opts *FetchOpts) (*File, error) {
 	}
 	log.Debugf("Selected HashiCorp asset %q for %s", gf.Name, g.repo)
 
-	expectedChecksum, err := expectedSHA256ForAsset(gf.Name, checksumAssets, gf.ExtraHeaders)
-	if err != nil {
-		log.WithError(err).Debugf("HashiCorp checksum lookup failed for %s asset %q", g.repo, gf.Name)
-		return nil, err
+	checksum := checksumBindingForAsset(gf.Name, checksumAssets, gf.ExtraHeaders)
+	if checksum.Failure != nil {
+		log.WithError(checksum.Failure.Err).Debugf("HashiCorp checksum lookup failed for %s asset %q", g.repo, gf.Name)
+		return nil, checksum.Failure.Err
 	}
+	expectedChecksum := checksum.Expected
 
 	verifyArchiveChecksum := expectedChecksum != nil && expectedChecksum.Scope == checksumScopeArchive
 	expectedSHA := ""
@@ -142,6 +143,7 @@ func (g *hashiCorp) Fetch(opts *FetchOpts) (*File, error) {
 
 	outFile, err := f.ProcessURL(gf, expectedSHA, verifyArchiveChecksum)
 	if err != nil {
+		err = checksumVerificationError(err)
 		log.WithError(err).Debugf("HashiCorp asset processing failed for %s asset %q", g.repo, gf.Name)
 		return nil, err
 	}

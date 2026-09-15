@@ -32,6 +32,7 @@ import (
 )
 
 var ErrNoCompatibleFiles = errors.New("no compatible files")
+var ErrChecksumMismatch = errors.New("checksum mismatch")
 
 var (
 	msiType = filetype.AddType("msi", "application/octet-stream")
@@ -1111,7 +1112,7 @@ func (f *Filter) ProcessURL(gf *FilteredAsset, expectedSHA string, verifyArchive
 
 	actualSHA := fmt.Sprintf("%x", h.Sum(nil))
 	if verifyArchiveChecksum && expectedSHA != "" && !strings.EqualFold(actualSHA, expectedSHA) {
-		return nil, fmt.Errorf("sha256 mismatch for %s: expected %s, got %s", gf.Name, expectedSHA, actualSHA)
+		return nil, fmt.Errorf("sha256 mismatch: %w for %s: expected %s, got %s", ErrChecksumMismatch, gf.Name, expectedSHA, actualSHA)
 	}
 
 	if err := tempFile.Close(); err != nil {
