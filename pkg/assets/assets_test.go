@@ -607,6 +607,199 @@ func TestFilterAssetsSelectsFFFExecutableProduct(t *testing.T) {
 	}
 }
 
+func TestFilterAssetsResolvesAgentsViewDarwinBeforeFormatPreference(t *testing.T) {
+	originalResolver := resolver
+	defer func() { resolver = originalResolver }()
+	resolver = testDarwinARMResolver
+
+	intended := &Asset{Name: "AgentsView_0.25.0_darwin_arm64.tar.gz"}
+	assets := []*Asset{
+		{Name: "AgentsView_0.25.0_amd64.AppImage"},
+		{Name: "agentsview-helper_0.25.0_darwin_arm64.zip"},
+		{Name: "AgentsView_0.25.0_darwin_arm64.tar.gz.sha256"},
+		intended,
+	}
+
+	for _, candidates := range [][]*Asset{assets, {intended, assets[2], assets[1], assets[0]}} {
+		result, err := NewFilter(&FilterOpts{NonInteractive: true}).FilterAssets("wesm/agentsview", candidates, "")
+		if err != nil {
+			t.Fatalf("FilterAssets returned error: %v", err)
+		}
+		if result.Name != intended.Name {
+			t.Fatalf("selected %q, want %q", result.Name, intended.Name)
+		}
+	}
+}
+
+func TestFilterAssetsSelectRejectsIncompatibleAndUnknownCandidates(t *testing.T) {
+	originalResolver := resolver
+	defer func() { resolver = originalResolver }()
+	resolver = testDarwinARMResolver
+
+	assets := []*Asset{
+		{Name: "AgentsView_0.25.0_amd64.AppImage"},
+		{Name: "AgentsView_0.25.0_darwin_arm64.tar.gz"},
+		{Name: "AgentsView_0.25.0_darwin_arm64.dylib"},
+	}
+	for _, tc := range []struct {
+		selection string
+		want      error
+	}{
+		{selection: "AgentsView_0.25.0_amd64.AppImage", want: ErrIncompatibleReleaseTarget},
+		{selection: "AgentsView_0.25.0_darwin_arm64.dylib", want: ErrInvalidReleaseCandidateSelection},
+	} {
+		_, err := NewFilter(&FilterOpts{NonInteractive: true}).FilterAssets("wesm/agentsview", assets, tc.selection)
+		if !errors.Is(err, tc.want) {
+			t.Fatalf("select %q error = %v, want %v", tc.selection, err, tc.want)
+		}
+	}
+}
+
+func TestFilterAssetsDoesNotScoreRepeatedTargetAliases(t *testing.T) {
+	originalResolver := resolver
+	defer func() { resolver = originalResolver }()
+	resolver = testLinuxAMDResolver
+
+	assets := []*Asset{
+		{Name: "tool-linux-amd64.tar.gz"},
+		{Name: "tool-linux-x86_64-x64-64bit.tar.gz"},
+	}
+	for _, candidates := range [][]*Asset{assets, {assets[1], assets[0]}} {
+		_, err := NewFilter(&FilterOpts{NonInteractive: true}).FilterAssets("tool", candidates, "")
+		if err == nil || !strings.Contains(err.Error(), "multiple matches") {
+			t.Fatalf("FilterAssets error = %v, want an ambiguity", err)
+		}
+	}
+}
+
+func TestFilterAssetsResolvesProductBeforeStandaloneFormat(t *testing.T) {
+	originalResolver := resolver
+	defer func() { resolver = originalResolver }()
+	resolver = testDarwinARMResolver
+
+	result, err := NewFilter(&FilterOpts{NonInteractive: true}).FilterAssets("agentsview", []*Asset{
+		{Name: "agentsview-helper-darwin-arm64"},
+		{Name: "agentsview-darwin-arm64.tar.gz"},
+	}, "")
+	if err != nil {
+		t.Fatalf("FilterAssets returned error: %v", err)
+	}
+	if result.Name != "agentsview-darwin-arm64.tar.gz" {
+		t.Fatalf("selected %q, want intended archive", result.Name)
+	}
+}
+
+func TestFilterAssetsAllRetainsCompatiblePackageFormats(t *testing.T) {
+	originalResolver := resolver
+	originalSelect := selectOption
+	originalIsInteractive := isInteractive
+	defer func() {
+		resolver = originalResolver
+		selectOption = originalSelect
+		isInteractive = originalIsInteractive
+	}()
+	resolver = testLinuxAMDResolver
+	isInteractive = func() bool { return true }
+	selectOption = func(_ string, options []fmt.Stringer) (interface{}, error) {
+		if len(options) != 2 || options[0].String() != "tool-linux-amd64.tar.gz" || options[1].String() != "tool-linux-amd64.zip" {
+			t.Fatalf("--all options = %v, want both compatible formats", options)
+		}
+		return options[1], nil
+	}
+
+	result, err := NewFilter(&FilterOpts{SkipScoring: true}).FilterAssets("tool", []*Asset{
+		{Name: "tool-linux-amd64.zip"},
+		{Name: "tool-linux-amd64.tar.gz"},
+	}, "")
+	if err != nil {
+		t.Fatalf("FilterAssets returned error: %v", err)
+	}
+	if result.Name != "tool-linux-amd64.zip" {
+		t.Fatalf("selected %q, want explicitly prompted zip", result.Name)
+	}
+}
+
+func TestFilterAssetsAllKeepsOnlyCurrentTargetInstallableCandidates(t *testing.T) {
+	originalResolver := resolver
+	originalSelect := selectOption
+	originalIsInteractive := isInteractive
+	defer func() {
+		resolver = originalResolver
+		selectOption = originalSelect
+		isInteractive = originalIsInteractive
+	}()
+	resolver = testDarwinARMResolver
+	isInteractive = func() bool { return true }
+	selectOption = func(_ string, options []fmt.Stringer) (interface{}, error) {
+		want := []string{"alpha-darwin-arm64.tar.gz", "beta-darwin-arm64.zip", "helper.tar.gz"}
+		if len(options) != len(want) {
+			t.Fatalf("--all options = %v, want %v", options, want)
+		}
+		for i, name := range want {
+			if options[i].String() != name {
+				t.Fatalf("--all option %d = %q, want %q", i, options[i], name)
+			}
+		}
+		return options[0], nil
+	}
+
+	result, err := NewFilter(&FilterOpts{SkipScoring: true}).FilterAssets("tool", []*Asset{
+		{Name: "beta-darwin-arm64.zip"},
+		{Name: "alpha-darwin-arm64.tar.gz"},
+		{Name: "helper.tar.gz"},
+		{Name: "tool-windows-arm64.zip"},
+		{Name: "tool-darwin-amd64.zip"},
+		{Name: "tool-darwin-arm64-avx2.zip"},
+		{Name: "tool-darwin-arm64.AppImage"},
+		{Name: "tool-darwin-arm64.tar.gz.sha256"},
+		{Name: "tool-darwin-arm64.dylib"},
+	}, "")
+	if err != nil {
+		t.Fatalf("FilterAssets returned error: %v", err)
+	}
+	if result.Name != "alpha-darwin-arm64.tar.gz" {
+		t.Fatalf("selected %q, want first compatible candidate", result.Name)
+	}
+}
+
+func TestCompatibleAssetsRejectsFormatImpliedWrongTargets(t *testing.T) {
+	originalResolver := resolver
+	defer func() { resolver = originalResolver }()
+	resolver = testDarwinARMResolver
+
+	compatible := NewFilter(&FilterOpts{SkipScoring: true}).CompatibleAssets([]*Asset{
+		{Name: "AgentsView_0.25.0_amd64.AppImage"},
+		{Name: "AgentsView_0.25.0_windows_arm64.exe"},
+		{Name: "AgentsView_0.25.0_darwin_arm64.tar.gz"},
+	}, "")
+	if len(compatible) != 1 || compatible[0].Name != "AgentsView_0.25.0_darwin_arm64.tar.gz" {
+		t.Fatalf("CompatibleAssets returned %+v, want only Darwin archive", compatible)
+	}
+}
+
+func TestCompatibleAssetsOrdersProductGroupsDeterministically(t *testing.T) {
+	originalResolver := resolver
+	defer func() { resolver = originalResolver }()
+	resolver = testLinuxAMDResolver
+
+	assets := []*Asset{
+		{Name: "zeta-linux-amd64.tar.gz"},
+		{Name: "alpha-linux-amd64.zip"},
+	}
+	want := []string{"alpha-linux-amd64.zip", "zeta-linux-amd64.tar.gz"}
+	for _, candidates := range [][]*Asset{assets, {assets[1], assets[0]}, assets} {
+		compatible := NewFilter(&FilterOpts{}).CompatibleAssets(candidates, "")
+		if len(compatible) != len(want) {
+			t.Fatalf("CompatibleAssets(%v) = %v, want %v", candidates, compatible, want)
+		}
+		for i, name := range want {
+			if compatible[i].Name != name {
+				t.Fatalf("CompatibleAssets(%v)[%d] = %q, want %q", candidates, i, compatible[i].Name, name)
+			}
+		}
+	}
+}
+
 func TestFilterAssetsFailsNonInteractiveForMultipleProducts(t *testing.T) {
 	originalResolver := resolver
 	defer func() { resolver = originalResolver }()
@@ -623,6 +816,56 @@ func TestFilterAssetsFailsNonInteractiveForMultipleProducts(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "use --select") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestFilterAssetsPromptsForAmbiguousProductsWhenInteractive(t *testing.T) {
+	originalResolver := resolver
+	originalSelect := selectOption
+	originalIsInteractive := isInteractive
+	defer func() {
+		resolver = originalResolver
+		selectOption = originalSelect
+		isInteractive = originalIsInteractive
+	}()
+	resolver = testLinuxAMDResolver
+	isInteractive = func() bool { return true }
+	selectOption = func(_ string, options []fmt.Stringer) (interface{}, error) {
+		if len(options) != 2 || options[0].String() != "csv2arrow-x86_64-unknown-linux-gnu.tar.xz" || options[1].String() != "json2arrow-x86_64-unknown-linux-gnu.tar.xz" {
+			t.Fatalf("prompt options = %v, want compatible products", options)
+		}
+		return options[1], nil
+	}
+
+	result, err := NewFilter(&FilterOpts{}).FilterAssets("arrow-tools", []*Asset{
+		{Name: "json2arrow-x86_64-unknown-linux-gnu.tar.xz"},
+		{Name: "csv2arrow-x86_64-unknown-linux-gnu.tar.xz"},
+	}, "")
+	if err != nil {
+		t.Fatalf("FilterAssets returned error: %v", err)
+	}
+	if result.Name != "json2arrow-x86_64-unknown-linux-gnu.tar.xz" {
+		t.Fatalf("selected %q, want prompted product", result.Name)
+	}
+}
+
+func TestFilterAssetsPreservesAmbiguousProductReasonWithoutPrompt(t *testing.T) {
+	originalResolver := resolver
+	originalIsInteractive := isInteractive
+	defer func() {
+		resolver = originalResolver
+		isInteractive = originalIsInteractive
+	}()
+	resolver = testLinuxAMDResolver
+	assets := []*Asset{
+		{Name: "csv2arrow-x86_64-unknown-linux-gnu.tar.xz"},
+		{Name: "json2arrow-x86_64-unknown-linux-gnu.tar.xz"},
+	}
+
+	for _, opts := range []*FilterOpts{{NonInteractive: true}, {}} {
+		isInteractive = func() bool { return false }
+		_, err := NewFilter(opts).FilterAssets("arrow-tools", assets, "")
+		assertReleaseCandidateReason(t, err, ErrAmbiguousReleaseProduct, ReleaseCandidateAmbiguousProduct)
 	}
 }
 
