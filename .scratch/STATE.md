@@ -4,7 +4,7 @@ Generated: 2026-09-15T08:56:33Z
 
 NOTE: This file is auto-generated. Do not edit manually.
 
-Tickets: 10 active, 8 resolved
+Tickets: 13 active, 8 resolved
 
 ## Active Tickets
 
@@ -20,6 +20,9 @@ Tickets: 10 active, 8 resolved
 | [reliability-managed-completions](reliability-managed-completions/spec.md) | [16-install-owned-completions](reliability-managed-completions/issues/16-install-owned-completions.md) | — | — | ready-for-agent | 15 / Generate completions through a bounded native runner |
 | [reliability-managed-completions](reliability-managed-completions/spec.md) | [17-integrate-completion-lifecycle](reliability-managed-completions/issues/17-integrate-completion-lifecycle.md) | — | — | ready-for-agent | 16 / Install completion files with explicit ownership |
 | [reliability-managed-completions](reliability-managed-completions/spec.md) | [18-document-and-verify](reliability-managed-completions/issues/18-document-and-verify.md) | — | — | ready-for-agent | 17 / Integrate completion lifecycle and sync |
+| [windows-compatibility](windows-compatibility/spec.md) | [01-resolve-managed-windows-targets](windows-compatibility/issues/01-resolve-managed-windows-targets.md) | — | — | ready-for-agent | None (can start immediately). |
+| [windows-compatibility](windows-compatibility/spec.md) | [02-preserve-go-import-paths](windows-compatibility/issues/02-preserve-go-import-paths.md) | — | — | ready-for-agent | None (can start immediately). |
+| [windows-compatibility](windows-compatibility/spec.md) | [03-enforce-windows-go-tests](windows-compatibility/issues/03-enforce-windows-go-tests.md) | — | — | ready-for-agent | 01 / Resolve managed Windows names and destinations; 02 / Preserve Go import-path separators on Windows; reliability-managed-completions/08 / Resolve release products before packaging; reliability-managed-completions/09 / Persist stable selection intent. |
 
 ## Resolved Tickets
 
