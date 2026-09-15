@@ -458,6 +458,82 @@ func TestInstallPublicationFailurePreservesPriorMetadata(t *testing.T) {
 	assertNoStagedBinary(t, target)
 }
 
+func TestInstallBinaryConfigFailureAfterPublicationRestoresPriorState(t *testing.T) {
+	installDir := setupTestConfig(t)
+	target := filepath.Join(installDir, "tool")
+	if err := os.WriteFile(target, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	prior := &config.Binary{Path: target, RemoteName: "tool", Version: "1.0.0", Hash: "old-hash", URL: "https://example.test/tool", Provider: "test"}
+	if err := config.UpsertBinary(prior); err != nil {
+		t.Fatal(err)
+	}
+	previousFactory, previousCommit := installProviderFactory, commitBinaryTransaction
+	installProviderFactory = func(string, string) (providers.Provider, error) {
+		return fetchBinaryTestProvider{id: "test", fetchFn: func(*providers.FetchOpts) (*providers.File, error) {
+			return &providers.File{Name: "tool", Version: "2.0.0", Data: strings.NewReader(runnableRunScript)}, nil
+		}}, nil
+	}
+	commitBinaryTransaction = func(transaction config.BinaryTransaction) error {
+		if _, err := transaction.ReserveRollbackArtifact(); err != nil {
+			return err
+		}
+		if err := transaction.Publish(prior); err != nil {
+			return err
+		}
+		if err := transaction.Rollback(prior); err != nil {
+			return err
+		}
+		return errors.New("config write failed")
+	}
+	t.Cleanup(func() { installProviderFactory, commitBinaryTransaction = previousFactory, previousCommit })
+	if _, err := installBinary(InstallOpts{URL: prior.URL, Provider: prior.Provider, Path: target, ConfigPath: target, LogicalName: "tool", Force: true}); err == nil {
+		t.Fatal("install succeeded despite config failure")
+	}
+	contents, err := os.ReadFile(target)
+	if err != nil || string(contents) != "old" {
+		t.Fatalf("published bytes were not rolled back: %q err=%v", contents, err)
+	}
+	if stored := config.Get().Bins[target]; stored == nil || stored.Version != prior.Version {
+		t.Fatalf("prior record changed: %#v", stored)
+	}
+}
+
+func TestInstallBinaryOverwritesTransactionallyAndCleansRollbackMaterial(t *testing.T) {
+	installDir := setupTestConfig(t)
+	target := filepath.Join(installDir, "tool")
+	if err := os.WriteFile(target, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.UpsertBinary(&config.Binary{Path: target, RemoteName: "tool", Version: "1.0.0", Hash: "old-hash"}); err != nil {
+		t.Fatal(err)
+	}
+
+	previousFactory := installProviderFactory
+	installProviderFactory = func(string, string) (providers.Provider, error) {
+		return fetchBinaryTestProvider{id: "test", fetchFn: func(*providers.FetchOpts) (*providers.File, error) {
+			return &providers.File{Name: "tool", Version: "2.0.0", Data: strings.NewReader(runnableRunScript)}, nil
+		}}, nil
+	}
+	t.Cleanup(func() { installProviderFactory = previousFactory })
+
+	if _, err := installBinary(InstallOpts{URL: "https://example.test/tool", Provider: "test", Path: target, ConfigPath: target, LogicalName: "tool", Force: true}); err != nil {
+		t.Fatalf("installBinary: %v", err)
+	}
+	contents, err := os.ReadFile(target)
+	if err != nil || string(contents) != runnableRunScript {
+		t.Fatalf("installed executable = %q, err=%v", contents, err)
+	}
+	stored := config.Get().Bins[target]
+	if stored == nil || stored.Version != "2.0.0" {
+		t.Fatalf("stored record = %#v", stored)
+	}
+	rollback, err := filepath.Glob(target + ".rollback-*")
+	if err != nil || len(rollback) != 0 {
+		t.Fatalf("rollback material was not cleaned: %v, err=%v", rollback, err)
+	}
+}
+
 func TestInstallBinaryPersistsScopedIntegrityRecords(t *testing.T) {
 	installDir := setupTestConfig(t)
 	installedHash := fmt.Sprintf("%x", sha256.Sum256([]byte(runnableRunScript)))

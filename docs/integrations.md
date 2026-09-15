@@ -11,7 +11,7 @@
 | Codeberg | `codeberg.org/owner/repo` or release URL | `CODEBERG_TOKEN` | Uses the Gitea SDK against Codeberg (`pkg/providers/codeberg.go`). |
 | Docker | `docker://repo:tag` | Any environment variable supported by the Docker CLI / `client.FromEnv` | Uses the local Docker daemon and pulls the image before wrapping it as an executable (`pkg/providers/docker.go`). |
 | HashiCorp | `https://releases.hashicorp.com/...` | None documented in source | Dedicated release pages; no provider-specific env vars are defined (`README.md`, `pkg/providers/providers.go`). |
-| Go install | `goinstall://module/path@version` | `go` must be on `PATH` | Uses `go env GOPATH`, `go install`, and `proxy.golang.org` version metadata (`pkg/providers/goinstall.go`). |
+| Go install | `goinstall://module/path@version` | `go` must be on `PATH` | Uses an isolated temporary `GOBIN` with `go install`, then `proxy.golang.org` version metadata (`pkg/providers/goinstall.go`). |
 | Generic URL | Any direct HTTP(S) URL | None | Infers the version from `Content-Disposition` or the filename in the redirect/original URL. Fails if no semver-like token can be inferred (`pkg/providers/generic_url.go`). |
 
 ## Common behaviors

@@ -3,6 +3,7 @@ package config
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
@@ -22,7 +25,11 @@ import (
 
 var cfg config
 
-var ErrInvalidConfigKey = errors.New("invalid config key")
+var (
+	ErrInvalidConfigKey             = errors.New("invalid config key")
+	ErrBinaryRecoveryRequired       = errors.New("binary has unresolved transaction state")
+	ErrTransactionOwnershipMismatch = errors.New("transaction does not own unresolved state")
+)
 
 const configFileMode os.FileMode = 0o600
 
@@ -31,9 +38,10 @@ func supportsConfigFileMode() bool {
 }
 
 var (
-	osStat    = os.Stat
-	globFiles = filepath.Glob
-	cfgMu     sync.Mutex
+	osStat      = os.Stat
+	globFiles   = filepath.Glob
+	writeConfig = writeConfigLocked
+	cfgMu       sync.Mutex
 
 	linuxLibCOnce   sync.Once
 	linuxLibCCached []string
@@ -49,9 +57,10 @@ type config struct {
 	// useGHAuthExplicit tracks whether use_gh_for_github_token was present in
 	// the JSON so we can default absent values to true while honoring an
 	// explicit false. It is not serialized.
-	useGHAuthExplicit bool               `json:"-"`
-	Bins              map[string]*Binary `json:"bins"`
-	Hooks             []RunHook          `json:"hooks,omitempty"`
+	useGHAuthExplicit      bool                                    `json:"-"`
+	Bins                   map[string]*Binary                      `json:"bins"`
+	UnresolvedTransactions map[string]*UnresolvedBinaryTransaction `json:"unresolved_transactions,omitempty"`
+	Hooks                  []RunHook                               `json:"hooks,omitempty"`
 }
 
 // HookType represents lifecycle hook event names.
@@ -144,6 +153,31 @@ type Binary struct {
 	MinAgeDays         int              `json:"min_age_days,omitempty"`
 }
 
+// UnresolvedBinaryTransaction records a direct-binary commit whose executable
+// rollback could not be confirmed. It is keyed by the managed binary path in
+// the configuration and owned by ID.
+type UnresolvedBinaryTransaction struct {
+	ID              string  `json:"id"`
+	DestinationPath string  `json:"destination_path"`
+	ArtifactPath    string  `json:"artifact_path,omitempty"`
+	Previous        *Binary `json:"previous,omitempty"`
+	Intended        *Binary `json:"intended"`
+}
+
+// BinaryTransaction combines a single managed-record update with the external
+// executable publication it represents. Publish and Rollback run while the
+// config mutex and cross-process config lock are held, so they must be short.
+type BinaryTransaction struct {
+	ID                      string
+	Intended                *Binary
+	DestinationPath         string
+	ReserveRollbackArtifact func() (string, error)
+	Publish                 func(previous *Binary) error
+	Rollback                func(previous *Binary) error
+	RollbackArtifact        func() string
+	Cleanup                 func() error
+}
+
 // IntegrityRecord is the serializable counterpart to provider integrity
 // evidence. It lives in config to keep provider transport types out of the
 // persistent configuration package.
@@ -167,6 +201,20 @@ func CloneBinary(binary *Binary) *Binary {
 	clone.DownloadIntegrity = CloneIntegrityRecord(binary.DownloadIntegrity)
 	clone.InstalledIntegrity = CloneIntegrityRecord(binary.InstalledIntegrity)
 	return &clone
+}
+
+func cloneUnresolvedBinaryTransaction(transaction *UnresolvedBinaryTransaction) *UnresolvedBinaryTransaction {
+	if transaction == nil {
+		return nil
+	}
+
+	return &UnresolvedBinaryTransaction{
+		ID:              transaction.ID,
+		DestinationPath: transaction.DestinationPath,
+		ArtifactPath:    transaction.ArtifactPath,
+		Previous:        CloneBinary(transaction.Previous),
+		Intended:        CloneBinary(transaction.Intended),
+	}
 }
 
 // CloneIntegrityRecord returns an independent copy of an integrity record.
@@ -223,7 +271,7 @@ func CheckAndLoad() error {
 			}
 
 			if created {
-				if err := writeConfigLocked(configPath, loaded); err != nil {
+				if err := writeConfig(configPath, loaded); err != nil {
 					return err
 				}
 			}
@@ -233,7 +281,7 @@ func CheckAndLoad() error {
 			if err != nil {
 				return err
 			}
-			if err := writeConfigLocked(configPath, loaded); err != nil {
+			if err := writeConfig(configPath, loaded); err != nil {
 				return err
 			}
 		}
@@ -329,6 +377,12 @@ func loadConfigLocked(configPath string) (config, bool, error) {
 	if loaded.Bins == nil {
 		loaded.Bins = map[string]*Binary{}
 	}
+	if loaded.UnresolvedTransactions == nil {
+		loaded.UnresolvedTransactions = map[string]*UnresolvedBinaryTransaction{}
+	}
+	if err := loadTransactionJournals(configPath, &loaded); err != nil {
+		return config{}, false, err
+	}
 	if runtime.GOOS == "linux" && len(loaded.DefaultChmod) == 0 {
 		loaded.DefaultChmod = "0755"
 	}
@@ -363,12 +417,328 @@ func mutateConfigLocked(mutate func(*config) error) error {
 		if err := mutate(&loaded); err != nil {
 			return err
 		}
-		if err := writeConfigLocked(configPath, loaded); err != nil {
+		if err := writeConfig(configPath, loaded); err != nil {
 			return err
 		}
 		cfg = loaded
 		return nil
 	})
+}
+
+// GetBinary returns a copy of a managed record. It refuses a record with
+// unresolved transaction state so lifecycle callers cannot treat either side
+// of an incomplete commit as successful.
+func GetBinary(path string) (*Binary, error) {
+	cfgMu.Lock()
+	defer cfgMu.Unlock()
+
+	if _, ok := cfg.UnresolvedTransactions[path]; ok {
+		return nil, fmt.Errorf("%w: %s", ErrBinaryRecoveryRequired, path)
+	}
+	return CloneBinary(cfg.Bins[path]), nil
+}
+
+// CheckBinaryResolved prevents lifecycle callers from acting on a direct
+// binary whose executable/config commit needs reconciliation.
+func CheckBinaryResolved(path string) error {
+	cfgMu.Lock()
+	defer cfgMu.Unlock()
+	return checkBinaryResolved(&cfg, path)
+}
+
+// CommitBinaryTransaction publishes an external executable mutation and its
+// one managed record while holding both config locks. It reloads current state
+// before publishing and preserves every record other than Intended.Path.
+func CommitBinaryTransaction(transaction BinaryTransaction) error {
+	if err := validateBinaryTransaction(transaction); err != nil {
+		return err
+	}
+
+	cfgMu.Lock()
+	defer cfgMu.Unlock()
+
+	configPath, err := getConfigPath()
+	if err != nil {
+		return err
+	}
+
+	return withConfigLock(configPath, func() error {
+		loaded, _, err := loadConfigLocked(configPath)
+		if err != nil {
+			return err
+		}
+		if err := checkBinaryResolved(&loaded, transaction.Intended.Path); err != nil {
+			cfg = loaded
+			return err
+		}
+
+		previous := CloneBinary(loaded.Bins[transaction.Intended.Path])
+		unresolved, err := prepareUnresolvedTransaction(transaction, previous)
+		if err != nil {
+			cfg = loaded
+			return err
+		}
+		if err := writeTransactionJournal(configPath, transaction.Intended.Path, unresolved, transactionJournalIntent); err != nil {
+			cfg = loaded
+			return fmt.Errorf("persist transaction intent: %w", err)
+		}
+		if err := transaction.Publish(CloneBinary(previous)); err != nil {
+			return finishFailedBinaryTransaction(configPath, &loaded, transaction, previous, unresolved, err)
+		}
+
+		loaded.Bins[transaction.Intended.Path] = CloneBinary(transaction.Intended)
+		if err := writeConfig(configPath, loaded); err != nil {
+			return finishFailedBinaryTransaction(configPath, &loaded, transaction, previous, unresolved, err)
+		}
+		loaded.UnresolvedTransactions[transaction.Intended.Path] = unresolved
+		cfg = loaded
+		if err := writeTransactionJournal(configPath, transaction.Intended.Path, unresolved, transactionJournalCommitted); err != nil {
+			cfg = loaded
+			return fmt.Errorf("mark committed transaction journal: %w", err)
+		}
+		if transaction.Cleanup == nil {
+			if err := removeOwnedTransactionJournal(configPath, transaction.Intended.Path, transaction.ID); err != nil {
+				return err
+			}
+			delete(loaded.UnresolvedTransactions, transaction.Intended.Path)
+			cfg = loaded
+			return nil
+		}
+		if err := transaction.Cleanup(); err != nil {
+			return err
+		}
+		if err := removeOwnedTransactionJournal(configPath, transaction.Intended.Path, transaction.ID); err != nil {
+			return err
+		}
+		delete(loaded.UnresolvedTransactions, transaction.Intended.Path)
+		cfg = loaded
+		return nil
+	})
+}
+
+// RecoverBinaryTransaction resolves an incomplete transaction from the current
+// managed record and owned filesystem evidence. It only accepts unambiguous
+// previous, intended, or never-published states.
+func RecoverBinaryTransaction(path string) error {
+	if path == "" {
+		return errors.New("binary transaction recovery requires path")
+	}
+
+	cfgMu.Lock()
+	defer cfgMu.Unlock()
+
+	configPath, err := getConfigPath()
+	if err != nil {
+		return err
+	}
+
+	return withConfigLock(configPath, func() error {
+		loaded, _, err := loadConfigLocked(configPath)
+		if err != nil {
+			return err
+		}
+		unresolved, ok := loaded.UnresolvedTransactions[path]
+		if !ok {
+			cfg = loaded
+			return fmt.Errorf("%w: %s", ErrTransactionOwnershipMismatch, path)
+		}
+
+		current := loaded.Bins[path]
+		if !reflect.DeepEqual(current, unresolved.Previous) && !reflect.DeepEqual(current, unresolved.Intended) {
+			cfg = loaded
+			return errors.New("transaction config evidence is ambiguous")
+		}
+		resolved, err := resolveTransactionEvidence(*cloneUnresolvedBinaryTransaction(unresolved))
+		if err != nil {
+			cfg = loaded
+			return err
+		}
+
+		if resolved == nil {
+			delete(loaded.Bins, path)
+		} else {
+			loaded.Bins[path] = CloneBinary(resolved)
+		}
+		delete(loaded.UnresolvedTransactions, path)
+		if err := writeConfig(configPath, loaded); err != nil {
+			loaded.UnresolvedTransactions[path] = unresolved
+			cfg = loaded
+			return err
+		}
+		if err := removeOwnedTransactionJournal(configPath, path, unresolved.ID); err != nil {
+			loaded.UnresolvedTransactions[path] = unresolved
+			cfg = loaded
+			return fmt.Errorf("remove resolved transaction journal: %w", err)
+		}
+		cfg = loaded
+		return nil
+	})
+}
+
+func resolveTransactionEvidence(unresolved UnresolvedBinaryTransaction) (*Binary, error) {
+	if unresolved.Intended == nil || unresolved.DestinationPath == "" {
+		return nil, errors.New("transaction recovery has unsafe or incomplete filesystem evidence")
+	}
+	if unresolved.ArtifactPath != "" && !ownedRollbackArtifact(unresolved.DestinationPath, unresolved.ArtifactPath) {
+		return nil, errors.New("transaction recovery has unsafe or incomplete filesystem evidence")
+	}
+	destinationHash, destinationExists, err := transactionFileHash(unresolved.DestinationPath)
+	if err != nil {
+		return nil, err
+	}
+	backupHash, backupExists := "", false
+	if unresolved.ArtifactPath != "" {
+		backupHash, backupExists, err = transactionFileHash(unresolved.ArtifactPath)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if unresolved.Previous == nil && !destinationExists && !backupExists {
+		return nil, nil
+	}
+	if destinationExists && hashMatches(destinationHash, unresolved.Intended.Hash) {
+		if backupExists {
+			if unresolved.Previous == nil || !hashMatches(backupHash, unresolved.Previous.Hash) {
+				return nil, errors.New("transaction backup does not match previous binary")
+			}
+			if err := os.Remove(unresolved.ArtifactPath); err != nil {
+				return nil, err
+			}
+		}
+		return CloneBinary(unresolved.Intended), nil
+	}
+	if unresolved.Previous != nil && destinationExists && hashMatches(destinationHash, unresolved.Previous.Hash) {
+		if backupExists {
+			if !hashMatches(backupHash, unresolved.Previous.Hash) {
+				return nil, errors.New("transaction backup does not match previous binary")
+			}
+			if err := os.Remove(unresolved.ArtifactPath); err != nil {
+				return nil, err
+			}
+		}
+		return CloneBinary(unresolved.Previous), nil
+	}
+	if unresolved.Previous != nil && !destinationExists && backupExists && hashMatches(backupHash, unresolved.Previous.Hash) {
+		if err := os.Rename(unresolved.ArtifactPath, unresolved.DestinationPath); err != nil {
+			return nil, err
+		}
+		return CloneBinary(unresolved.Previous), nil
+	}
+	return nil, errors.New("transaction filesystem evidence is ambiguous")
+}
+
+func transactionFileHash(path string) (string, bool, error) {
+	f, err := os.Open(path)
+	if os.IsNotExist(err) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", false, err
+	}
+	return fmt.Sprintf("%x", h.Sum(nil)), true, nil
+}
+
+func hashMatches(actual, expected string) bool {
+	return expected != "" && strings.EqualFold(actual, expected)
+}
+
+func validateBinaryTransaction(transaction BinaryTransaction) error {
+	if transaction.ID == "" || transaction.Intended == nil || transaction.Intended.Path == "" || transaction.Publish == nil || transaction.Rollback == nil {
+		return errors.New("binary transaction requires owner, intended binary, publish, and rollback")
+	}
+	if !safeTransactionID(transaction.ID) {
+		return fmt.Errorf("invalid binary transaction owner %q", transaction.ID)
+	}
+	return nil
+}
+
+func finishFailedBinaryTransaction(configPath string, loaded *config, transaction BinaryTransaction, previous *Binary, unresolved *UnresolvedBinaryTransaction, operationErr error) error {
+	rollbackErr := transaction.Rollback(CloneBinary(previous))
+	if rollbackErr == nil {
+		restoreTransactionRecord(loaded, transaction.Intended.Path, previous)
+		loaded.UnresolvedTransactions[transaction.Intended.Path] = unresolved
+		if err := writeTransactionJournal(configPath, transaction.Intended.Path, unresolved, transactionJournalRolledBack); err != nil {
+			cfg = *loaded
+			return errors.Join(operationErr, fmt.Errorf("mark rolled-back transaction journal: %w", err))
+		}
+		cfg = *loaded
+		if err := removeOwnedTransactionJournal(configPath, transaction.Intended.Path, transaction.ID); err != nil {
+			return errors.Join(operationErr, err)
+		}
+		delete(loaded.UnresolvedTransactions, transaction.Intended.Path)
+		cfg = *loaded
+		return operationErr
+	}
+
+	restoreTransactionRecord(loaded, transaction.Intended.Path, previous)
+	if artifact := rollbackArtifact(transaction); artifact != "" {
+		unresolved.ArtifactPath = artifact
+	}
+	loaded.UnresolvedTransactions[transaction.Intended.Path] = unresolved
+	if err := writeTransactionJournal(configPath, transaction.Intended.Path, unresolved, transactionJournalIntent); err != nil {
+		cfg = *loaded
+		return errors.Join(operationErr, rollbackErr, fmt.Errorf("persist unresolved transaction journal: %w", err))
+	}
+	if err := writeConfig(configPath, *loaded); err != nil {
+		cfg = *loaded
+		return errors.Join(operationErr, rollbackErr, fmt.Errorf("persist unresolved transaction: %w", err))
+	}
+	cfg = *loaded
+	return errors.Join(operationErr, rollbackErr)
+}
+
+func prepareUnresolvedTransaction(transaction BinaryTransaction, previous *Binary) (*UnresolvedBinaryTransaction, error) {
+	destination := transaction.DestinationPath
+	if destination == "" {
+		destination = transaction.Intended.Path
+	}
+	unresolved := &UnresolvedBinaryTransaction{ID: transaction.ID, DestinationPath: destination, Previous: CloneBinary(previous), Intended: CloneBinary(transaction.Intended)}
+	if transaction.ReserveRollbackArtifact == nil {
+		return unresolved, nil
+	}
+	artifact, err := transaction.ReserveRollbackArtifact()
+	if err != nil {
+		return nil, fmt.Errorf("reserve rollback artifact: %w", err)
+	}
+	if !ownedRollbackArtifact(destination, artifact) {
+		return nil, errors.New("reserved rollback artifact is not owned by transaction destination")
+	}
+	unresolved.ArtifactPath = artifact
+	return unresolved, nil
+}
+
+func rollbackArtifact(transaction BinaryTransaction) string {
+	if transaction.RollbackArtifact == nil {
+		return ""
+	}
+	return transaction.RollbackArtifact()
+}
+
+func ownedRollbackArtifact(destination, artifact string) bool {
+	if destination == "" || artifact == "" {
+		return false
+	}
+	return filepath.Dir(destination) == filepath.Dir(artifact) && strings.HasPrefix(filepath.Base(artifact), filepath.Base(destination)+".rollback-")
+}
+
+func restoreTransactionRecord(current *config, path string, previous *Binary) {
+	if previous == nil {
+		delete(current.Bins, path)
+		return
+	}
+	current.Bins[path] = CloneBinary(previous)
+}
+
+func checkBinaryResolved(current *config, path string) error {
+	if _, ok := current.UnresolvedTransactions[path]; ok {
+		return fmt.Errorf("%w: %s", ErrBinaryRecoveryRequired, path)
+	}
+	return nil
 }
 
 // ensureDefaultPathExists recreates the cached default install directory if
@@ -452,6 +822,9 @@ func UpsertBinary(c *Binary) error {
 	}
 
 	return mutateConfigLocked(func(current *config) error {
+		if err := checkBinaryResolved(current, c.Path); err != nil {
+			return err
+		}
 		current.Bins[c.Path] = CloneBinary(c)
 		return nil
 	})
@@ -466,6 +839,9 @@ func UpsertBinaries(binaries []*Binary) error {
 	return mutateConfigLocked(func(current *config) error {
 		for _, c := range binaries {
 			if c != nil {
+				if err := checkBinaryResolved(current, c.Path); err != nil {
+					return err
+				}
 				current.Bins[c.Path] = CloneBinary(c)
 			}
 		}
@@ -481,6 +857,9 @@ func RemoveBinaries(paths []string) error {
 
 	return mutateConfigLocked(func(current *config) error {
 		for _, p := range paths {
+			if err := checkBinaryResolved(current, p); err != nil {
+				return err
+			}
 			delete(current.Bins, p)
 		}
 		return nil
@@ -526,6 +905,113 @@ func writeConfigLocked(configPath string, current config) error {
 	}
 
 	return nil
+}
+
+type transactionJournal struct {
+	Path       string                      `json:"path"`
+	State      string                      `json:"state"`
+	Unresolved UnresolvedBinaryTransaction `json:"unresolved"`
+}
+
+const (
+	transactionJournalIntent     = "intent"
+	transactionJournalCommitted  = "committed"
+	transactionJournalRolledBack = "rolled-back"
+)
+
+var transactionIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
+
+func safeTransactionID(id string) bool {
+	return transactionIDPattern.MatchString(id) && id != "." && id != ".."
+}
+
+func transactionJournalPath(configPath, transactionID string) string {
+	return configPath + ".transaction-" + transactionID + ".json"
+}
+
+func writeTransactionJournal(configPath, path string, unresolved *UnresolvedBinaryTransaction, state string) error {
+	if !safeTransactionID(unresolved.ID) || path == "" || unresolved.Intended == nil {
+		return errors.New("invalid transaction journal")
+	}
+	journalPath := transactionJournalPath(configPath, unresolved.ID)
+	journal := transactionJournal{Path: path, State: state, Unresolved: *cloneUnresolvedBinaryTransaction(unresolved)}
+	data, err := json.Marshal(journal)
+	if err != nil {
+		return err
+	}
+	journalFile, err := os.CreateTemp(filepath.Dir(journalPath), filepath.Base(journalPath)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	temporaryPath := journalFile.Name()
+	defer func() { _ = os.Remove(temporaryPath) }()
+	if _, err := journalFile.Write(data); err != nil {
+		_ = journalFile.Close()
+		return err
+	}
+	if supportsConfigFileMode() {
+		if err := journalFile.Chmod(configFileMode); err != nil {
+			_ = journalFile.Close()
+			return err
+		}
+	}
+	if err := journalFile.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(temporaryPath, journalPath); err != nil {
+		return err
+	}
+	return nil
+}
+
+func loadTransactionJournals(configPath string, loaded *config) error {
+	paths, err := globFiles(configPath + ".transaction-*.json")
+	if err != nil {
+		return err
+	}
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		var journal transactionJournal
+		if err := json.Unmarshal(data, &journal); err != nil {
+			return fmt.Errorf("read transaction journal %s: %w", path, err)
+		}
+		if journal.Path == "" || !safeTransactionID(journal.Unresolved.ID) || journal.Unresolved.Intended == nil || transactionJournalPath(configPath, journal.Unresolved.ID) != path {
+			return fmt.Errorf("invalid transaction journal %s", path)
+		}
+		if journal.State != transactionJournalIntent && journal.State != transactionJournalCommitted && journal.State != transactionJournalRolledBack {
+			return fmt.Errorf("invalid transaction journal state %q", journal.State)
+		}
+		if journal.Unresolved.DestinationPath == "" || (journal.Unresolved.ArtifactPath != "" && !ownedRollbackArtifact(journal.Unresolved.DestinationPath, journal.Unresolved.ArtifactPath)) {
+			return fmt.Errorf("unsafe transaction journal paths %s", path)
+		}
+		loaded.UnresolvedTransactions[journal.Path] = cloneUnresolvedBinaryTransaction(&journal.Unresolved)
+	}
+	return nil
+}
+
+func removeOwnedTransactionJournal(configPath, path, transactionID string) error {
+	if !safeTransactionID(transactionID) {
+		return fmt.Errorf("invalid transaction journal owner %q", transactionID)
+	}
+	journalPath := transactionJournalPath(configPath, transactionID)
+	data, err := os.ReadFile(journalPath)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var journal transactionJournal
+	if err := json.Unmarshal(data, &journal); err != nil {
+		return err
+	}
+	if journal.Path != path || journal.Unresolved.ID != transactionID {
+		return ErrTransactionOwnershipMismatch
+	}
+	return os.Remove(journalPath)
 }
 
 // GetArch returns the running program's architecture target

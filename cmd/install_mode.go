@@ -129,6 +129,21 @@ func lifecycleForMode(mode string) lifecycleStrategy {
 	return lifecycleRegistry[installModeBinary]
 }
 
+// ensureDirectBinariesResolved keeps direct-binary lifecycle work from
+// touching an executable while a prior publication is awaiting recovery.
+// System-package records have no direct-binary rollback state.
+func ensureDirectBinariesResolved(bins map[string]*config.Binary) error {
+	for path, binary := range bins {
+		if binary == nil || effectiveInstallMode(binary.InstallMode) != installModeBinary {
+			continue
+		}
+		if err := config.CheckBinaryResolved(path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func requestedInstallModes(strictSystemPackage, preferSystemPackage bool, requestedPath string) []string {
 	if strictSystemPackage {
 		return []string{installModeSystemPackage}

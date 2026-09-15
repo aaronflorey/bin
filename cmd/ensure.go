@@ -42,6 +42,9 @@ func runEnsure(args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := ensureDirectBinariesResolved(binsToProcess); err != nil {
+		return err
+	}
 
 	for _, binCfg := range binsToProcess {
 		ep := expandTrackedBinaryPath(binCfg.Path)

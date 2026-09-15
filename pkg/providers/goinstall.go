@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -19,6 +20,11 @@ type goinstall struct {
 	cachedVersionInfo        *goInstallVersionInfo
 	httpClient               *http.Client
 }
+
+var (
+	goInstallCommand = exec.Command
+	goInstallTempDir = os.MkdirTemp
+)
 
 type goInstallVersionInfo struct {
 	Version string    `json:"Version"`
@@ -120,22 +126,8 @@ func baseModulePathWith(noVer string, lister func(mod string) (string, error)) (
 	return "", false
 }
 
-func getGoPath() (string, error) {
-	cmd := exec.Command("go", "env", "GOPATH")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("command %v failed: %w, output: %s", cmd, err, string(output))
-	}
-	return strings.TrimSpace(string(output)), nil
-}
-
 func (g *goinstall) Fetch(opts *FetchOpts) (*File, error) {
 	g.resolveSubPath()
-
-	goPath, err := getGoPath()
-	if err != nil {
-		return nil, err
-	}
 
 	if (len(g.tag) > 0 && g.tag != "latest") || len(opts.Version) > 0 {
 		if len(opts.Version) > 0 {
@@ -153,19 +145,31 @@ func (g *goinstall) Fetch(opts *FetchOpts) (*File, error) {
 		g.cachedVersionInfo = versionInfo
 	}
 
-	cmd := exec.Command("go", "install", fmt.Sprintf("%s%s@%s", g.repo, g.subPath, g.tag))
+	outputDir, err := goInstallTempDir("", "bin-goinstall-*")
+	if err != nil {
+		return nil, fmt.Errorf("create isolated Go install directory: %w", err)
+	}
+	cleanupOutput := func() { _ = os.RemoveAll(outputDir) }
+
+	cmd := goInstallCommand("go", "install", fmt.Sprintf("%s%s@%s", g.repo, g.subPath, g.tag))
+	if len(cmd.Env) == 0 {
+		cmd.Env = os.Environ()
+	}
+	cmd.Env = append(cmd.Env, "GOBIN="+outputDir)
 
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
+		cleanupOutput()
 		return nil, fmt.Errorf("failed to install package: %w", err)
 	}
 
-	goBinPath := filepath.Join(goPath, "bin", g.name)
+	goBinPath := filepath.Join(outputDir, goInstallOutputName(g.name, runtime.GOOS))
 
 	file, err := os.Open(os.ExpandEnv(goBinPath))
 	if err != nil {
+		cleanupOutput()
 		return nil, fmt.Errorf("failed to open path '%s': %w", goBinPath, err)
 	}
 
@@ -174,17 +178,36 @@ func (g *goinstall) Fetch(opts *FetchOpts) (*File, error) {
 		versionInfo, err = g.getVersionInfo(versionInfoURL(g.repo, g.tag))
 		if err != nil {
 			_ = file.Close()
+			cleanupOutput()
 			return nil, err
 		}
 	}
 
 	return &File{
-		Data:        file,
+		Data:        &removeOnClose{ReadCloser: file, remove: cleanupOutput},
 		Name:        g.name,
 		SourceAsset: g.name,
 		Version:     g.tag,
 		PublishedAt: PtrTime(versionInfo.Time),
 	}, nil
+}
+
+func goInstallOutputName(name, goos string) string {
+	if goos == "windows" && filepath.Ext(name) != ".exe" {
+		return name + ".exe"
+	}
+	return name
+}
+
+type removeOnClose struct {
+	io.ReadCloser
+	remove func()
+}
+
+func (r *removeOnClose) Close() error {
+	err := r.ReadCloser.Close()
+	r.remove()
+	return err
 }
 
 func (g *goinstall) GetLatestVersion() (*ReleaseInfo, error) {

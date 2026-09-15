@@ -25,6 +25,7 @@ var isPromptInteractive = prompt.IsInteractive
 var confirmPrompt = prompt.Confirm
 var confirmDefaultNoPrompt = prompt.ConfirmDefaultNo
 var installProviderFactory = newProviderWithPolicy
+var commitBinaryTransaction = config.CommitBinaryTransaction
 
 // applyChmod applies the configured mode for installed binaries.
 // When unset, direct binary installs default to 0755 on non-Windows systems.
@@ -155,19 +156,20 @@ func installBinary(opts InstallOpts) (result *InstallResult, err error) {
 	}
 	log.Debugf("Resolved final install path to %q (overwrite=%t)", resolvedPath, overwrite)
 
-	hash, err := saveToDiskAndCloseInput(pResult, resolvedPath, overwrite)
+	candidate, err := prepareStagedBinary(pResult, resolvedPath, true)
 	inputClosed = true
 	if err != nil {
 		return nil, fmt.Errorf("error installing binary: %w", err)
 	}
-	hashString := fmt.Sprintf("%x", hash)
+	defer candidate.cleanup()
+	hashString := fmt.Sprintf("%x", candidate.hash)
 
 	configPath, err := resolveTrackedConfigPath(opts, resolvedPath)
 	if err != nil {
 		return nil, err
 	}
 
-	err = persistInstalledBinary(&config.Binary{
+	installed := &config.Binary{
 		RemoteName:         logicalName,
 		Path:               configPath,
 		Version:            pResult.Version,
@@ -184,10 +186,22 @@ func installBinary(opts InstallOpts) (result *InstallResult, err error) {
 		InstalledIntegrity: installedIntegrityRecord(pResult.InstalledIntegrity, hashString),
 		Pinned:             pinned,
 		MinAgeDays:         minAgeDays,
+	}
+	publication := stagedBinaryPublication{candidate: candidate.path, destination: resolvedPath, overwrite: overwrite}
+	transactionID := fmt.Sprintf("%x", sha256.Sum256([]byte(candidate.path)))
+	err = commitBinaryTransaction(config.BinaryTransaction{
+		ID:                      transactionID,
+		Intended:                installed,
+		DestinationPath:         resolvedPath,
+		ReserveRollbackArtifact: publication.reserveBackup,
+		Publish:                 func(*config.Binary) error { return publication.publish() },
+		Rollback:                func(*config.Binary) error { return publication.rollback() },
+		Cleanup:                 publication.cleanup,
 	})
 	if err != nil {
 		return nil, err
 	}
+	warnDuplicateManagedHash(installed.Path, installed.Hash)
 	log.Debugf("Saved installed binary config for %q at %s", logicalName, configPath)
 
 	return &InstallResult{
@@ -400,6 +414,29 @@ func saveToDiskAndCloseInput(f *providers.File, path string, overwrite bool) ([]
 }
 
 func saveToDiskWithInputClose(f *providers.File, path string, overwrite, closeInput bool) (hash []byte, err error) {
+	candidate, err := prepareStagedBinary(f, path, closeInput)
+	if err != nil {
+		return nil, err
+	}
+	defer candidate.cleanup()
+	if err := publishStagedBinary(candidate.path, path, overwrite); err != nil {
+		return nil, err
+	}
+	return candidate.hash, nil
+}
+
+type stagedBinaryCandidate struct {
+	path string
+	hash []byte
+}
+
+func (candidate *stagedBinaryCandidate) cleanup() {
+	if candidate != nil && candidate.path != "" {
+		_ = os.Remove(candidate.path)
+	}
+}
+
+func prepareStagedBinary(f *providers.File, path string, closeInput bool) (candidate *stagedBinaryCandidate, err error) {
 	inputClosed := false
 	defer func() {
 		if !closeInput || inputClosed {
@@ -410,13 +447,11 @@ func saveToDiskWithInputClose(f *providers.File, path string, overwrite, closeIn
 		}
 	}()
 
-	epath := path
-
-	if err := os.MkdirAll(filepath.Dir(epath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
 
-	file, err := os.CreateTemp(filepath.Dir(epath), filepath.Base(epath)+".tmp-*")
+	file, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
 	if err != nil {
 		return nil, err
 	}
@@ -426,14 +461,16 @@ func saveToDiskWithInputClose(f *providers.File, path string, overwrite, closeIn
 		if file != nil {
 			_ = file.Close()
 		}
-		_ = os.Remove(tempPath)
+		if err != nil {
+			_ = os.Remove(tempPath)
+		}
 	}()
 
 	h := sha256.New()
 
 	tr := io.TeeReader(f.Data, h)
 
-	log.Infof("Copying for %s@%s into %s", f.Name, f.Version, epath)
+	log.Infof("Copying for %s@%s into %s", f.Name, f.Version, path)
 	_, copyErr := io.Copy(file, tr)
 	var inputCloseErr error
 	if closeInput {
@@ -465,11 +502,107 @@ func saveToDiskWithInputClose(f *providers.File, path string, overwrite, closeIn
 		return nil, err
 	}
 
-	if err := publishStagedBinary(tempPath, epath, overwrite); err != nil {
-		return nil, err
-	}
+	return &stagedBinaryCandidate{path: tempPath, hash: h.Sum(nil)}, nil
+}
 
-	return h.Sum(nil), nil
+type stagedBinaryPublication struct {
+	candidate   string
+	destination string
+	overwrite   bool
+	backup      string
+	backedUp    bool
+	published   bool
+}
+
+func (publication *stagedBinaryPublication) reserveBackup() (string, error) {
+	backup, err := os.CreateTemp(filepath.Dir(publication.destination), filepath.Base(publication.destination)+".rollback-*")
+	if err != nil {
+		return "", err
+	}
+	publication.backup = backup.Name()
+	if err := backup.Close(); err != nil {
+		return "", err
+	}
+	if err := os.Remove(publication.backup); err != nil {
+		return "", err
+	}
+	return publication.backup, nil
+}
+
+func (publication *stagedBinaryPublication) publish() error {
+	if err := rejectDestinationSymlink(publication.destination); err != nil {
+		return err
+	}
+	if err := publication.backupDestination(); err != nil {
+		return err
+	}
+	if err := publishStagedBinary(publication.candidate, publication.destination, false); err != nil {
+		return errors.Join(err, publication.restoreBackup())
+	}
+	publication.published = true
+	return nil
+}
+
+func (publication *stagedBinaryPublication) backupDestination() error {
+	info, err := os.Lstat(publication.destination)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		return fmt.Errorf("refusing to replace directory destination %s", publication.destination)
+	}
+	if !publication.overwrite {
+		return fmt.Errorf("path %s already exists, use --force to overwrite", publication.destination)
+	}
+	if publication.backup == "" {
+		return errors.New("rollback artifact was not reserved")
+	}
+	if err := os.Rename(publication.destination, publication.backup); err != nil {
+		return err
+	}
+	publication.backedUp = true
+	return nil
+}
+
+func (publication *stagedBinaryPublication) rollback() error {
+	if !publication.published {
+		if !publication.backedUp {
+			return publication.cleanup()
+		}
+		return publication.restoreBackup()
+	}
+	if err := os.Remove(publication.destination); err != nil {
+		return err
+	}
+	publication.published = false
+	return publication.restoreBackup()
+}
+
+func (publication *stagedBinaryPublication) restoreBackup() error {
+	if publication.backup == "" {
+		return nil
+	}
+	if err := os.Rename(publication.backup, publication.destination); err != nil {
+		return err
+	}
+	publication.backup = ""
+	publication.backedUp = false
+	return nil
+}
+
+func (publication *stagedBinaryPublication) cleanup() error {
+	if publication.backup == "" {
+		return nil
+	}
+	err := os.Remove(publication.backup)
+	if err == nil || os.IsNotExist(err) {
+		publication.backup = ""
+		return nil
+	}
+	return err
 }
 
 func applyChmodToPath(path string) error {

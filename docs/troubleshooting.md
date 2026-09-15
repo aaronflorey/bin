@@ -215,7 +215,7 @@ Use a filename or redirect target that contains a version token such as `1.2.3`.
 **Cause**
 
 - `go` is not installed or not on `PATH`.
-- `go env GOPATH` fails.
+- The isolated temporary Go build output cannot be created or read.
 - The module proxy does not return version metadata.
 
 **Fix**

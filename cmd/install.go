@@ -68,6 +68,11 @@ func newInstallCmd() *installCmd {
 			if err != nil {
 				return err
 			}
+			if !root.opts.systemPackage {
+				if err := ensureInstallTargetsResolved(config.Get().Bins, targets, root.opts.provider); err != nil {
+					return err
+				}
+			}
 
 			if err := config.ExecuteHooks(config.GetHooks(config.PreInstall)); err != nil {
 				return err
@@ -100,6 +105,75 @@ func newInstallCmd() *installCmd {
 	root.cmd.Flags().StringVar(&root.opts.packageType, "package-type", "", "Restrict system package selection to a specific type (deb, rpm, apk, flatpak, dmg)")
 	root.cmd.Flags().BoolVar(&root.opts.nonInteractive, "non-interactive", false, "Disable prompts and fail on ambiguous choices")
 	return root
+}
+
+func ensureInstallTargetsResolved(bins map[string]*config.Binary, targets []installTarget, forcedProvider string) error {
+	for _, target := range targets {
+		if destination, ok, err := explicitInstallDestination(target); err != nil {
+			return err
+		} else if ok {
+			for path, unresolved := range config.Get().UnresolvedTransactions {
+				if unresolved == nil || !sameInstallDestination(destination, path, unresolved.DestinationPath) {
+					continue
+				}
+				if err := config.CheckBinaryResolved(path); err != nil {
+					return err
+				}
+			}
+		}
+		request, err := resolveFetchRequest(target.url, forcedProvider, providers.FetchOpts{})
+		if err != nil {
+			return err
+		}
+		for path, binary := range bins {
+			if binary == nil || effectiveInstallMode(binary.InstallMode) != installModeBinary || binary.URL != request.url {
+				continue
+			}
+			if forcedProvider != "" && binary.Provider != forcedProvider {
+				continue
+			}
+			if err := config.CheckBinaryResolved(path); err != nil {
+				return err
+			}
+		}
+		for path, unresolved := range config.Get().UnresolvedTransactions {
+			if unresolved == nil || unresolved.Intended == nil || unresolved.Intended.URL != request.url {
+				continue
+			}
+			if forcedProvider != "" && unresolved.Intended.Provider != forcedProvider {
+				continue
+			}
+			if err := config.CheckBinaryResolved(path); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func explicitInstallDestination(target installTarget) (string, bool, error) {
+	if target.path == "" {
+		return "", false, nil
+	}
+	path := target.path
+	if !strings.Contains(path, "/") {
+		path = filepath.Join(config.Get().DefaultPath, path)
+	}
+	resolved, err := absExpandedPath(path)
+	return resolved, err == nil, err
+}
+
+func sameInstallDestination(destination, configPath, transactionDestination string) bool {
+	for _, candidate := range []string{configPath, transactionDestination} {
+		if candidate == "" {
+			continue
+		}
+		expanded, err := absExpandedPath(expandTrackedBinaryPath(candidate))
+		if err == nil && expanded == destination {
+			return true
+		}
+	}
+	return false
 }
 
 func (root *installCmd) installTarget(cmd *cobra.Command, target installTarget) error {
