@@ -1,14 +1,35 @@
 # Local Issue State
 
-Generated: 2026-09-15T00:22:13Z
+Generated: 2026-09-15T02:02:30Z
 
 NOTE: This file is auto-generated. Do not edit manually.
 
-Tickets: 0 active, 0 resolved
+Tickets: 17 active, 1 resolved
 
 ## Active Tickets
 
 | Effort | Ticket | Type | Mode | Status | Blocked by |
 | --- | --- | --- | --- | --- | --- |
+| [reliability-managed-completions](reliability-managed-completions/spec.md) | [02-bind-checksums](reliability-managed-completions/issues/02-bind-checksums.md) | — | — | ready-for-agent | None (can start immediately) |
+| [reliability-managed-completions](reliability-managed-completions/spec.md) | [03-verify-integrity](reliability-managed-completions/issues/03-verify-integrity.md) | — | — | ready-for-agent | 02 / Bind checksum records to exact artifacts |
+| [reliability-managed-completions](reliability-managed-completions/spec.md) | [04-safe-binary-replacement](reliability-managed-completions/issues/04-safe-binary-replacement.md) | — | — | ready-for-agent | 01 / Contain remote names and clean failed fetches; 03 / Verify download and installed-byte integrity |
+| [reliability-managed-completions](reliability-managed-completions/spec.md) | [05-recoverable-install-commit](reliability-managed-completions/issues/05-recoverable-install-commit.md) | — | — | ready-for-agent | 04 / Replace direct binaries without deleting the working version |
+| [reliability-managed-completions](reliability-managed-completions/spec.md) | [06-bounded-artifact-inventory](reliability-managed-completions/issues/06-bounded-artifact-inventory.md) | — | — | ready-for-agent | 05 / Commit executable and config state recoverably |
+| [reliability-managed-completions](reliability-managed-completions/spec.md) | [07-resolve-archive-members](reliability-managed-completions/issues/07-resolve-archive-members.md) | — | — | ready-for-agent | 06 / Process artifacts through a bounded owned inventory |
+| [reliability-managed-completions](reliability-managed-completions/spec.md) | [08-resolve-release-products](reliability-managed-completions/issues/08-resolve-release-products.md) | — | — | ready-for-agent | 07 / Resolve archive members by identity |
+| [reliability-managed-completions](reliability-managed-completions/spec.md) | [09-persist-selection-intent](reliability-managed-completions/issues/09-persist-selection-intent.md) | — | — | ready-for-agent | 08 / Resolve release products before packaging |
+| [reliability-managed-completions](reliability-managed-completions/spec.md) | [10-select-dmg-bundle](reliability-managed-completions/issues/10-select-dmg-bundle.md) | — | — | ready-for-agent | 01 / Contain remote names and clean failed fetches; 09 / Persist stable selection intent |
+| [reliability-managed-completions](reliability-managed-completions/spec.md) | [11-process-generic-urls](reliability-managed-completions/issues/11-process-generic-urls.md) | — | — | ready-for-agent | 09 / Persist stable selection intent |
+| [reliability-managed-completions](reliability-managed-completions/spec.md) | [12-inspect-artifacts](reliability-managed-completions/issues/12-inspect-artifacts.md) | — | — | ready-for-agent | 11 / Process generic URLs through the shared resolver |
+| [reliability-managed-completions](reliability-managed-completions/spec.md) | [13-completion-policy-state](reliability-managed-completions/issues/13-completion-policy-state.md) | — | — | ready-for-agent | 10 / Select DMG bundles by managed identity; 12 / Inspect artifact decisions without side effects |
+| [reliability-managed-completions](reliability-managed-completions/spec.md) | [14-discover-bundled-completions](reliability-managed-completions/issues/14-discover-bundled-completions.md) | — | — | ready-for-agent | 13 / Define managed-completion policy and local state |
+| [reliability-managed-completions](reliability-managed-completions/spec.md) | [15-bounded-completion-runner](reliability-managed-completions/issues/15-bounded-completion-runner.md) | — | — | ready-for-agent | 14 / Discover completion scripts from artifact inventory |
+| [reliability-managed-completions](reliability-managed-completions/spec.md) | [16-install-owned-completions](reliability-managed-completions/issues/16-install-owned-completions.md) | — | — | ready-for-agent | 15 / Generate completions through a bounded native runner |
+| [reliability-managed-completions](reliability-managed-completions/spec.md) | [17-integrate-completion-lifecycle](reliability-managed-completions/issues/17-integrate-completion-lifecycle.md) | — | — | ready-for-agent | 16 / Install completion files with explicit ownership |
+| [reliability-managed-completions](reliability-managed-completions/spec.md) | [18-document-and-verify](reliability-managed-completions/issues/18-document-and-verify.md) | — | — | ready-for-agent | 17 / Integrate completion lifecycle and sync |
 
-_No local Markdown tickets found in `/home/aaron/Code/bin/.scratch`._
+## Resolved Tickets
+
+| Effort | Ticket | Type | Mode | Status | Blocked by |
+| --- | --- | --- | --- | --- | --- |
+| [reliability-managed-completions](reliability-managed-completions/spec.md) | [01-contain-remote-names](reliability-managed-completions/issues/01-contain-remote-names.md) | — | — | resolved | None (can start immediately) |
