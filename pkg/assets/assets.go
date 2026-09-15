@@ -20,7 +20,6 @@ import (
 
 	"github.com/aaronflorey/bin/pkg/config"
 	"github.com/aaronflorey/bin/pkg/options"
-	bstrings "github.com/aaronflorey/bin/pkg/strings"
 	"github.com/aaronflorey/bin/pkg/systempackage"
 	"github.com/caarlos0/log"
 	"github.com/cheggaaa/pb"
@@ -141,7 +140,6 @@ type FilteredAsset struct {
 	Name         string
 	DisplayName  string
 	URL          string
-	score        int
 	ExtraHeaders map[string]string
 }
 
@@ -276,96 +274,18 @@ func (f *Filter) FilterAssets(repoName string, as []*Asset, autoSelect string) (
 	if f.opts == nil {
 		f.opts = &FilterOpts{}
 	}
-	matchName := f.preferredMatchName(repoName)
-	as = filterInstallableAssets(f.opts, as)
-	// Generic assets remain compatible. Keep them through exact selection and
-	// scoring; target-specific candidates will naturally score higher.
-	as = filterTargetCompatibleAssets(as, false)
-
-	// Exact selection is an override of ranking, not compatibility or safety.
-	if autoSelect != "" {
-		for _, a := range as {
-			if a.String() == autoSelect || a.Name == autoSelect {
-				return &FilteredAsset{RepoName: repoName, Name: a.Name, DisplayName: a.DisplayName, URL: a.URL}, nil
+	assets, err := f.resolveReleaseAssets(as, f.preferredMatchName(repoName), autoSelect)
+	if err != nil {
+		if !f.opts.NonInteractive && isInteractive() && (errors.Is(err, ErrAmbiguousReleaseProduct) || errors.Is(err, ErrAmbiguousReleaseVariant)) {
+			assets = f.allCurrentTargetReleaseAssets(as)
+			if len(assets) == 0 {
+				return nil, err
 			}
-		}
-		return nil, fmt.Errorf("selected asset %q is not compatible or is not installable", autoSelect)
-	}
-
-	matches := []*FilteredAsset{}
-	if len(as) == 1 {
-		a := as[0]
-		if f.supportsAssetExt(a.Name) {
-			matches = append(matches, &FilteredAsset{RepoName: repoName, Name: a.Name, URL: a.URL, score: 0})
-		}
-	} else {
-		if !f.opts.SkipScoring {
-			scores := map[string]int{}
-			scoreKeys := []string{}
-			scores[matchName] = 1
-			for _, os := range resolver.GetOS() {
-				scores[os] = 10
-			}
-			for _, arch := range resolver.GetArch() {
-				scores[arch] = 5
-			}
-			for _, osSpecificExtension := range resolver.GetOSSpecificExtensions() {
-				scores[osSpecificExtension] = osSpecificExtensionScore(osSpecificExtension)
-			}
-
-			for key := range scores {
-				scoreKeys = append(scoreKeys, strings.ToLower(key))
-			}
-
-			for _, a := range as {
-				highestScoreForAsset := 0
-				gf := &FilteredAsset{RepoName: repoName, Name: a.Name, DisplayName: a.DisplayName, URL: a.URL, score: 0}
-				candidate := a.Name
-				candidateScore := 0
-				if bstrings.ContainsAny(strings.ToLower(candidate), scoreKeys) &&
-					f.supportsAssetExt(candidate) {
-					for toMatch, score := range scores {
-						if strings.Contains(strings.ToLower(candidate), strings.ToLower(toMatch)) {
-							log.Debugf("Candidate %s contains %s. Adding score %d", candidate, toMatch, score)
-							candidateScore += score
-						}
-					}
-					if candidateScore > highestScoreForAsset {
-						highestScoreForAsset = candidateScore
-						gf.Name = candidate
-						gf.score = candidateScore
-					}
-				}
-
-				if highestScoreForAsset > 0 {
-					matches = append(matches, gf)
-				}
-			}
-			highestAssetScore := 0
-			for i := range matches {
-				if matches[i].score > highestAssetScore {
-					highestAssetScore = matches[i].score
-				}
-			}
-			for i := len(matches) - 1; i >= 0; i-- {
-				if matches[i].score < highestAssetScore {
-					log.Debugf("Removing %v (URL %v) with score %v lower than %v", matches[i].Name, matches[i].URL, matches[i].score, highestAssetScore)
-					matches = append(matches[:i], matches[i+1:]...)
-				} else {
-					log.Debugf("Keeping %v (URL %v) with highest score %v", matches[i].Name, matches[i].URL, matches[i].score)
-				}
-			}
-			matches = rankLinuxLibCMatches(matches)
-			matches = rankArchitectureMatches(matches)
-			matches = applyTieBreakers(matchName, matches)
-
 		} else {
-			log.Debugf("--all flag was supplied, skipping scoring")
-			for _, a := range as {
-				matches = append(matches, &FilteredAsset{RepoName: repoName, Name: a.Name, DisplayName: a.DisplayName, URL: a.URL, score: 0})
-			}
+			return nil, err
 		}
 	}
+	matches := filteredAssets(repoName, assets)
 
 	var gf *FilteredAsset
 	if len(matches) == 0 {
@@ -415,39 +335,177 @@ func (f *Filter) CompatibleAssets(as []*Asset, autoSelect string) []*FilteredAss
 		f.opts = &FilterOpts{}
 	}
 
-	as = filterInstallableAssets(f.opts, as)
-	as = filterTargetCompatibleAssets(as, true)
-
-	compatible := make([]*FilteredAsset, 0, len(as))
-	for _, a := range as {
-		if !f.supportsAssetExt(a.Name) {
-			continue
-		}
-		compatible = append(compatible, &FilteredAsset{
-			Name:        a.Name,
-			DisplayName: a.DisplayName,
-			URL:         a.URL,
-		})
+	assets, err := f.resolveCompatibleReleaseAssets(as, autoSelect)
+	if err != nil {
+		return nil
 	}
-
-	if autoSelect == "" {
-		return compatible
-	}
-	for _, a := range compatible {
-		if a.String() == autoSelect || a.Name == autoSelect {
-			return []*FilteredAsset{a}
-		}
-	}
-	return nil
+	return filteredAssets("", assets)
 }
 
-func osSpecificExtensionScore(extension string) int {
-	if strings.EqualFold(extension, "AppImage") {
-		// AppImages are Linux-compatible, but should not outrank native Linux binaries.
-		return 8
-	}
+type describedReleaseAsset struct {
+	asset     *Asset
+	candidate ReleaseCandidate
+}
 
-	return 15
+func (f *Filter) describeReleaseAssets(as []*Asset, intendedProduct string) []describedReleaseAsset {
+	as = filterInstallableAssets(f.opts, as)
+	described := make([]describedReleaseAsset, 0, len(as))
+	for _, asset := range as {
+		if asset == nil || !f.supportsAssetExt(asset.Name) {
+			continue
+		}
+		described = append(described, describedReleaseAsset{asset: asset, candidate: describeReleaseCandidate(asset, intendedProduct)})
+	}
+	return described
+}
+
+func (f *Filter) resolveReleaseAssets(as []*Asset, intendedProduct, explicitSelection string) ([]*Asset, error) {
+	intendedProduct = releaseProduct(intendedProduct)
+	described := f.describeReleaseAssets(as, intendedProduct)
+	if explicitSelection == "" && f.opts.SkipScoring {
+		return currentTargetReleaseAssets(described), nil
+	}
+	candidates := make([]ReleaseCandidate, 0, len(described))
+	for _, asset := range described {
+		candidates = append(candidates, asset.candidate)
+	}
+	request := ReleaseCandidateResolutionRequest{
+		Target:             ReleaseTarget{OS: resolver.GetOS(), Architecture: resolver.GetArch(), ABI: resolver.GetLibC()},
+		PackagePreferences: []ReleasePackageFormat{"standalone", "tar.gz", "tar.xz", "gz", "zip"},
+	}
+	if explicitSelection != "" {
+		request.ExplicitSelection = true
+		request.ExplicitID = explicitSelection
+		for _, asset := range described {
+			if asset.asset.String() == explicitSelection {
+				request.ExplicitID = asset.candidate.ID
+				break
+			}
+		}
+	} else if hasReleaseProduct(candidates, intendedProduct) {
+		request.Product = intendedProduct
+	}
+	resolution, err := ResolveReleaseCandidate(candidates, request)
+	if err != nil {
+		if explicitSelection != "" {
+			return nil, fmt.Errorf("selected asset %q is not compatible or is not installable: %w", explicitSelection, err)
+		}
+		if errors.Is(err, ErrAmbiguousReleaseProduct) || errors.Is(err, ErrAmbiguousReleaseVariant) {
+			return nil, fmt.Errorf("%w (use --select to choose one)", err)
+		}
+		return nil, fmt.Errorf("%w: Could not find any compatible files: %w", ErrNoCompatibleFiles, err)
+	}
+	selectedFormat := resolution.Candidate.Format
+	assets := make([]*Asset, 0, len(resolution.EligibleCandidates))
+	for _, candidate := range resolution.EligibleCandidates {
+		if candidate.Format != selectedFormat {
+			continue
+		}
+		for _, asset := range described {
+			if asset.candidate.ID == candidate.ID {
+				assets = append(assets, asset.asset)
+				break
+			}
+		}
+	}
+	return assets, nil
+}
+
+func (f *Filter) allCurrentTargetReleaseAssets(as []*Asset) []*Asset {
+	return currentTargetReleaseAssets(f.describeReleaseAssets(as, ""))
+}
+
+func currentTargetReleaseAssets(described []describedReleaseAsset) []*Asset {
+	target := ReleaseTarget{OS: resolver.GetOS(), Architecture: resolver.GetArch(), ABI: resolver.GetLibC()}
+	compatible := make([]describedReleaseAsset, 0, len(described))
+	for _, asset := range described {
+		if candidateMatchesReleaseTarget(asset.candidate, target, nil) {
+			compatible = append(compatible, asset)
+		}
+	}
+	sort.Slice(compatible, func(i, j int) bool {
+		return compatible[i].candidate.ID < compatible[j].candidate.ID
+	})
+	assets := make([]*Asset, 0, len(compatible))
+	for _, asset := range compatible {
+		assets = append(assets, asset.asset)
+	}
+	return assets
+}
+
+func (f *Filter) resolveCompatibleReleaseAssets(as []*Asset, explicitSelection string) ([]*Asset, error) {
+	described := f.describeReleaseAssets(as, "")
+	if explicitSelection != "" {
+		return f.resolveReleaseAssets(as, "", explicitSelection)
+	}
+	groups := groupReleaseCandidatesByProduct(releaseCandidates(described))
+	resolved := make([]describedReleaseAsset, 0, len(described))
+	request := ReleaseCandidateResolutionRequest{Target: ReleaseTarget{OS: resolver.GetOS(), Architecture: resolver.GetArch(), ABI: resolver.GetLibC()}}
+	for _, product := range productIDs(groups) {
+		candidates := groups[product]
+		request.Product = product
+		result, err := ResolveReleaseCandidate(candidates, request)
+		if err != nil {
+			continue
+		}
+		for _, candidate := range result.EligibleCandidates {
+			for _, asset := range described {
+				if asset.candidate.ID == candidate.ID {
+					resolved = append(resolved, asset)
+					break
+				}
+			}
+		}
+	}
+	return mostSpecificReleaseAssets(resolved), nil
+}
+
+func releaseCandidates(described []describedReleaseAsset) []ReleaseCandidate {
+	candidates := make([]ReleaseCandidate, 0, len(described))
+	for _, asset := range described {
+		candidates = append(candidates, asset.candidate)
+	}
+	return candidates
+}
+
+func mostSpecificReleaseAssets(described []describedReleaseAsset) []*Asset {
+	mostSpecific, maximum := make([]describedReleaseAsset, 0, len(described)), 0
+	for _, asset := range described {
+		target, _ := mergedCandidateTarget(asset.candidate)
+		specificity := len(canonicalValues(target.OS, canonicalOS)) + len(canonicalValues(target.Architecture, canonicalArchitecture))
+		if specificity > maximum {
+			maximum, mostSpecific = specificity, mostSpecific[:0]
+		}
+		if specificity == maximum {
+			mostSpecific = append(mostSpecific, asset)
+		}
+	}
+	assets := make([]*Asset, 0, len(mostSpecific))
+	for _, asset := range mostSpecific {
+		assets = append(assets, asset.asset)
+	}
+	sort.Slice(assets, func(i, j int) bool {
+		return assets[i].Name < assets[j].Name
+	})
+	return assets
+}
+
+func hasReleaseProduct(candidates []ReleaseCandidate, product string) bool {
+	product = canonicalProduct(product)
+	for _, candidate := range candidates {
+		if canonicalProduct(candidate.Product) == product {
+			return true
+		}
+	}
+	return false
+}
+
+func filteredAssets(repoName string, as []*Asset) []*FilteredAsset {
+	filtered := make([]*FilteredAsset, 0, len(as))
+	for _, asset := range as {
+		filtered = append(filtered, &FilteredAsset{RepoName: repoName, Name: asset.Name, DisplayName: asset.DisplayName, URL: asset.URL})
+	}
+	return filtered
 }
 
 func (f *Filter) preferredMatchName(repoName string) string {
@@ -492,95 +550,6 @@ func supportsExeForCurrentRuntime() bool {
 	return false
 }
 
-func rankLinuxLibCMatches(matches []*FilteredAsset) []*FilteredAsset {
-	if len(matches) <= 1 {
-		return matches
-	}
-
-	preferred := resolver.GetLibC()
-	if len(preferred) == 0 {
-		return matches
-	}
-
-	preferredSet := make(map[string]struct{}, len(preferred))
-	for _, token := range preferred {
-		preferredSet[strings.ToLower(token)] = struct{}{}
-	}
-
-	bestRank := libCRankUnknown
-	filtered := make([]*FilteredAsset, 0, len(matches))
-	for _, match := range matches {
-		rank := classifyLibC(match.Name, preferredSet)
-		if rank < bestRank {
-			bestRank = rank
-			filtered = filtered[:0]
-			filtered = append(filtered, match)
-			continue
-		}
-		if rank == bestRank {
-			filtered = append(filtered, match)
-		}
-	}
-
-	if len(filtered) == len(matches) {
-		return matches
-	}
-
-	for _, match := range filtered {
-		log.Debugf("Keeping %v after Linux libc ranking", match.Name)
-	}
-	return filtered
-}
-
-func rankArchitectureMatches(matches []*FilteredAsset) []*FilteredAsset {
-	if len(matches) <= 1 {
-		return matches
-	}
-
-	preferred := preferredArchTokens()
-	if len(preferred) == 0 {
-		return matches
-	}
-
-	preferredSet := make(map[string]struct{}, len(preferred))
-	for _, token := range preferred {
-		preferredSet[token] = struct{}{}
-	}
-
-	bestRank := archRankUnknown
-	filtered := make([]*FilteredAsset, 0, len(matches))
-	for _, match := range matches {
-		rank := classifyArch(match.Name, preferredSet)
-		if rank < bestRank {
-			bestRank = rank
-			filtered = filtered[:0]
-			filtered = append(filtered, match)
-			continue
-		}
-		if rank == bestRank {
-			filtered = append(filtered, match)
-		}
-	}
-
-	if len(filtered) == len(matches) {
-		return matches
-	}
-
-	for _, match := range filtered {
-		log.Debugf("Keeping %v after architecture ranking", match.Name)
-	}
-	return filtered
-}
-
-type libCRank int
-
-const (
-	libCRankPreferred libCRank = iota
-	libCRankGeneric
-	libCRankOpposite
-	libCRankUnknown
-)
-
 type archRank int
 
 const (
@@ -597,30 +566,6 @@ var knownArchTokens = []string{
 	"386", "i386", "x86", "32bit",
 	"armv7", "armv6", "arm",
 	"ppc64le", "s390x", "riscv64", "mips64", "mips64le",
-}
-
-func classifyLibC(candidate string, preferredSet map[string]struct{}) libCRank {
-	lower := strings.ToLower(candidate)
-
-	hasPreferred := false
-	hasKnownLibC := false
-	for _, token := range knownLibCTokens {
-		if strings.Contains(lower, token) {
-			hasKnownLibC = true
-			if _, ok := preferredSet[token]; ok {
-				hasPreferred = true
-			}
-		}
-	}
-
-	switch {
-	case hasPreferred:
-		return libCRankPreferred
-	case !hasKnownLibC:
-		return libCRankGeneric
-	default:
-		return libCRankOpposite
-	}
 }
 
 func preferredArchTokens() []string {
@@ -686,207 +631,6 @@ func containsDelimitedToken(candidate, token string) bool {
 
 func isAlphaNumeric(ch byte) bool {
 	return (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9')
-}
-
-// applyTieBreakers applies additional ranking when assets have equal scores.
-// This is critical for non-interactive mode to automatically select the best option.
-func applyTieBreakers(repoName string, matches []*FilteredAsset) []*FilteredAsset {
-	if len(matches) <= 1 {
-		return matches
-	}
-
-	log.Debugf("Applying tie-breakers to %d matches with equal scores", len(matches))
-
-	// Step 1: Prefer standalone files over archives
-	previous := matches
-	matches = rankByArchiveType(matches)
-	if len(matches) == 0 {
-		log.Debugf("Tie-breaker returned no matches after archive ranking; falling back to previous candidates")
-		matches = previous
-	}
-	if len(matches) == 1 {
-		log.Debugf("Tie-breaker: selected standalone file")
-		return matches
-	}
-
-	// Note: Archive format preference is already handled by rankByArchiveType
-
-	// Step 3: Filename similarity to repo name
-	previous = matches
-	matches = rankByNameSimilarity(repoName, matches)
-	if len(matches) == 0 {
-		log.Debugf("Tie-breaker returned no matches after name similarity ranking; falling back to previous candidates")
-		matches = previous
-	}
-	if len(matches) == 1 {
-		log.Debugf("Tie-breaker: selected by name similarity to %s", repoName)
-		return matches
-	}
-	if len(matches) == 0 {
-		return matches
-	}
-
-	return matches
-}
-
-// archiveType represents the type of file/archive
-type archiveType int
-
-const (
-	archiveTypeStandalone archiveType = iota // No archive extension
-	archiveTypeTarGz                         // .tar.gz
-	archiveTypeTarXz                         // .tar.xz
-	archiveTypeGz                            // .gz (standalone compressed)
-	archiveTypeZip                           // .zip
-	archiveTypeOther                         // Other archives
-	archiveTypeUnknown                       // Unrecognised extension
-)
-
-// getArchiveType determines what type of archive a file is
-func getArchiveType(name string) archiveType {
-	lower := strings.ToLower(name)
-
-	// Check for specific archive types (order matters - check .tar.gz before .gz)
-	if strings.HasSuffix(lower, ".tar.gz") || strings.HasSuffix(lower, ".tgz") {
-		return archiveTypeTarGz
-	}
-	if strings.HasSuffix(lower, ".tar.xz") {
-		return archiveTypeTarXz
-	}
-	if strings.HasSuffix(lower, ".gz") {
-		return archiveTypeGz
-	}
-	if strings.HasSuffix(lower, ".zip") {
-		return archiveTypeZip
-	}
-
-	// Check if it has any other archive extension
-	ext := filepath.Ext(lower)
-	if ext == ".xz" || ext == ".bz2" || ext == ".tar" {
-		return archiveTypeOther
-	}
-
-	if classifyArtifactName(name) == artifactStandalone {
-		return archiveTypeStandalone
-	}
-	if classifyArtifactName(name) == artifactUnknown {
-		return archiveTypeUnknown
-	}
-	return archiveTypeOther
-}
-
-// rankByArchiveType prefers standalone files over archives
-func rankByArchiveType(matches []*FilteredAsset) []*FilteredAsset {
-	if len(matches) <= 1 {
-		return matches
-	}
-
-	// Group by archive type
-	byType := make(map[archiveType][]*FilteredAsset)
-	for _, match := range matches {
-		aType := getArchiveType(match.Name)
-		byType[aType] = append(byType[aType], match)
-	}
-
-	// Prefer recognised runnable shapes and archives ahead of unknown files.
-	preferenceOrder := []archiveType{
-		archiveTypeStandalone,
-		archiveTypeTarGz,
-		archiveTypeTarXz,
-		archiveTypeGz,
-		archiveTypeZip,
-		archiveTypeOther,
-		archiveTypeUnknown,
-	}
-
-	for _, preferred := range preferenceOrder {
-		if candidates := byType[preferred]; len(candidates) > 0 {
-			for _, c := range candidates {
-				log.Debugf("Keeping %s (archive type preference)", c.Name)
-			}
-			return candidates
-		}
-	}
-
-	return matches
-}
-
-// rankByNameSimilarity filters matches to keep only those with highest
-// similarity to the repository name
-func rankByNameSimilarity(repoName string, matches []*FilteredAsset) []*FilteredAsset {
-	if len(matches) <= 1 {
-		return matches
-	}
-
-	// Extract the actual repo name from potential path formats
-	// e.g., "owner/repo" -> "repo", "repo" -> "repo"
-	parts := strings.Split(repoName, "/")
-	shortName := strings.ToLower(parts[len(parts)-1])
-
-	type scoredMatch struct {
-		match *FilteredAsset
-		score int
-	}
-
-	scored := make([]scoredMatch, 0, len(matches))
-	for _, match := range matches {
-		score := calculateNameSimilarity(shortName, strings.ToLower(match.Name))
-		scored = append(scored, scoredMatch{match: match, score: score})
-	}
-	if len(scored) == 0 {
-		return matches
-	}
-
-	// Find highest score
-	maxScore := scored[0].score
-	for _, s := range scored {
-		if s.score > maxScore {
-			maxScore = s.score
-		}
-	}
-	// Do not turn unrelated products into a deterministic pick merely because
-	// one filename happens to be shorter. Those choices must remain ambiguous.
-	if maxScore <= 0 {
-		return matches
-	}
-
-	// Keep only matches with highest score
-	filtered := make([]*FilteredAsset, 0, len(matches))
-	for _, s := range scored {
-		if s.score == maxScore {
-			filtered = append(filtered, s.match)
-			log.Debugf("Keeping %s (similarity score: %d)", s.match.Name, s.score)
-		}
-	}
-	if len(filtered) == 0 {
-		return matches
-	}
-
-	return filtered
-}
-
-// calculateNameSimilarity returns a similarity score between repo name and asset name
-// Higher score means more similar
-func calculateNameSimilarity(repoName, assetName string) int {
-	score := 0
-
-	// Bonus points if repo name appears in asset name
-	if strings.Contains(assetName, repoName) {
-		score += 100
-	}
-
-	// Additional points for exact prefix match
-	if strings.HasPrefix(assetName, repoName) {
-		score += 50
-	}
-
-	// Penalty for longer names (prefer simpler names)
-	// Subtract 1 point per character over the repo name length
-	if len(assetName) > len(repoName) {
-		score -= (len(assetName) - len(repoName))
-	}
-
-	return score
 }
 
 // SanitizeName removes irrelevant information from the
