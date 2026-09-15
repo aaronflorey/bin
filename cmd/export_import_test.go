@@ -697,26 +697,34 @@ func TestImportOutputsInstalledUpdatedSkipped(t *testing.T) {
 	}
 }
 
-func TestExportImportRoundTripsInstallMetadata(t *testing.T) {
+func TestExportImportRoundTripsLegacyDMGMetadata(t *testing.T) {
 	setupTestConfig(t)
 
-	installedPath := filepath.Join(t.TempDir(), "flatpak-tool")
-	if err := os.WriteFile(installedPath, []byte("flatpak-tool-content"), 0o755); err != nil {
+	originalApplicationsDir := applicationsDir
+	applicationsDir = t.TempDir()
+	t.Cleanup(func() { applicationsDir = originalApplicationsDir })
+	installedPath := filepath.Join(applicationsDir, "Fastpotify.app", "Contents", "MacOS", "Fastpotify-bin")
+	if err := os.MkdirAll(filepath.Dir(installedPath), 0o755); err != nil {
+		t.Fatalf("failed to create app bundle: %v", err)
+	}
+	if err := os.WriteFile(installedPath, []byte("fastpotify-content"), 0o755); err != nil {
 		t.Fatalf("failed to write installed test binary: %v", err)
 	}
 
 	if err := config.UpsertBinary(&config.Binary{
 		Path:             installedPath,
-		RemoteName:       "flatpak-tool",
+		RemoteName:       "spotify",
 		Version:          "1.2.3",
 		Hash:             "old-hash",
-		URL:              "https://example.com/tools/flatpak-tool/releases/tag/v1.2.3",
+		URL:              "https://example.com/tools/spotify/releases/tag/v1.2.3",
 		Provider:         "github",
 		InstallMode:      installModeSystemPackage,
-		PackageType:      "flatpak",
-		AppBundle:        "Flatpak Tool.app",
-		SourceAsset:      "flatpak-tool-linux-amd64.flatpak",
+		PackageType:      "dmg",
+		AppBundle:        "Fastpotify.app",
+		SourceAsset:      "spotify-macos-arm64.dmg",
 		ReleaseTagPrefix: "pi-v",
+		// Deliberately leave SelectionIntent absent to model a persisted legacy
+		// DMG record whose AppBundle and executable path are still authoritative.
 	}); err != nil {
 		t.Fatalf("failed to seed binary: %v", err)
 	}
@@ -736,19 +744,22 @@ func TestExportImportRoundTripsInstallMetadata(t *testing.T) {
 	if len(exported) != 1 {
 		t.Fatalf("expected one exported entry, got %d", len(exported))
 	}
+	if exported[0].Name != "Fastpotify-bin" {
+		t.Fatalf("unexpected exported executable name: %s", exported[0].Name)
+	}
 	if exported[0].InstallMode != installModeSystemPackage {
 		t.Fatalf("unexpected install mode: %s", exported[0].InstallMode)
 	}
-	if exported[0].PackageType != "flatpak" {
+	if exported[0].PackageType != "dmg" {
 		t.Fatalf("unexpected package type: %s", exported[0].PackageType)
 	}
-	if exported[0].AppBundle != "Flatpak Tool.app" {
+	if exported[0].AppBundle != "Fastpotify.app" {
 		t.Fatalf("unexpected app bundle: %s", exported[0].AppBundle)
 	}
 	if exported[0].ReleaseTagPrefix != "pi-v" {
 		t.Fatalf("unexpected release tag prefix: %s", exported[0].ReleaseTagPrefix)
 	}
-	if exported[0].SourceAsset != "flatpak-tool-linux-amd64.flatpak" {
+	if exported[0].SourceAsset != "spotify-macos-arm64.dmg" {
 		t.Fatalf("unexpected source asset: %s", exported[0].SourceAsset)
 	}
 
@@ -765,8 +776,7 @@ func TestExportImportRoundTripsInstallMetadata(t *testing.T) {
 		t.Fatalf("unexpected import error: %v", err)
 	}
 
-	defaultPath := config.Get().DefaultPath
-	importedPath := filepath.Join(defaultPath, exported[0].Name)
+	importedPath := installedPath
 	binCfg, ok := config.Get().Bins[importedPath]
 	if !ok {
 		t.Fatalf("expected imported binary at %s", importedPath)
@@ -774,17 +784,20 @@ func TestExportImportRoundTripsInstallMetadata(t *testing.T) {
 	if binCfg.InstallMode != installModeSystemPackage {
 		t.Fatalf("unexpected imported install mode: %s", binCfg.InstallMode)
 	}
-	if binCfg.PackageType != "flatpak" {
+	if binCfg.PackageType != "dmg" {
 		t.Fatalf("unexpected imported package type: %s", binCfg.PackageType)
 	}
-	if binCfg.AppBundle != "Flatpak Tool.app" {
+	if binCfg.AppBundle != "Fastpotify.app" {
 		t.Fatalf("unexpected imported app bundle: %s", binCfg.AppBundle)
 	}
-	if binCfg.SourceAsset != "flatpak-tool-linux-amd64.flatpak" {
+	if binCfg.SourceAsset != "spotify-macos-arm64.dmg" {
 		t.Fatalf("unexpected imported source asset: %s", binCfg.SourceAsset)
 	}
 	if binCfg.ReleaseTagPrefix != "pi-v" {
 		t.Fatalf("unexpected imported release tag prefix: %s", binCfg.ReleaseTagPrefix)
+	}
+	if resolved := findManagedBinByAlias(config.Get().Bins, "Fastpotify"); resolved != installedPath {
+		t.Fatalf("imported app bundle alias resolved to %q, want persisted executable %q", resolved, installedPath)
 	}
 }
 

@@ -52,7 +52,7 @@ func runEnsure(args []string) error {
 		ep := expandTrackedBinaryPath(binCfg.Path)
 		installMode := effectiveInstallMode(binCfg.InstallMode)
 		strategy := lifecycleForMode(installMode)
-		if installMode == installModeSystemPackage && systempackage.NormalizeType(binCfg.PackageType) == "dmg" && binCfg.AppBundle != "" {
+		if ep == "" && installMode == installModeSystemPackage && systempackage.NormalizeType(binCfg.PackageType) == "dmg" && binCfg.AppBundle != "" {
 			if resolvedPath, err := resolveAppBundleExecutable(filepath.Join(applicationsDir, binCfg.AppBundle)); err == nil {
 				ep = resolvedPath
 			}
@@ -97,6 +97,7 @@ func runEnsure(args []string) error {
 			ConfigPath:            binCfg.Path,
 			AllowProviderFallback: binCfg.Provider != "",
 			LogicalName:           binCfg.RemoteName,
+			AppBundle:             binCfg.AppBundle,
 		}
 		res, err := strategy.install(opts)
 		if err != nil && installMode == installModeBinary && fetchOpts.SelectionIntent == nil && fetchOpts.PackagePath != "" && isPackagePathSelectionError(err) {

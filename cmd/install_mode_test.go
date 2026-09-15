@@ -79,7 +79,7 @@ func TestLifecycleForModeSystemPackageAppliesStoredMetadata(t *testing.T) {
 		t.Fatalf("expected normalized package type, got %q", fetchOpts.PackageType)
 	}
 	if fetchOpts.PackageName != "Paseo" {
-		t.Fatalf("expected package name to be preserved, got %q", fetchOpts.PackageName)
+		t.Fatalf("expected provider product name to be preserved, got %q", fetchOpts.PackageName)
 	}
 	if fetchOpts.PackagePath != "Paseo.app" {
 		t.Fatalf("expected package path to be preserved, got %q", fetchOpts.PackagePath)

@@ -83,6 +83,8 @@ var lifecycleRegistry = map[string]lifecycleStrategy{
 				return fmt.Errorf("binary %s is in system-package mode but has no package_type metadata", b.Path)
 			}
 			fetchOpts.PackagePath = b.PackagePath
+			// PackageName remains the provider's product-selection hint. DMG
+			// bundle selection receives its identity separately through InstallOpts.
 			fetchOpts.PackageName = b.RemoteName
 			fetchOpts.ReleaseTagPrefix = providers.EffectiveReleaseTagPrefix(b.Version, b.ReleaseTagPrefix)
 			fetchOpts.SelectionIntent = storedSelectionIntent(b)

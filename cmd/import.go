@@ -62,9 +62,13 @@ func newImportCmd() *importCmd {
 			skippedCount := 0
 			for i, b := range bins {
 				name := validatedNames[i]
+				path, err := importedBinaryPath(defaultPath, name, b)
+				if err != nil {
+					return fmt.Errorf("binary at index %d: %w", i, err)
+				}
 
 				target := &config.Binary{
-					Path:               filepath.Join(defaultPath, name),
+					Path:               path,
 					RemoteName:         b.RemoteName,
 					Version:            b.Version,
 					Hash:               b.Hash,
@@ -142,6 +146,18 @@ func newImportCmd() *importCmd {
 	root.cmd.Flags().BoolVar(&root.skipEnsure, "skip-ensure", false, "Do not run ensure after importing")
 	enableSpinner(root.cmd)
 	return root
+}
+
+func importedBinaryPath(defaultPath, name string, binary *portableBinary) (string, error) {
+	if effectiveInstallMode(binary.InstallMode) == installModeSystemPackage &&
+		strings.EqualFold(binary.PackageType, "dmg") && binary.AppBundle != "" {
+		bundlePath, err := managedDMGBundlePath(binary.AppBundle)
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(bundlePath, "Contents", "MacOS", name), nil
+	}
+	return filepath.Join(defaultPath, name), nil
 }
 
 func importedInstalledIntegrity(record *config.IntegrityRecord) *config.IntegrityRecord {

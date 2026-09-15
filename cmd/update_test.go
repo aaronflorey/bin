@@ -591,6 +591,50 @@ func TestUpdateAppliesPersistedSelectionIntent(t *testing.T) {
 	}
 }
 
+func TestUpdateRetainsManagedDMGBundleAndProviderProduct(t *testing.T) {
+	setupTestConfig(t)
+	path := filepath.Join(t.TempDir(), "Fastpotify.app", "Contents", "MacOS", "Fastpotify-bin")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestBinary(t, path)
+	if err := config.UpsertBinary(&config.Binary{
+		Path: path, RemoteName: "spotify", Version: "1.0.0", Hash: "old", URL: "https://example.test/spotify", Provider: "github",
+		InstallMode: installModeSystemPackage, PackageType: "dmg", AppBundle: "Fastpotify.app", PackagePath: "spotify-macos-arm64.dmg",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	originalRegistry := lifecycleRegistry
+	t.Cleanup(func() { lifecycleRegistry = originalRegistry })
+	updated := false
+	lifecycleRegistry = map[string]lifecycleStrategy{
+		installModeSystemPackage: {
+			applyStoredFetch: originalRegistry[installModeSystemPackage].applyStoredFetch,
+			install: func(opts InstallOpts) (*InstallResult, error) {
+				updated = true
+				if opts.AppBundle != "Fastpotify.app" || opts.RequestedAppBundle != "" || opts.FetchOpts.PackageName != "spotify" {
+					t.Fatalf("update install options = %#v, want stored Fastpotify bundle and spotify product", opts)
+				}
+				return &InstallResult{Version: opts.FetchOpts.Version, Path: opts.Path}, nil
+			},
+			resolvePath: originalRegistry[installModeSystemPackage].resolvePath,
+		},
+	}
+
+	cmd := newUpdateCmd()
+	cmd.newProvider = func(string, string) (providers.Provider, error) {
+		return mockProvider{latestVersion: "2.0.0", latestVersionURL: "https://example.test/spotify/releases/tag/v2.0.0"}, nil
+	}
+	cmd.cmd.SetArgs([]string{"--yes", path})
+	if err := cmd.cmd.Execute(); err != nil {
+		t.Fatalf("update error = %v", err)
+	}
+	if !updated {
+		t.Fatal("expected update to reinstall the managed DMG")
+	}
+}
+
 func TestUpdateContinuesAfterInstallFailureWithYesFlag(t *testing.T) {
 	setupTestConfig(t)
 
