@@ -127,6 +127,59 @@ func TestExportWritesToFileWhenPathIsProvided(t *testing.T) {
 	}
 }
 
+func TestExportImportPreservesIntegrityProvenanceWithoutLocalVerification(t *testing.T) {
+	setupTestConfig(t)
+	installedPath := filepath.Join(t.TempDir(), "integrity-tool")
+	if err := os.WriteFile(installedPath, []byte("integrity-tool-content"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.UpsertBinary(&config.Binary{
+		Path: installedPath, RemoteName: "integrity-tool", Version: "1.0.0", Hash: "old-hash", URL: "https://example.test/tool", Provider: "generic",
+		DownloadIntegrity:  &config.IntegrityRecord{Algorithm: "sha256", Expected: "download", Observed: "download", Source: "release", Scope: "download", Result: "verified"},
+		InstalledIntegrity: &config.IntegrityRecord{Algorithm: "sha256", Expected: "old-hash", Observed: "old-hash", Source: "release", Scope: "installed", Result: "verified"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := newExportCmd().cmd
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	var exported []portableBinary
+	if err := json.Unmarshal(out.Bytes(), &exported); err != nil {
+		t.Fatalf("decode export: %v", err)
+	}
+	if len(exported) != 1 || exported[0].DownloadIntegrity == nil || exported[0].InstalledIntegrity != nil {
+		t.Fatalf("exported integrity = %#v, want download provenance and stale installed assertion removed", exported)
+	}
+	updated := config.Get().Bins[installedPath]
+	if updated.Hash != exported[0].Hash || updated.InstalledIntegrity != nil {
+		t.Fatalf("export did not normalize stale installed integrity: %#v", updated)
+	}
+
+	setupTestConfig(t)
+	payload, err := json.Marshal([]portableBinary{{
+		Name: "integrity-tool", RemoteName: "integrity-tool", Version: "1.0.0", Hash: exported[0].Hash, URL: "https://example.test/tool", Provider: "generic",
+		DownloadIntegrity:  exported[0].DownloadIntegrity,
+		InstalledIntegrity: &config.IntegrityRecord{Algorithm: "sha256", Expected: "installed", Observed: exported[0].Hash, Source: "release", Scope: "installed", Result: "verified"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	imp := newImportCmd()
+	imp.cmd.SetIn(bytes.NewReader(payload))
+	imp.cmd.SetArgs([]string{"--skip-ensure"})
+	if err := imp.cmd.Execute(); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	imported := config.Get().Bins[filepath.Join(config.Get().DefaultPath, "integrity-tool")]
+	if imported.DownloadIntegrity == nil || imported.DownloadIntegrity.Result != "verified" || imported.InstalledIntegrity == nil || imported.InstalledIntegrity.Result != "imported" {
+		t.Fatalf("imported integrity provenance = %#v", imported)
+	}
+}
+
 func TestExportListWritesURLsToStdout(t *testing.T) {
 	setupTestConfig(t)
 

@@ -134,8 +134,49 @@ type Binary struct {
 	SourceAsset string `json:"source_asset,omitempty"`
 	// ReleaseTagPrefix keeps the exact tag lane prefix for multi-track repos.
 	ReleaseTagPrefix string `json:"release_tag_prefix,omitempty"`
-	Pinned           bool   `json:"pinned"`
-	MinAgeDays       int    `json:"min_age_days,omitempty"`
+	// DownloadIntegrity describes verification of the raw release artifact;
+	// InstalledIntegrity describes verification of the installed file bytes.
+	// Both are optional so configurations written before integrity evidence was
+	// recorded continue to load unchanged.
+	DownloadIntegrity  *IntegrityRecord `json:"download_integrity,omitempty"`
+	InstalledIntegrity *IntegrityRecord `json:"installed_integrity,omitempty"`
+	Pinned             bool             `json:"pinned"`
+	MinAgeDays         int              `json:"min_age_days,omitempty"`
+}
+
+// IntegrityRecord is the serializable counterpart to provider integrity
+// evidence. It lives in config to keep provider transport types out of the
+// persistent configuration package.
+type IntegrityRecord struct {
+	Algorithm string `json:"algorithm"`
+	Expected  string `json:"expected"`
+	Observed  string `json:"observed"`
+	Source    string `json:"source"`
+	Scope     string `json:"scope"`
+	Result    string `json:"result"`
+}
+
+// CloneBinary returns an independent copy of binary, including optional
+// integrity records.
+func CloneBinary(binary *Binary) *Binary {
+	if binary == nil {
+		return nil
+	}
+
+	clone := *binary
+	clone.DownloadIntegrity = CloneIntegrityRecord(binary.DownloadIntegrity)
+	clone.InstalledIntegrity = CloneIntegrityRecord(binary.InstalledIntegrity)
+	return &clone
+}
+
+// CloneIntegrityRecord returns an independent copy of an integrity record.
+func CloneIntegrityRecord(record *IntegrityRecord) *IntegrityRecord {
+	if record == nil {
+		return nil
+	}
+
+	clone := *record
+	return &clone
 }
 
 func CheckAndLoad() error {
@@ -411,7 +452,7 @@ func UpsertBinary(c *Binary) error {
 	}
 
 	return mutateConfigLocked(func(current *config) error {
-		current.Bins[c.Path] = c
+		current.Bins[c.Path] = CloneBinary(c)
 		return nil
 	})
 }
@@ -425,7 +466,7 @@ func UpsertBinaries(binaries []*Binary) error {
 	return mutateConfigLocked(func(current *config) error {
 		for _, c := range binaries {
 			if c != nil {
-				current.Bins[c.Path] = c
+				current.Bins[c.Path] = CloneBinary(c)
 			}
 		}
 		return nil

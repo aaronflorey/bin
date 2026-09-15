@@ -98,20 +98,22 @@ func buildExportPayload(format string, exportedBins []*portableBinary) ([]byte, 
 
 // portableBinary is the shared serialization format for export and import.
 type portableBinary struct {
-	Name             string `json:"name"`
-	RemoteName       string `json:"remote_name"`
-	Version          string `json:"version"`
-	Hash             string `json:"hash"`
-	URL              string `json:"url"`
-	Provider         string `json:"provider"`
-	InstallMode      string `json:"install_mode,omitempty"`
-	PackageType      string `json:"package_type,omitempty"`
-	AppBundle        string `json:"app_bundle,omitempty"`
-	PackagePath      string `json:"package_path"`
-	SourceAsset      string `json:"source_asset,omitempty"`
-	ReleaseTagPrefix string `json:"release_tag_prefix,omitempty"`
-	Pinned           bool   `json:"pinned"`
-	MinAgeDays       int    `json:"min_age_days,omitempty"`
+	Name               string                  `json:"name"`
+	RemoteName         string                  `json:"remote_name"`
+	Version            string                  `json:"version"`
+	Hash               string                  `json:"hash"`
+	URL                string                  `json:"url"`
+	Provider           string                  `json:"provider"`
+	InstallMode        string                  `json:"install_mode,omitempty"`
+	PackageType        string                  `json:"package_type,omitempty"`
+	AppBundle          string                  `json:"app_bundle,omitempty"`
+	PackagePath        string                  `json:"package_path"`
+	SourceAsset        string                  `json:"source_asset,omitempty"`
+	ReleaseTagPrefix   string                  `json:"release_tag_prefix,omitempty"`
+	DownloadIntegrity  *config.IntegrityRecord `json:"download_integrity,omitempty"`
+	InstalledIntegrity *config.IntegrityRecord `json:"installed_integrity,omitempty"`
+	Pinned             bool                    `json:"pinned"`
+	MinAgeDays         int                     `json:"min_age_days,omitempty"`
 }
 
 func buildExportBins(bins map[string]*config.Binary) ([]*portableBinary, []*config.Binary, error) {
@@ -125,6 +127,7 @@ func buildExportBins(bins map[string]*config.Binary) ([]*portableBinary, []*conf
 	normalizedBins := make([]*config.Binary, 0)
 	for _, k := range keys {
 		binCfg := bins[k]
+		updatedBin := config.CloneBinary(binCfg)
 		ep := expandTrackedBinaryPath(binCfg.Path)
 
 		hash, err := hashFile(ep)
@@ -139,27 +142,36 @@ func buildExportBins(bins map[string]*config.Binary) ([]*portableBinary, []*conf
 		if err != nil {
 			return nil, nil, err
 		}
-		if normalizedURL != binCfg.URL {
-			updatedBin := *binCfg
+		if normalizedURL != updatedBin.URL {
 			updatedBin.URL = normalizedURL
-			normalizedBins = append(normalizedBins, &updatedBin)
+		}
+		if hash != updatedBin.Hash {
+			updatedBin.Hash = hash
+			if updatedBin.InstalledIntegrity != nil {
+				updatedBin.InstalledIntegrity = nil
+			}
+		}
+		if !equalBinaryConfig(binCfg, updatedBin) {
+			normalizedBins = append(normalizedBins, updatedBin)
 		}
 
 		exportedBins = append(exportedBins, &portableBinary{
-			Name:             filepath.Base(ep),
-			RemoteName:       binCfg.RemoteName,
-			Version:          binCfg.Version,
-			Hash:             hash,
-			URL:              normalizedURL,
-			Provider:         binCfg.Provider,
-			InstallMode:      binCfg.InstallMode,
-			PackageType:      binCfg.PackageType,
-			AppBundle:        binCfg.AppBundle,
-			PackagePath:      binCfg.PackagePath,
-			SourceAsset:      binCfg.SourceAsset,
-			ReleaseTagPrefix: binCfg.ReleaseTagPrefix,
-			Pinned:           binCfg.Pinned,
-			MinAgeDays:       binCfg.MinAgeDays,
+			Name:               filepath.Base(ep),
+			RemoteName:         binCfg.RemoteName,
+			Version:            updatedBin.Version,
+			Hash:               hash,
+			URL:                normalizedURL,
+			Provider:           updatedBin.Provider,
+			InstallMode:        updatedBin.InstallMode,
+			PackageType:        updatedBin.PackageType,
+			AppBundle:          updatedBin.AppBundle,
+			PackagePath:        updatedBin.PackagePath,
+			SourceAsset:        updatedBin.SourceAsset,
+			ReleaseTagPrefix:   updatedBin.ReleaseTagPrefix,
+			DownloadIntegrity:  updatedBin.DownloadIntegrity,
+			InstalledIntegrity: updatedBin.InstalledIntegrity,
+			Pinned:             updatedBin.Pinned,
+			MinAgeDays:         updatedBin.MinAgeDays,
 		})
 	}
 

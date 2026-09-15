@@ -169,6 +169,57 @@ func TestProcessURLRejectsArchiveChecksumMismatch(t *testing.T) {
 	}
 }
 
+func TestProcessURLReportsByteTransformationEvidence(t *testing.T) {
+	plain := []byte("plain executable payload")
+	archive := buildTestZipArchive(t, map[string]string{"tool": "#!/bin/sh\nexit 0\n"})
+
+	tests := []struct {
+		name          string
+		assetName     string
+		payload       []byte
+		wantUnchanged bool
+	}{
+		{name: "unchanged plain payload", assetName: "tool-linux-amd64", payload: plain, wantUnchanged: true},
+		{name: "renamed unchanged plain payload", assetName: "tool-renamed-linux-amd64", payload: plain, wantUnchanged: true},
+		{name: "archive payload", assetName: "tool-linux-amd64.zip", payload: archive, wantUnchanged: false},
+		{name: "same-name transformed payload", assetName: "tool", payload: archive, wantUnchanged: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write(tt.payload)
+			}))
+			defer server.Close()
+
+			f := NewFilter(&FilterOpts{NonInteractive: true})
+			f.repoName = "tool"
+			result, err := f.ProcessURL(&FilteredAsset{Name: tt.assetName, URL: server.URL}, "", false)
+			if err != nil {
+				t.Fatalf("ProcessURL returned error: %v", err)
+			}
+			defer func() {
+				if closer, ok := result.Source.(io.Closer); ok {
+					_ = closer.Close()
+				}
+			}()
+
+			if result.UnchangedBytes != tt.wantUnchanged {
+				t.Fatalf("UnchangedBytes = %v, want %v", result.UnchangedBytes, tt.wantUnchanged)
+			}
+			if result.DownloadSHA256 == "" || result.InstalledSHA256 == "" {
+				t.Fatalf("missing processing digests: download=%q installed=%q", result.DownloadSHA256, result.InstalledSHA256)
+			}
+			if tt.wantUnchanged && result.DownloadSHA256 != result.InstalledSHA256 {
+				t.Fatalf("unchanged payload digests differ: download=%q installed=%q", result.DownloadSHA256, result.InstalledSHA256)
+			}
+			if !tt.wantUnchanged && result.DownloadSHA256 == result.InstalledSHA256 {
+				t.Fatalf("transformed payload unexpectedly has identical digests: %q", result.DownloadSHA256)
+			}
+		})
+	}
+}
+
 func TestProcessURLPreservesNameForTarGzArchives(t *testing.T) {
 	originalResolver := resolver
 	defer func() { resolver = originalResolver }()

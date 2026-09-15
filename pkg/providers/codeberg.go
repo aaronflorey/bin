@@ -109,24 +109,27 @@ func (c *codeberg) Fetch(opts *FetchOpts) (*File, error) {
 		return nil, err
 	}
 
-	finalExpectedSHA := ""
-	if expectedChecksum != nil {
-		if expectedChecksum.Scope == checksumScopeFinal || outFile.Name == gf.Name {
-			finalExpectedSHA = expectedChecksum.Hash
-		}
+	downloadIntegrity, installedIntegrity, finalExpectedSHA, err := processedIntegrity(expectedChecksum, outFile.DownloadSHA256, outFile.InstalledSHA256, outFile.UnchangedBytes)
+	if err != nil {
+		err = checksumVerificationError(err)
+		log.WithError(err).Debugf("Codeberg installed-byte verification failed for %s/%s asset %q", c.owner, c.repo, gf.Name)
+		return nil, err
 	}
 
 	version := release.TagName
 
 	file := &File{
-		Data:             outFile.Source,
-		Name:             outFile.Name,
-		Version:          version,
-		ReleaseTagPrefix: fetchedReleaseTagPrefix(version, opts.ReleaseTagPrefix),
-		ExpectedSHA:      finalExpectedSHA,
-		PackagePath:      outFile.PackagePath,
-		SourceAsset:      gf.Name,
-		PublishedAt:      codebergPublishedAt(release),
+		Data:                outFile.Source,
+		Name:                outFile.Name,
+		Version:             version,
+		ReleaseTagPrefix:    fetchedReleaseTagPrefix(version, opts.ReleaseTagPrefix),
+		ExpectedSHA:         finalExpectedSHA,
+		PackagePath:         outFile.PackagePath,
+		SourceAsset:         gf.Name,
+		PublishedAt:         codebergPublishedAt(release),
+		DownloadIntegrity:   downloadIntegrity,
+		InstalledIntegrity:  installedIntegrity,
+		ProcessingUnchanged: outFile.UnchangedBytes,
 	}
 
 	return file, nil

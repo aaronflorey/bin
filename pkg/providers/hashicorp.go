@@ -148,23 +148,26 @@ func (g *hashiCorp) Fetch(opts *FetchOpts) (*File, error) {
 		return nil, err
 	}
 
-	finalExpectedSHA := ""
-	if expectedChecksum != nil {
-		if expectedChecksum.Scope == checksumScopeFinal || outFile.Name == gf.Name {
-			finalExpectedSHA = expectedChecksum.Hash
-		}
+	downloadIntegrity, installedIntegrity, finalExpectedSHA, err := processedIntegrity(expectedChecksum, outFile.DownloadSHA256, outFile.InstalledSHA256, outFile.UnchangedBytes)
+	if err != nil {
+		err = checksumVerificationError(err)
+		log.WithError(err).Debugf("HashiCorp installed-byte verification failed for %s asset %q", g.repo, gf.Name)
+		return nil, err
 	}
 
 	version := release.Version
 
 	file := &File{
-		Data:             outFile.Source,
-		Name:             outFile.Name,
-		Version:          version,
-		ReleaseTagPrefix: fetchedReleaseTagPrefix(version, opts.ReleaseTagPrefix),
-		ExpectedSHA:      finalExpectedSHA,
-		PackagePath:      outFile.PackagePath,
-		SourceAsset:      gf.Name,
+		Data:                outFile.Source,
+		Name:                outFile.Name,
+		Version:             version,
+		ReleaseTagPrefix:    fetchedReleaseTagPrefix(version, opts.ReleaseTagPrefix),
+		ExpectedSHA:         finalExpectedSHA,
+		PackagePath:         outFile.PackagePath,
+		SourceAsset:         gf.Name,
+		DownloadIntegrity:   downloadIntegrity,
+		InstalledIntegrity:  installedIntegrity,
+		ProcessingUnchanged: outFile.UnchangedBytes,
 	}
 
 	return file, nil

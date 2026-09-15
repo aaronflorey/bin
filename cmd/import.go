@@ -64,20 +64,22 @@ func newImportCmd() *importCmd {
 				name := validatedNames[i]
 
 				target := &config.Binary{
-					Path:             filepath.Join(defaultPath, name),
-					RemoteName:       b.RemoteName,
-					Version:          b.Version,
-					Hash:             b.Hash,
-					URL:              b.URL,
-					Provider:         b.Provider,
-					InstallMode:      b.InstallMode,
-					PackageType:      b.PackageType,
-					AppBundle:        b.AppBundle,
-					PackagePath:      b.PackagePath,
-					SourceAsset:      b.SourceAsset,
-					ReleaseTagPrefix: b.ReleaseTagPrefix,
-					Pinned:           b.Pinned,
-					MinAgeDays:       b.MinAgeDays,
+					Path:               filepath.Join(defaultPath, name),
+					RemoteName:         b.RemoteName,
+					Version:            b.Version,
+					Hash:               b.Hash,
+					URL:                b.URL,
+					Provider:           b.Provider,
+					InstallMode:        b.InstallMode,
+					PackageType:        b.PackageType,
+					AppBundle:          b.AppBundle,
+					PackagePath:        b.PackagePath,
+					SourceAsset:        b.SourceAsset,
+					ReleaseTagPrefix:   b.ReleaseTagPrefix,
+					DownloadIntegrity:  config.CloneIntegrityRecord(b.DownloadIntegrity),
+					InstalledIntegrity: importedInstalledIntegrity(b.InstalledIntegrity),
+					Pinned:             b.Pinned,
+					MinAgeDays:         b.MinAgeDays,
 				}
 
 				status := "installed"
@@ -141,6 +143,19 @@ func newImportCmd() *importCmd {
 	return root
 }
 
+func importedInstalledIntegrity(record *config.IntegrityRecord) *config.IntegrityRecord {
+	if record == nil {
+		return nil
+	}
+
+	clone := config.CloneIntegrityRecord(record)
+	// An export describes verification on another machine. Keep that evidence
+	// as provenance, but do not present it as a fresh assertion about local
+	// bytes until this installation is fetched and verified again.
+	clone.Result = "imported"
+	return clone
+}
+
 func parseImportBins(r io.Reader) ([]*portableBinary, error) {
 	var bins []*portableBinary
 	if err := json.NewDecoder(r).Decode(&bins); err != nil {
@@ -179,6 +194,15 @@ func equalBinaryConfig(a, b *config.Binary) bool {
 		a.PackagePath == b.PackagePath &&
 		a.SourceAsset == b.SourceAsset &&
 		a.ReleaseTagPrefix == b.ReleaseTagPrefix &&
+		equalIntegrityRecord(a.DownloadIntegrity, b.DownloadIntegrity) &&
+		equalIntegrityRecord(a.InstalledIntegrity, b.InstalledIntegrity) &&
 		a.Pinned == b.Pinned &&
 		a.MinAgeDays == b.MinAgeDays
+}
+
+func equalIntegrityRecord(a, b *config.IntegrityRecord) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }

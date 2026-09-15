@@ -153,6 +153,10 @@ func TestInstallSystemPackageDMGTracksInstalledAppBundle(t *testing.T) {
 			Name:        "Paseo-0.1.64-arm64.dmg",
 			Version:     "0.1.64",
 			PackagePath: "Paseo.app",
+			DownloadIntegrity: &providers.IntegrityRecord{
+				Algorithm: "sha256", Expected: "release-digest", Observed: "release-digest",
+				Source: "Paseo-0.1.64-arm64.dmg.sha256", Scope: "download", Result: "verified",
+			},
 		}}, nil
 	}
 
@@ -201,6 +205,12 @@ func TestInstallSystemPackageDMGTracksInstalledAppBundle(t *testing.T) {
 	}
 	if binCfg.PackageType != "dmg" {
 		t.Fatalf("unexpected package type: %s", binCfg.PackageType)
+	}
+	if binCfg.DownloadIntegrity == nil || binCfg.DownloadIntegrity.Algorithm != "sha256" || binCfg.DownloadIntegrity.Expected != "release-digest" || binCfg.DownloadIntegrity.Observed != "release-digest" || binCfg.DownloadIntegrity.Source != "Paseo-0.1.64-arm64.dmg.sha256" || binCfg.DownloadIntegrity.Scope != "download" || binCfg.DownloadIntegrity.Result != "verified" {
+		t.Fatalf("download integrity was not persisted: %#v", binCfg.DownloadIntegrity)
+	}
+	if binCfg.InstalledIntegrity != nil {
+		t.Fatalf("package-manager install asserted installed-byte integrity: %#v", binCfg.InstalledIntegrity)
 	}
 	if !strings.HasSuffix(binCfg.Path, "/Paseo.app/Contents/MacOS/Paseo") {
 		t.Fatalf("unexpected tracked path: %s", binCfg.Path)

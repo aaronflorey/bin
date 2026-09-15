@@ -29,6 +29,23 @@ type File struct {
 	// remains the selected inner archive entry.
 	SourceAsset string
 	PublishedAt *time.Time
+	// DownloadIntegrity verifies the raw release-asset bytes. InstalledIntegrity
+	// verifies the bytes handed to the installer, when independently bound or
+	// proven unchanged by processing.
+	DownloadIntegrity   *IntegrityRecord
+	InstalledIntegrity  *IntegrityRecord
+	ProcessingUnchanged bool
+}
+
+// IntegrityRecord describes evidence for one byte scope. It is intentionally
+// separate from File.Hash, which remains the SHA-256 of installed bytes.
+type IntegrityRecord struct {
+	Algorithm string
+	Expected  string
+	Observed  string
+	Source    string
+	Scope     string
+	Result    string
 }
 
 type ReleaseInfo struct {
