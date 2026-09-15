@@ -162,6 +162,47 @@ func TestCheckAndLoadAllowsFreshBINCONFIGPath(t *testing.T) {
 	}
 }
 
+func TestBinaryIntegrityRecordsLoadAndCloneWithoutMigration(t *testing.T) {
+	t.Cleanup(func() { cfg = config{} })
+
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	defaultPath := t.TempDir()
+	t.Setenv("BIN_CONFIG", configPath)
+	t.Setenv("BIN_EXE_DIR", defaultPath)
+	oldConfig := fmt.Sprintf(`{"default_path":%q,"bins":{"/tmp/old":{"path":"/tmp/old","remote_name":"old","version":"1.0.0","hash":"old-hash","url":"https://example.test/old","provider":"generic"}}}`, defaultPath)
+	if err := os.WriteFile(configPath, []byte(oldConfig), 0o600); err != nil {
+		t.Fatalf("write old config: %v", err)
+	}
+	if err := CheckAndLoad(); err != nil {
+		t.Fatalf("load old config: %v", err)
+	}
+	if got := cfg.Bins["/tmp/old"]; got == nil || got.DownloadIntegrity != nil || got.InstalledIntegrity != nil {
+		t.Fatalf("old config integrity fields = %#v, want nil", got)
+	}
+
+	bin := &Binary{
+		Path: "/tmp/new", Hash: "installed-sha", DownloadIntegrity: &IntegrityRecord{Algorithm: "sha256", Scope: "download", Result: "verified"},
+		InstalledIntegrity: &IntegrityRecord{Algorithm: "sha256", Observed: "installed-sha", Scope: "installed", Result: "verified"},
+	}
+	if err := UpsertBinary(bin); err != nil {
+		t.Fatalf("upsert binary: %v", err)
+	}
+	bin.DownloadIntegrity.Result = "changed"
+	bin.InstalledIntegrity.Observed = "changed"
+	stored := cfg.Bins[bin.Path]
+	if stored.DownloadIntegrity.Result != "verified" || stored.InstalledIntegrity.Observed != "installed-sha" {
+		t.Fatalf("upsert retained caller-owned integrity pointers: %#v", stored)
+	}
+
+	if err := CheckAndLoad(); err != nil {
+		t.Fatalf("reload config: %v", err)
+	}
+	stored = cfg.Bins[bin.Path]
+	if stored.DownloadIntegrity == nil || stored.InstalledIntegrity == nil || stored.InstalledIntegrity.Observed != "installed-sha" {
+		t.Fatalf("integrity records did not round trip: %#v", stored)
+	}
+}
+
 func TestCheckAndLoadDoesNotRewriteExistingConfigWithoutDefaultPath(t *testing.T) {
 	t.Cleanup(func() {
 		cfg = config{}

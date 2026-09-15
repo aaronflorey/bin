@@ -14,7 +14,7 @@ import (
 	"github.com/aaronflorey/bin/pkg/assets"
 	"github.com/aaronflorey/bin/pkg/config"
 	"github.com/caarlos0/log"
-	"github.com/google/go-github/v73/github"
+	"github.com/google/go-github/v80/github"
 )
 
 var runGHAuthToken = sync.OnceValues(func() ([]byte, error) {
@@ -105,7 +105,10 @@ func (g *gitHub) Fetch(opts *FetchOpts) (*File, error) {
 		gf.ExtraHeaders["Authorization"] = fmt.Sprintf("token %s", g.token)
 	}
 
-	checksum := checksumBindingForAsset(gf.Name, checksumAssets, gf.ExtraHeaders)
+	checksum := githubDigestBinding(githubReleaseAsset(release.Assets, gf.Name))
+	if checksum.Expected == nil && checksum.Failure == nil {
+		checksum = checksumBindingForAsset(gf.Name, checksumAssets, gf.ExtraHeaders)
+	}
 	if checksum.Failure != nil {
 		log.WithError(checksum.Failure.Err).Debugf("GitHub checksum lookup failed for %s/%s asset %q", g.owner, g.repo, gf.Name)
 		return nil, checksum.Failure.Err
@@ -125,27 +128,61 @@ func (g *gitHub) Fetch(opts *FetchOpts) (*File, error) {
 		return nil, err
 	}
 
-	finalExpectedSHA := ""
-	if expectedChecksum != nil {
-		if expectedChecksum.Scope == checksumScopeFinal || outFile.Name == gf.Name {
-			finalExpectedSHA = expectedChecksum.Hash
-		}
+	downloadIntegrity, installedIntegrity, finalExpectedSHA, err := processedIntegrity(expectedChecksum, outFile.DownloadSHA256, outFile.InstalledSHA256, outFile.UnchangedBytes)
+	if err != nil {
+		err = checksumVerificationError(err)
+		log.WithError(err).Debugf("GitHub installed-byte verification failed for %s/%s asset %q", g.owner, g.repo, gf.Name)
+		return nil, err
 	}
 
 	version := release.GetTagName()
 
 	file := &File{
-		Data:             outFile.Source,
-		Name:             outFile.Name,
-		Version:          version,
-		ReleaseTagPrefix: fetchedReleaseTagPrefix(version, opts.ReleaseTagPrefix),
-		ExpectedSHA:      finalExpectedSHA,
-		PackagePath:      outFile.PackagePath,
-		SourceAsset:      gf.Name,
-		PublishedAt:      githubPublishedAt(release),
+		Data:                outFile.Source,
+		Name:                outFile.Name,
+		Version:             version,
+		ReleaseTagPrefix:    fetchedReleaseTagPrefix(version, opts.ReleaseTagPrefix),
+		ExpectedSHA:         finalExpectedSHA,
+		PackagePath:         outFile.PackagePath,
+		SourceAsset:         gf.Name,
+		PublishedAt:         githubPublishedAt(release),
+		DownloadIntegrity:   downloadIntegrity,
+		InstalledIntegrity:  installedIntegrity,
+		ProcessingUnchanged: outFile.UnchangedBytes,
 	}
 
 	return file, nil
+}
+
+// githubDigestBinding accepts GitHub's release-asset sha256:<hex> digest. An
+// advertised digest is authoritative, so callers must not inspect manifests
+// after this function reports either an expectation or a failure.
+func githubDigestBinding(asset *github.ReleaseAsset) checksumBindingResult {
+	if asset == nil || asset.GetDigest() == "" {
+		return checksumBindingResult{}
+	}
+
+	algorithm, hash, hasSeparator := strings.Cut(asset.GetDigest(), ":")
+	if !hasSeparator || algorithm == "" || hash == "" || strings.Contains(hash, ":") {
+		return failedBinding(checksumParsingFailure, fmt.Errorf("GitHub asset %q has malformed digest %q", asset.GetName(), asset.GetDigest()))
+	}
+	if !strings.EqualFold(algorithm, "sha256") {
+		return failedBinding(checksumUnsupportedAlgorithmFailure, fmt.Errorf("GitHub asset %q uses unsupported digest algorithm %q", asset.GetName(), algorithm))
+	}
+	if !sha256Pattern.MatchString(hash) {
+		return failedBinding(checksumParsingFailure, fmt.Errorf("GitHub asset %q has malformed SHA-256 digest", asset.GetName()))
+	}
+
+	return checksumBindingResult{Expected: &expectedChecksum{Hash: strings.ToLower(hash), Scope: checksumScopeArchive, Source: "GitHub release asset digest"}}
+}
+
+func githubReleaseAsset(assets []*github.ReleaseAsset, name string) *github.ReleaseAsset {
+	for _, asset := range assets {
+		if asset.GetName() == name {
+			return asset
+		}
+	}
+	return nil
 }
 
 // GetLatestVersion checks the latest repo release and

@@ -199,6 +199,66 @@ func TestSaveToDiskChecksumMismatchPreservesExistingFile(t *testing.T) {
 	}
 }
 
+func TestInstallIntegrityFailurePreservesPriorBinaryAndMetadata(t *testing.T) {
+	installDir := setupTestConfig(t)
+	target := filepath.Join(installDir, "tool")
+	if err := os.WriteFile(target, []byte("existing"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	prior := &config.Binary{Path: target, RemoteName: "tool", Version: "1.0.0", Hash: "prior-hash", URL: "https://example.test/tool", Provider: "test",
+		InstalledIntegrity: &config.IntegrityRecord{Algorithm: "sha256", Observed: "prior-hash", Scope: "installed", Result: "verified"}}
+	if err := config.UpsertBinary(prior); err != nil {
+		t.Fatal(err)
+	}
+
+	previousFactory := installProviderFactory
+	installProviderFactory = func(string, string) (providers.Provider, error) {
+		return fetchBinaryTestProvider{id: "test", fetchFn: func(*providers.FetchOpts) (*providers.File, error) {
+			return &providers.File{Name: "tool", Version: "2.0.0", Data: strings.NewReader(runnableRunScript), ExpectedSHA: "not-the-installed-sha"}, nil
+		}}, nil
+	}
+	t.Cleanup(func() { installProviderFactory = previousFactory })
+
+	if _, err := installBinary(InstallOpts{URL: prior.URL, Provider: prior.Provider, Path: target, ConfigPath: target, LogicalName: "tool", Force: true}); err == nil {
+		t.Fatal("expected integrity failure")
+	}
+	contents, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(contents) != "existing" {
+		t.Fatalf("installed bytes changed after integrity failure: %q", contents)
+	}
+	stored := config.Get().Bins[target]
+	if stored.Version != prior.Version || stored.Hash != prior.Hash || stored.InstalledIntegrity == nil || stored.InstalledIntegrity.Result != "verified" {
+		t.Fatalf("prior integrity metadata changed after failure: %#v", stored)
+	}
+}
+
+func TestInstallBinaryPersistsScopedIntegrityRecords(t *testing.T) {
+	installDir := setupTestConfig(t)
+	installedHash := fmt.Sprintf("%x", sha256.Sum256([]byte(runnableRunScript)))
+	previousFactory := installProviderFactory
+	installProviderFactory = func(string, string) (providers.Provider, error) {
+		return fetchBinaryTestProvider{id: "test", fetchFn: func(*providers.FetchOpts) (*providers.File, error) {
+			return &providers.File{
+				Name: "tool", Version: "1.0.0", Data: strings.NewReader(runnableRunScript),
+				DownloadIntegrity:  &providers.IntegrityRecord{Algorithm: "sha256", Expected: "download", Observed: "download", Source: "release", Scope: "download", Result: "verified"},
+				InstalledIntegrity: &providers.IntegrityRecord{Algorithm: "sha256", Expected: installedHash, Observed: installedHash, Source: "release", Scope: "installed", Result: "verified"},
+			}, nil
+		}}, nil
+	}
+	t.Cleanup(func() { installProviderFactory = previousFactory })
+
+	if _, err := installBinary(InstallOpts{URL: "https://example.test/tool", Path: installDir, ResolvePath: true}); err != nil {
+		t.Fatalf("installBinary: %v", err)
+	}
+	stored := config.Get().Bins[filepath.Join(installDir, "tool")]
+	if stored == nil || stored.Hash != installedHash || stored.DownloadIntegrity == nil || stored.InstalledIntegrity == nil || stored.InstalledIntegrity.Observed != stored.Hash {
+		t.Fatalf("stored integrity metadata = %#v", stored)
+	}
+}
+
 func TestSaveToDiskRejectsInvalidPayloadWithoutReplacingDestination(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "tool")

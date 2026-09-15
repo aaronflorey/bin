@@ -10,7 +10,7 @@ require (
 	github.com/coreos/go-semver v0.3.1
 	github.com/docker/docker v28.3.2+incompatible
 	github.com/fatih/color v1.18.0
-	github.com/google/go-github/v73 v73.0.0
+	github.com/google/go-github/v80 v80.0.0
 	github.com/h2non/filetype v1.1.3
 	github.com/hashicorp/go-version v1.7.0
 	github.com/krolaw/zipstream v0.0.0-20241109034754-4a67be70fe31

@@ -159,20 +159,22 @@ func installBinary(opts InstallOpts) (*InstallResult, error) {
 	}
 
 	err = persistInstalledBinary(&config.Binary{
-		RemoteName:       logicalName,
-		Path:             configPath,
-		Version:          pResult.Version,
-		Hash:             hashString,
-		URL:              opts.URL,
-		Provider:         p.GetID(),
-		InstallMode:      installModeBinary,
-		PackageType:      "",
-		AppBundle:        "",
-		PackagePath:      pResult.PackagePath,
-		SourceAsset:      pResult.SourceAsset,
-		ReleaseTagPrefix: pResult.ReleaseTagPrefix,
-		Pinned:           pinned,
-		MinAgeDays:       minAgeDays,
+		RemoteName:         logicalName,
+		Path:               configPath,
+		Version:            pResult.Version,
+		Hash:               hashString,
+		URL:                opts.URL,
+		Provider:           p.GetID(),
+		InstallMode:        installModeBinary,
+		PackageType:        "",
+		AppBundle:          "",
+		PackagePath:        pResult.PackagePath,
+		SourceAsset:        pResult.SourceAsset,
+		ReleaseTagPrefix:   pResult.ReleaseTagPrefix,
+		DownloadIntegrity:  configIntegrityRecord(pResult.DownloadIntegrity),
+		InstalledIntegrity: installedIntegrityRecord(pResult.InstalledIntegrity, hashString),
+		Pinned:             pinned,
+		MinAgeDays:         minAgeDays,
 	})
 	if err != nil {
 		return nil, err
@@ -184,6 +186,28 @@ func installBinary(opts InstallOpts) (*InstallResult, error) {
 		Version: pResult.Version,
 		Path:    configPath,
 	}, nil
+}
+
+func configIntegrityRecord(record *providers.IntegrityRecord) *config.IntegrityRecord {
+	if record == nil {
+		return nil
+	}
+
+	return &config.IntegrityRecord{
+		Algorithm: record.Algorithm,
+		Expected:  record.Expected,
+		Observed:  record.Observed,
+		Source:    record.Source,
+		Scope:     record.Scope,
+		Result:    record.Result,
+	}
+}
+
+func installedIntegrityRecord(record *providers.IntegrityRecord, installedHash string) *config.IntegrityRecord {
+	if record == nil || !strings.EqualFold(record.Observed, installedHash) {
+		return nil
+	}
+	return configIntegrityRecord(record)
 }
 
 func fetchBinary(newProvider providerFactory, url, forcedProvider string, fetchOpts providers.FetchOpts, allowProviderFallback bool) (providers.Provider, *providers.File, error) {

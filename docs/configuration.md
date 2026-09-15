@@ -60,6 +60,11 @@ records the raw outer release asset selected during the last successful install;
 `package_path` continues to identify the selected inner archive entry. Older
 configuration files without `source_asset` remain valid.
 
+`download_integrity` and `installed_integrity` are optional integrity evidence
+records. Each records an algorithm, expected and observed digest, source,
+scope, and result. `hash` remains the SHA-256 of the installed bytes; older
+configuration files without integrity records remain valid.
+
 ## Environment variables
 
 ### Core runtime variables

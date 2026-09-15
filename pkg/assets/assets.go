@@ -143,9 +143,12 @@ type FilteredAsset struct {
 }
 
 type finalFile struct {
-	Source      io.Reader
-	Name        string
-	PackagePath string
+	Source          io.Reader
+	Name            string
+	PackagePath     string
+	DownloadSHA256  string
+	InstalledSHA256 string
+	UnchangedBytes  bool
 }
 
 type cleanupReadCloser struct {
@@ -1119,7 +1122,7 @@ func (f *Filter) ProcessURL(gf *FilteredAsset, expectedSHA string, verifyArchive
 		return nil, err
 	}
 
-	final, err := f.processDownloadedFile(tempPath)
+	final, err := f.processDownloadedFile(tempPath, actualSHA, false)
 	if err != nil {
 		return nil, err
 	}
@@ -1128,7 +1131,7 @@ func (f *Filter) ProcessURL(gf *FilteredAsset, expectedSHA string, verifyArchive
 	return final, nil
 }
 
-func (f *Filter) processDownloadedFile(tempPath string) (*finalFile, error) {
+func (f *Filter) processDownloadedFile(tempPath, downloadSHA string, transformed bool) (*finalFile, error) {
 	inputFile, err := os.Open(tempPath)
 	if err != nil {
 		return nil, err
@@ -1156,6 +1159,11 @@ func (f *Filter) processDownloadedFile(tempPath string) (*finalFile, error) {
 	}
 
 	if processor == nil {
+		installedSHA, err := fileSHA256(tempPath)
+		if err != nil {
+			_ = inputFile.Close()
+			return nil, err
+		}
 		return &finalFile{
 			Source: &cleanupReadCloser{
 				ReadCloser: inputFile,
@@ -1163,8 +1171,11 @@ func (f *Filter) processDownloadedFile(tempPath string) (*finalFile, error) {
 					return os.Remove(tempPath)
 				},
 			},
-			Name:        f.name,
-			PackagePath: f.packagePath,
+			Name:            f.name,
+			PackagePath:     f.packagePath,
+			DownloadSHA256:  downloadSHA,
+			InstalledSHA256: installedSHA,
+			UnchangedBytes:  !transformed,
 		}, nil
 	}
 
@@ -1197,7 +1208,21 @@ func (f *Filter) processDownloadedFile(tempPath string) (*finalFile, error) {
 	f.name = outFile.Name
 	f.packagePath = outFile.PackagePath
 
-	return f.processDownloadedFile(nextPath)
+	return f.processDownloadedFile(nextPath, downloadSHA, true)
+}
+
+func fileSHA256(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, file); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", h.Sum(nil)), nil
 }
 
 func writeReaderToTempFile(r io.Reader) (string, error) {

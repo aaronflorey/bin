@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/google/go-github/v73/github"
+	"github.com/google/go-github/v80/github"
 )
 
 func TestGitHubReusesLatestReleaseForFetch(t *testing.T) {

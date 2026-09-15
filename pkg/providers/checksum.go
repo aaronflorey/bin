@@ -42,8 +42,9 @@ const (
 )
 
 type expectedChecksum struct {
-	Hash  string
-	Scope checksumScope
+	Hash   string
+	Scope  checksumScope
+	Source string
 }
 
 // checksumOutcomeState records completed integrity checks only.
@@ -331,7 +332,7 @@ func readChecksumManifest(reader io.Reader) ([]byte, error) {
 func parseExactSHA256Sidecar(content []byte, request checksumManifestRequest) checksumBindingResult {
 	value := strings.TrimSpace(string(content))
 	if sha256Pattern.MatchString(value) {
-		return checksumBindingResult{Expected: &expectedChecksum{Hash: strings.ToLower(value), Scope: checksumScopeArchive}}
+		return checksumBindingResult{Expected: &expectedChecksum{Hash: strings.ToLower(value), Scope: checksumScopeArchive, Source: request.Asset.Name}}
 	}
 	return parseNamedChecksumManifest(content, request)
 }
@@ -368,7 +369,27 @@ func parseNamedChecksumManifest(content []byte, request checksumManifestRequest)
 	if len(hashes) != 1 {
 		return failedBinding(checksumParsingFailure, errors.New("duplicate checksum records for target"))
 	}
-	return checksumBindingResult{Expected: &expectedChecksum{Hash: hashes[0], Scope: checksumScopeArchive}}
+	return checksumBindingResult{Expected: &expectedChecksum{Hash: hashes[0], Scope: checksumScopeArchive, Source: request.Asset.Name}}
+}
+
+func processedIntegrity(expected *expectedChecksum, downloadSHA, installedSHA string, unchanged bool) (download, installed *IntegrityRecord, finalExpected string, err error) {
+	if expected == nil {
+		return nil, nil, "", nil
+	}
+
+	if expected.Scope == checksumScopeArchive {
+		download = &IntegrityRecord{Algorithm: "sha256", Expected: expected.Hash, Observed: downloadSHA, Source: expected.Source, Scope: "download", Result: "verified"}
+		if unchanged {
+			installed = &IntegrityRecord{Algorithm: "sha256", Expected: expected.Hash, Observed: installedSHA, Source: expected.Source, Scope: "installed", Result: "verified"}
+		}
+		return download, installed, "", nil
+	}
+
+	if !strings.EqualFold(installedSHA, expected.Hash) {
+		return nil, nil, "", fmt.Errorf("sha256 mismatch: %w for installed bytes: expected %s, got %s", assets.ErrChecksumMismatch, expected.Hash, installedSHA)
+	}
+	installed = &IntegrityRecord{Algorithm: "sha256", Expected: expected.Hash, Observed: installedSHA, Source: expected.Source, Scope: "installed", Result: "verified"}
+	return nil, installed, expected.Hash, nil
 }
 
 func manifestMentionsTarget(content string, request checksumManifestRequest, hasHashOrder bool) (bool, error) {
