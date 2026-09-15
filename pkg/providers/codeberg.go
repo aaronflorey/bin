@@ -111,6 +111,7 @@ func (c *codeberg) Fetch(opts *FetchOpts) (*File, error) {
 
 	downloadIntegrity, installedIntegrity, finalExpectedSHA, err := processedIntegrity(expectedChecksum, outFile.DownloadSHA256, outFile.InstalledSHA256, outFile.UnchangedBytes)
 	if err != nil {
+		_ = closeFileData(outFile.Source)
 		err = checksumVerificationError(err)
 		log.WithError(err).Debugf("Codeberg installed-byte verification failed for %s/%s asset %q", c.owner, c.repo, gf.Name)
 		return nil, err

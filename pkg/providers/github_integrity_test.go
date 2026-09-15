@@ -14,7 +14,7 @@ import (
 )
 
 func TestGitHubFetchDigestSourcePriorityAndFailures(t *testing.T) {
-	payload := []byte("binary payload")
+	payload := []byte("#!/bin/sh\nexit 0\n")
 	payloadDigest := sha256.Sum256(payload)
 	correctDigest := "sha256:" + fmtDigest(payloadDigest)
 	manifestDigest := strings.Repeat("a", 64)
@@ -132,7 +132,7 @@ func TestGitHubFetchArchiveDoesNotInheritDownloadIntegrity(t *testing.T) {
 }
 
 func TestGitHubFetchApplicableAndUnrelatedSidecarFailures(t *testing.T) {
-	payload := []byte("binary payload")
+	payload := []byte("#!/bin/sh\nexit 0\n")
 
 	tests := []struct {
 		name              string

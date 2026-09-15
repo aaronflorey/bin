@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"os/exec"
@@ -130,6 +131,7 @@ func (g *gitHub) Fetch(opts *FetchOpts) (*File, error) {
 
 	downloadIntegrity, installedIntegrity, finalExpectedSHA, err := processedIntegrity(expectedChecksum, outFile.DownloadSHA256, outFile.InstalledSHA256, outFile.UnchangedBytes)
 	if err != nil {
+		_ = closeFileData(outFile.Source)
 		err = checksumVerificationError(err)
 		log.WithError(err).Debugf("GitHub installed-byte verification failed for %s/%s asset %q", g.owner, g.repo, gf.Name)
 		return nil, err
@@ -152,6 +154,14 @@ func (g *gitHub) Fetch(opts *FetchOpts) (*File, error) {
 	}
 
 	return file, nil
+}
+
+func closeFileData(data io.Reader) error {
+	closer, ok := data.(io.Closer)
+	if !ok {
+		return nil
+	}
+	return closer.Close()
 }
 
 // githubDigestBinding accepts GitHub's release-asset sha256:<hex> digest. An

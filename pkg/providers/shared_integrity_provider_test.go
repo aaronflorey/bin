@@ -47,7 +47,7 @@ func TestGitLabFetchPreservesApplicableSidecarFailure(t *testing.T) {
 }
 
 func TestCodebergFetchRetainsScopedIntegrityRecords(t *testing.T) {
-	payload := []byte("payload")
+	payload := []byte("#!/bin/sh\nexit 0\n")
 	digest := sha256.Sum256(payload)
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

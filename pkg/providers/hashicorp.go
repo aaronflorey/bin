@@ -150,6 +150,7 @@ func (g *hashiCorp) Fetch(opts *FetchOpts) (*File, error) {
 
 	downloadIntegrity, installedIntegrity, finalExpectedSHA, err := processedIntegrity(expectedChecksum, outFile.DownloadSHA256, outFile.InstalledSHA256, outFile.UnchangedBytes)
 	if err != nil {
+		_ = closeFileData(outFile.Source)
 		err = checksumVerificationError(err)
 		log.WithError(err).Debugf("HashiCorp installed-byte verification failed for %s asset %q", g.repo, gf.Name)
 		return nil, err

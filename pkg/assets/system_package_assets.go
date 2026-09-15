@@ -226,6 +226,11 @@ func IsKnownNonRunnableName(name string) bool {
 	if looksLikeMetadataAsset(lower) {
 		return true
 	}
+	for _, compression := range compressedArchiveSuffixes {
+		if strings.HasSuffix(lower, compression) && looksLikeMetadataAsset(strings.TrimSuffix(lower, compression)) {
+			return true
+		}
+	}
 	for _, suffix := range []string{".bsdiff", ".bspatch", ".patch", ".diff", ".delta", ".zsync"} {
 		if strings.HasSuffix(lower, suffix) {
 			return true
