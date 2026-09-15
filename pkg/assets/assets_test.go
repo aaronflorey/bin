@@ -81,6 +81,36 @@ func TestSanitizeName(t *testing.T) {
 
 }
 
+func TestValidatePortableName(t *testing.T) {
+	for _, name := range []string{"tool", "tool.exe", "$REMOTE", "name.with.dots"} {
+		if err := ValidatePortableName(name); err != nil {
+			t.Errorf("ValidatePortableName(%q) error = %v", name, err)
+		}
+	}
+
+	for _, name := range []string{"", ".", "..", "...", ".......", "tool/child", `tool\child`, "/tool", `C:tool`, `\\server\share`, "NUL", "aux.txt", "tool.", "tool ", "tool\x00name", "tool:name"} {
+		if err := ValidatePortableName(name); err == nil {
+			t.Errorf("ValidatePortableName(%q) succeeded", name)
+		}
+	}
+}
+
+func TestArchiveMemberLeaf(t *testing.T) {
+	leaf, err := archiveMemberLeaf(`directory\tool`)
+	if err != nil {
+		t.Fatalf("archiveMemberLeaf returned error: %v", err)
+	}
+	if leaf != "tool" {
+		t.Fatalf("unexpected archive leaf: got %q, want tool", leaf)
+	}
+
+	for _, name := range []string{"../tool", "directory/../tool", "directory/...", "/tool"} {
+		if _, err := archiveMemberLeaf(name); err == nil {
+			t.Errorf("archiveMemberLeaf(%q) succeeded", name)
+		}
+	}
+}
+
 func TestProcessURLValidatesArchiveChecksum(t *testing.T) {
 	archiveData := buildTestZipArchive(t, map[string]string{"tool": "#!/bin/sh\nhello from archive"})
 	expectedHash := sha256.Sum256(archiveData)
@@ -198,6 +228,27 @@ func TestProcessZipLogsEntriesRejectedByPackagePath(t *testing.T) {
 	output := logs.String()
 	if !strings.Contains(output, `ZIP archive entry "ast-grep": PackagePath match=false`) {
 		t.Fatalf("expected rejected ZIP entry to be logged, got %q", output)
+	}
+}
+
+func TestProcessZipAllowsNonPortableAncillaryMember(t *testing.T) {
+	archiveData := buildTestZipArchive(t, map[string]string{
+		"tool":         "#!/bin/sh\nexit 0\n",
+		"docs/aux.txt": "documentation",
+	})
+
+	f := NewFilter(&FilterOpts{NonInteractive: true})
+	result, err := f.processZip("tool", bytes.NewReader(archiveData), "")
+	if err != nil {
+		t.Fatalf("processZip returned error: %v", err)
+	}
+	defer func() {
+		if closer, ok := result.Source.(io.Closer); ok {
+			_ = closer.Close()
+		}
+	}()
+	if result.Name != "tool" {
+		t.Fatalf("unexpected executable name: got %q, want tool", result.Name)
 	}
 }
 

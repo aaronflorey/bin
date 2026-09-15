@@ -5,12 +5,14 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aaronflorey/bin/pkg/assets"
 	"github.com/aaronflorey/bin/pkg/config"
@@ -24,6 +26,22 @@ type fetchBinaryTestProvider struct {
 	fetchFn func(*providers.FetchOpts) (*providers.File, error)
 	fetches *int
 }
+
+type trackingReadCloser struct {
+	reader     io.Reader
+	closeCount int
+	closeErr   error
+}
+
+func (r *trackingReadCloser) Read(p []byte) (int, error) { return r.reader.Read(p) }
+func (r *trackingReadCloser) Close() error {
+	r.closeCount++
+	return r.closeErr
+}
+
+type failingReader struct{ err error }
+
+func (r failingReader) Read([]byte) (int, error) { return 0, r.err }
 
 func (p fetchBinaryTestProvider) Fetch(opts *providers.FetchOpts) (*providers.File, error) {
 	if p.fetches != nil {
@@ -66,6 +84,18 @@ func TestAbsExpandedPath(t *testing.T) {
 	want := filepath.Join(homeDir, ".local", "bin", "tool")
 	if got != want {
 		t.Fatalf("unexpected expanded path: got %q, want %q", got, want)
+	}
+}
+
+func TestExpandTrackedBinaryPathKeepsFilenameLiteral(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	t.Setenv("remote_name", "outside/tool")
+
+	got := expandTrackedBinaryPath("$HOME/bin/$remote_name")
+	want := filepath.Join(homeDir, "bin", "$remote_name")
+	if got != want {
+		t.Fatalf("unexpected tracked path: got %q, want %q", got, want)
 	}
 }
 
@@ -234,6 +264,202 @@ func TestCheckFinalPathKeepsOverwriteDisabledForNewPath(t *testing.T) {
 	}
 	if overwrite {
 		t.Fatal("expected overwrite to stay disabled")
+	}
+}
+
+func TestCheckFinalPathExpandsOnlyExplicitDestination(t *testing.T) {
+	homeDir := t.TempDir()
+	installDir := filepath.Join(homeDir, "bin")
+	if err := os.Mkdir(installDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", homeDir)
+	t.Setenv("REMOTE_NAME", "outside/tool")
+
+	path, _, err := checkFinalPath(os.ExpandEnv("$HOME/bin"), "$REMOTE_NAME", false)
+	if err != nil {
+		t.Fatalf("checkFinalPath returned error: %v", err)
+	}
+	want := filepath.Join(installDir, "$REMOTE_NAME")
+	if path != want {
+		t.Fatalf("unexpected path: got %q, want %q", path, want)
+	}
+}
+
+func TestInstallBinaryRejectsUnsafeProviderNameWithAlias(t *testing.T) {
+	installDir := setupTestConfig(t)
+	previousFactory := installProviderFactory
+	installProviderFactory = func(string, string) (providers.Provider, error) {
+		return fetchBinaryTestProvider{
+			id: "test",
+			fetchFn: func(*providers.FetchOpts) (*providers.File, error) {
+				return &providers.File{Name: "tool_1.2.3...", Version: "1.2.3", Data: strings.NewReader("payload")}, nil
+			},
+		}, nil
+	}
+	t.Cleanup(func() { installProviderFactory = previousFactory })
+
+	_, err := installBinary(InstallOpts{
+		URL:         "https://example.test/tool",
+		Path:        installDir,
+		LogicalName: "user-alias",
+		ResolvePath: true,
+	})
+	if err == nil {
+		t.Fatal("installBinary accepted an unsafe provider name")
+	}
+	if _, statErr := os.Stat(filepath.Join(installDir, "user-alias")); !os.IsNotExist(statErr) {
+		t.Fatalf("unexpected destination after rejected provider name: %v", statErr)
+	}
+}
+
+func TestInstallBinaryKeepsProviderEnvironmentSyntaxLiteral(t *testing.T) {
+	setupTestConfig(t)
+	homeDir := t.TempDir()
+	installDir := filepath.Join(homeDir, "bin")
+	if err := os.Mkdir(installDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", homeDir)
+	// SanitizeName lowercases provider names, so this is the environment name
+	// present in the final provider-derived component.
+	t.Setenv("remote_name", "outside/tool")
+
+	previousFactory := installProviderFactory
+	installProviderFactory = func(string, string) (providers.Provider, error) {
+		return fetchBinaryTestProvider{
+			id: "test",
+			fetchFn: func(*providers.FetchOpts) (*providers.File, error) {
+				return &providers.File{Name: "$REMOTE_NAME", Version: "1.2.3", Data: strings.NewReader("#!/bin/sh\nexit 0\n")}, nil
+			},
+		}, nil
+	}
+	t.Cleanup(func() { installProviderFactory = previousFactory })
+
+	result, err := installBinary(InstallOpts{
+		URL:         "https://example.test/tool",
+		Path:        "$HOME/bin",
+		ResolvePath: true,
+	})
+	if err != nil {
+		t.Fatalf("installBinary returned error: %v", err)
+	}
+	want := filepath.Join(installDir, "$remote_name")
+	if result.Path != want {
+		t.Fatalf("unexpected installed path: got %q, want %q", result.Path, want)
+	}
+	if _, err := os.Stat(want); err != nil {
+		t.Fatalf("literal provider name was not installed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(installDir, "outside", "tool")); !os.IsNotExist(err) {
+		t.Fatalf("provider environment syntax expanded into a path: %v", err)
+	}
+}
+
+func TestInstallBinaryExpandsDestinationWithoutPathResolution(t *testing.T) {
+	setupTestConfig(t)
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	previousFactory := installProviderFactory
+	installProviderFactory = func(string, string) (providers.Provider, error) {
+		return fetchBinaryTestProvider{
+			id: "test",
+			fetchFn: func(*providers.FetchOpts) (*providers.File, error) {
+				return &providers.File{Name: "tool", Version: "1.2.3", Data: strings.NewReader("#!/bin/sh\nexit 0\n")}, nil
+			},
+		}, nil
+	}
+	t.Cleanup(func() { installProviderFactory = previousFactory })
+
+	path := "$HOME/bin/tool"
+	if _, err := installBinary(InstallOpts{URL: "https://example.test/tool", Path: path, ResolvePath: false}); err != nil {
+		t.Fatalf("installBinary returned error: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(homeDir, "bin", "tool")); err != nil {
+		t.Fatalf("expanded destination was not installed: %v", err)
+	}
+}
+
+func TestInstallBinaryClosesFetchedStreamAfterMinimumAgeFailure(t *testing.T) {
+	setupTestConfig(t)
+	stream := &trackingReadCloser{reader: strings.NewReader(runnableRunScript)}
+	previousFactory := installProviderFactory
+	installProviderFactory = func(string, string) (providers.Provider, error) {
+		now := time.Now()
+		return fetchBinaryTestProvider{id: "test", fetchFn: func(*providers.FetchOpts) (*providers.File, error) {
+			return &providers.File{Name: "tool", Version: "1.0.0", PublishedAt: &now, Data: stream}, nil
+		}}, nil
+	}
+	t.Cleanup(func() { installProviderFactory = previousFactory })
+
+	minAgeDays := 1
+	_, err := installBinary(InstallOpts{URL: "https://example.test/tool", Path: t.TempDir(), ResolvePath: true, MinAgeDays: &minAgeDays})
+	if err == nil {
+		t.Fatal("expected minimum-age failure")
+	}
+	if stream.closeCount != 1 {
+		t.Fatalf("fetched stream closed %d times, want 1", stream.closeCount)
+	}
+}
+
+func TestInstallBinaryClosesFetchedStreamAfterDestinationResolutionFailure(t *testing.T) {
+	setupTestConfig(t)
+	stream := &trackingReadCloser{reader: strings.NewReader(runnableRunScript)}
+	previousFactory := installProviderFactory
+	installProviderFactory = func(string, string) (providers.Provider, error) {
+		return fetchBinaryTestProvider{id: "test", fetchFn: func(*providers.FetchOpts) (*providers.File, error) {
+			return &providers.File{Name: "tool", Version: "1.0.0", Data: stream}, nil
+		}}, nil
+	}
+	t.Cleanup(func() { installProviderFactory = previousFactory })
+
+	_, err := installBinary(InstallOpts{URL: "https://example.test/tool", Path: "\x00", ResolvePath: true})
+	if err == nil {
+		t.Fatal("expected destination-resolution failure")
+	}
+	if stream.closeCount != 1 {
+		t.Fatalf("fetched stream closed %d times, want 1", stream.closeCount)
+	}
+}
+
+func TestInstallBinaryClosesFetchedStreamAfterCopyFailure(t *testing.T) {
+	setupTestConfig(t)
+	stream := &trackingReadCloser{reader: failingReader{err: errors.New("read failed")}}
+	previousFactory := installProviderFactory
+	installProviderFactory = func(string, string) (providers.Provider, error) {
+		return fetchBinaryTestProvider{id: "test", fetchFn: func(*providers.FetchOpts) (*providers.File, error) {
+			return &providers.File{Name: "tool", Version: "1.0.0", Data: stream}, nil
+		}}, nil
+	}
+	t.Cleanup(func() { installProviderFactory = previousFactory })
+
+	_, err := installBinary(InstallOpts{URL: "https://example.test/tool", Path: t.TempDir(), ResolvePath: true})
+	if err == nil {
+		t.Fatal("expected copy failure")
+	}
+	if stream.closeCount != 1 {
+		t.Fatalf("fetched stream closed %d times, want 1", stream.closeCount)
+	}
+}
+
+func TestInstallBinaryClosesFetchedStreamAfterSuccess(t *testing.T) {
+	installDir := setupTestConfig(t)
+	stream := &trackingReadCloser{reader: strings.NewReader(runnableRunScript)}
+	previousFactory := installProviderFactory
+	installProviderFactory = func(string, string) (providers.Provider, error) {
+		return fetchBinaryTestProvider{id: "test", fetchFn: func(*providers.FetchOpts) (*providers.File, error) {
+			return &providers.File{Name: "tool", Version: "1.0.0", Data: stream}, nil
+		}}, nil
+	}
+	t.Cleanup(func() { installProviderFactory = previousFactory })
+
+	_, err := installBinary(InstallOpts{URL: "https://example.test/tool", Path: installDir, ResolvePath: true})
+	if err != nil {
+		t.Fatalf("installBinary returned error: %v", err)
+	}
+	if stream.closeCount != 1 {
+		t.Fatalf("fetched stream closed %d times, want 1", stream.closeCount)
 	}
 }
 

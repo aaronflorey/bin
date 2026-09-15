@@ -46,7 +46,7 @@ func writeList(out io.Writer, bins map[string]*config.Binary) error {
 	maxLengths := make([]int, 4)
 	for _, k := range binPaths {
 		b := bins[k]
-		p := os.ExpandEnv(b.Path)
+		p := expandTrackedBinaryPath(b.Path)
 		if len(p) > maxLengths[0] {
 			maxLengths[0] = len(p)
 		}
@@ -75,7 +75,7 @@ func writeList(out io.Writer, bins map[string]*config.Binary) error {
 
 	for _, k := range binPaths {
 		b := bins[k]
-		p := os.ExpandEnv(b.Path)
+		p := expandTrackedBinaryPath(b.Path)
 		status := color.GreenString("OK")
 		if _, err := os.Stat(p); err != nil {
 			status = color.RedString("missing %s", p)
@@ -128,7 +128,7 @@ func listEntries(bins map[string]*config.Binary) []listedBinary {
 	entries := make([]listedBinary, 0, len(binPaths))
 	for _, path := range binPaths {
 		bin := bins[path]
-		expandedPath := os.ExpandEnv(bin.Path)
+		expandedPath := expandTrackedBinaryPath(bin.Path)
 		entries = append(entries, listedBinary{
 			Path:        expandedPath,
 			Version:     bin.Version,

@@ -125,7 +125,7 @@ func buildExportBins(bins map[string]*config.Binary) ([]*portableBinary, []*conf
 	normalizedBins := make([]*config.Binary, 0)
 	for _, k := range keys {
 		binCfg := bins[k]
-		ep := os.ExpandEnv(binCfg.Path)
+		ep := expandTrackedBinaryPath(binCfg.Path)
 
 		hash, err := hashFile(ep)
 		if err != nil {

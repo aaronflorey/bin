@@ -14,7 +14,7 @@
 | Command | Purpose | Notes |
 | --- | --- | --- |
 | `install` | Install a binary from a release, image, `goinstall://`, or URL | Alias: `i`. Supports `--force`, `--provider`, `--select`, `--all`, `--min-age-days`, `--pin`, `--system-package`, `--prefer-system-package`, `--package-type`, `--non-interactive`. |
-| `run` | Download a binary into the user cache and execute it | Supports passthrough args after `--`. Cached files live under `os.UserCacheDir()/bin`. |
+| `run` | Download a binary into the user cache and execute it | Supports passthrough args after `--`. Cached files live under `os.UserCacheDir()/bin`; provider versions remain cache identities even when encoded for safe filenames. |
 | `ensure` | Reinstall tracked binaries when they are missing or mismatched | Alias: `e`. |
 | `outdated` | Show tracked binaries with newer versions available | `--format=text|json` (default `text`). |
 | `update` | Update one or more tracked binaries | Alias: `u`. Supports `--yes`, `--dry-run`, `--all`, `--parallelism`, `--skip-path-check`, `--continue-on-error`. Defaults to `--continue-on-error=true`: later binaries still run after a per-binary failure, but the command exits with code `4` if any update failed. Use `--continue-on-error=false` to stop on the first per-binary failure. |
@@ -30,6 +30,7 @@
 ## Notes
 
 - `install` rejects multiple binaries plus custom paths; custom paths are only valid for a single target (`cmd/install.go`).
+- Environment variables expand in explicit install destinations only; provider-derived names remain literal portable filename components.
 - `install --all` shows all compatible current-platform candidates but still excludes unsupported artifact shapes and does not bypass payload validation.
 - `install --select <token>` chooses an exact compatible asset before product ranking. It does not bypass platform or executable validation.
 - Ambiguous products prompt interactively; ambiguous release lanes prompt for one lane. Both fail in non-interactive mode rather than selecting alphabetically.

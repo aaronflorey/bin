@@ -29,9 +29,10 @@ mise run coverage
 
 ## What the test suite covers
 
-- Command behavior in `cmd/*_test.go`
+- Command behavior, fetched-stream cleanup, and run-cache containment in `cmd/*_test.go`
 - Config path resolution and hook execution in `pkg/config/*_test.go`
-- Provider normalization and asset selection in `pkg/providers/*_test.go`
+- Provider normalization, untrusted remote-name rejection, and asset selection in `pkg/providers/*_test.go`
+- Portable executable-name and archive-member validation in `pkg/assets/*_test.go`
 - System package support in `pkg/systempackage/*_test.go`
 
 ## CI smoke coverage

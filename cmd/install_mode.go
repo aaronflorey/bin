@@ -107,7 +107,7 @@ func validateStoredBinaryForReuse(b *config.Binary) error {
 	if assets.IsKnownNonRunnableName(b.RemoteName) || assets.IsKnownNonRunnableName(b.SourceAsset) || assets.IsKnownNonRunnableName(b.PackagePath) {
 		return fmt.Errorf("stored entry %s has unsafe artifact metadata; remove the managed entry and reinstall it", b.Path)
 	}
-	ep := os.ExpandEnv(b.Path)
+	ep := expandTrackedBinaryPath(b.Path)
 	if _, err := os.Stat(ep); err != nil {
 		if os.IsNotExist(err) {
 			return nil

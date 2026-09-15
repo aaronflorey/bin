@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"unicode"
 
+	"github.com/aaronflorey/bin/pkg/assets"
 	"github.com/aaronflorey/bin/pkg/config"
 	"github.com/spf13/cobra"
 )
@@ -157,49 +157,10 @@ func safePortableBinaryName(raw string, index int) (string, error) {
 	if raw != trimmed {
 		return "", fmt.Errorf("binary at index %d has invalid name %q", index, raw)
 	}
-	name := raw
-	if name == "." || name == ".." {
-		return "", fmt.Errorf("binary at index %d has invalid name %q", index, name)
+	if err := assets.ValidatePortableName(raw); err != nil {
+		return "", fmt.Errorf("binary at index %d has invalid name %q", index, raw)
 	}
-	if filepath.IsAbs(name) || strings.Contains(name, "/") || strings.ContainsRune(name, '\\') || hasWindowsDrivePrefix(name) {
-		return "", fmt.Errorf("binary at index %d has invalid name %q", index, name)
-	}
-	if strings.HasSuffix(name, ".") || strings.HasSuffix(name, " ") || hasNonPortableWindowsFilenameChars(name) || isWindowsReservedBaseName(name) {
-		return "", fmt.Errorf("binary at index %d has invalid name %q", index, name)
-	}
-	return name, nil
-}
-
-func hasNonPortableWindowsFilenameChars(name string) bool {
-	for _, r := range name {
-		if unicode.IsControl(r) || strings.ContainsRune(`<>:"|?*`, r) {
-			return true
-		}
-	}
-	return false
-}
-
-func isWindowsReservedBaseName(name string) bool {
-	base := name
-	if dot := strings.IndexRune(base, '.'); dot >= 0 {
-		base = base[:dot]
-	}
-	base = strings.ToUpper(base)
-	if base == "CON" || base == "PRN" || base == "AUX" || base == "NUL" {
-		return true
-	}
-	if len(base) == 4 && (strings.HasPrefix(base, "COM") || strings.HasPrefix(base, "LPT")) {
-		return base[3] >= '1' && base[3] <= '9'
-	}
-	return false
-}
-
-func hasWindowsDrivePrefix(name string) bool {
-	if len(name) < 2 || name[1] != ':' {
-		return false
-	}
-	drive := name[0]
-	return (drive >= 'a' && drive <= 'z') || (drive >= 'A' && drive <= 'Z')
+	return raw, nil
 }
 
 func equalBinaryConfig(a, b *config.Binary) bool {

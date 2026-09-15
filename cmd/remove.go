@@ -186,7 +186,7 @@ func (root *removeCmd) resolveTargets(cmd *cobra.Command, bins map[string]*confi
 		}
 
 		seen[configPath] = struct{}{}
-		targets = append(targets, removeTarget{configPath: configPath, deletePath: os.ExpandEnv(bin.Path), binary: bin})
+		targets = append(targets, removeTarget{configPath: configPath, deletePath: expandTrackedBinaryPath(bin.Path), binary: bin})
 	}
 
 	return targets, nil
@@ -202,7 +202,7 @@ func makeRemoveSelectionOptions(bins map[string]*config.Binary) []prompt.MultiSe
 	options := make([]prompt.MultiSelectOption, 0, len(paths))
 	for _, p := range paths {
 		b := bins[p]
-		expanded := os.ExpandEnv(b.Path)
+		expanded := expandTrackedBinaryPath(b.Path)
 		name := filepath.Base(expanded)
 		label := fmt.Sprintf("%s (%s)", name, expanded)
 		if effectiveInstallMode(b.InstallMode) == installModeSystemPackage {
@@ -234,7 +234,7 @@ func resolveTargetsFromConfigPaths(bins map[string]*config.Binary, configPaths [
 		seen[configPath] = struct{}{}
 		targets = append(targets, removeTarget{
 			configPath: configPath,
-			deletePath: os.ExpandEnv(bin.Path),
+			deletePath: expandTrackedBinaryPath(bin.Path),
 			binary:     bin,
 		})
 	}

@@ -108,11 +108,15 @@ func installBinary(opts InstallOpts) (*InstallResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer closeFetchedFile(pResult)
 	log.Debugf("Fetched %s version %s from provider %q", pResult.Name, pResult.Version, p.GetID())
 
 	_, minAgeDays, pinned := resolveInstallState(opts)
 	if err := ensureReleaseAge(p.GetID(), pResult.Version, pResult.PublishedAt, minAgeDays); err != nil {
 		return nil, err
+	}
+	if err := assets.ValidatePortableName(pResult.Name); err != nil {
+		return nil, fmt.Errorf("invalid provider executable name %q: %w", pResult.Name, err)
 	}
 
 	logicalName := opts.LogicalName
@@ -122,8 +126,18 @@ func installBinary(opts InstallOpts) (*InstallResult, error) {
 	if logicalName == "" {
 		logicalName = pResult.Name
 	}
+	if opts.LogicalName == "" {
+		if err := assets.ValidatePortableName(logicalName); err != nil {
+			return nil, fmt.Errorf("invalid provider executable name %q: %w", logicalName, err)
+		}
+	}
 
-	resolvedPath := opts.Path
+	var resolvedPath string
+	if opts.ConfigPath != "" {
+		resolvedPath = expandTrackedBinaryPath(opts.Path)
+	} else {
+		resolvedPath = os.ExpandEnv(opts.Path)
+	}
 	overwrite := opts.Force
 	if opts.ResolvePath {
 		resolvedPath, overwrite, err = checkFinalPath(resolvedPath, logicalName, overwrite)
@@ -253,7 +267,7 @@ func resolveTrackedConfigPath(opts InstallOpts, resolvedPath string) (string, er
 		return opts.ConfigPath, nil
 	}
 
-	configPath, err := absExpandedPath(resolvedPath)
+	configPath, err := filepath.Abs(resolvedPath)
 	if err != nil {
 		return "", fmt.Errorf("error converting to absolute path: %w", err)
 	}
@@ -271,6 +285,14 @@ func persistInstalledBinary(bin *config.Binary) error {
 
 func absExpandedPath(path string) (string, error) {
 	return filepath.Abs(os.ExpandEnv(path))
+}
+
+// expandTrackedBinaryPath expands only the trusted directory portion of a
+// persisted path. The final filename is provider-derived or user-chosen and
+// must remain literal.
+func expandTrackedBinaryPath(path string) string {
+	dir, name := filepath.Split(path)
+	return os.ExpandEnv(dir) + name
 }
 
 func ensureReleaseAge(providerID, version string, publishedAt *time.Time, minAgeDays int) error {
@@ -300,7 +322,7 @@ func ensureReleaseAge(providerID, version string, publishedAt *time.Time, minAge
 // checks if the path already exists and prompts
 // the user to override
 func checkFinalPath(path, fileName string, overwrite bool) (string, bool, error) {
-	fi, err := os.Stat(os.ExpandEnv(path))
+	fi, err := os.Stat(path)
 	if err != nil && !os.IsNotExist(err) {
 		return "", overwrite, err
 	}
@@ -311,7 +333,7 @@ func checkFinalPath(path, fileName string, overwrite bool) (string, bool, error)
 		finalPath = filepath.Join(path, fileName)
 	}
 
-	if _, err := os.Stat(os.ExpandEnv(finalPath)); err == nil {
+	if _, err := os.Stat(finalPath); err == nil {
 		if overwrite {
 			return finalPath, true, nil
 		}
@@ -334,10 +356,7 @@ func checkFinalPath(path, fileName string, overwrite bool) (string, bool, error)
 // and makes it executable. It also checks if any other binary
 // has the same hash and exists if so.
 func saveToDisk(f *providers.File, path string, overwrite bool) ([]byte, error) {
-	epath := os.ExpandEnv(path)
-	if closer, ok := f.Data.(io.Closer); ok {
-		defer closer.Close()
-	}
+	epath := path
 
 	if err := os.MkdirAll(filepath.Dir(epath), 0o755); err != nil {
 		return nil, err
@@ -350,7 +369,9 @@ func saveToDisk(f *providers.File, path string, overwrite bool) ([]byte, error) 
 	tempPath := file.Name()
 
 	defer func() {
-		_ = file.Close()
+		if file != nil {
+			_ = file.Close()
+		}
 		_ = os.Remove(tempPath)
 	}()
 
@@ -369,8 +390,10 @@ func saveToDisk(f *providers.File, path string, overwrite bool) ([]byte, error) 
 		return nil, fmt.Errorf("sha256 mismatch for %s: expected %s, got %s", f.Name, f.ExpectedSHA, actualHash)
 	}
 
-	if err := file.Close(); err != nil {
-		return nil, err
+	closeErr := file.Close()
+	file = nil
+	if closeErr != nil {
+		return nil, closeErr
 	}
 
 	if err := assets.ValidateRunnablePayload(tempPath, f.Name); err != nil {
