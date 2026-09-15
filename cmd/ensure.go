@@ -44,7 +44,7 @@ func runEnsure(args []string) error {
 	}
 
 	for _, binCfg := range binsToProcess {
-		ep := os.ExpandEnv(binCfg.Path)
+		ep := expandTrackedBinaryPath(binCfg.Path)
 		installMode := effectiveInstallMode(binCfg.InstallMode)
 		strategy := lifecycleForMode(installMode)
 		if installMode == installModeSystemPackage && systempackage.NormalizeType(binCfg.PackageType) == "dmg" && binCfg.AppBundle != "" {
@@ -102,7 +102,7 @@ func runEnsure(args []string) error {
 		if err != nil {
 			return err
 		}
-		log.Infof("Done ensuring %s to %s", os.ExpandEnv(binCfg.Path), color.GreenString(res.Version))
+		log.Infof("Done ensuring %s to %s", expandTrackedBinaryPath(binCfg.Path), color.GreenString(res.Version))
 	}
 
 	return nil

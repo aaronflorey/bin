@@ -194,6 +194,34 @@ func TestGenericURLFetchReturnsFileNameVersionAndData(t *testing.T) {
 	}
 }
 
+func TestGenericURLFetchRejectsUnsafeFilenameBeforeSanitizing(t *testing.T) {
+	for _, filename := range []string{"tool_1.2.3...", "tool_1.2.3.......", `tool_1.2.3\\child`} {
+		t.Run(filename, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer server.Close()
+
+			u, err := url.Parse(server.URL + "/download")
+			if err != nil {
+				t.Fatal(err)
+			}
+			p, err := newGenericURL(u)
+			if err != nil {
+				t.Fatal(err)
+			}
+			file, err := p.Fetch(&FetchOpts{})
+			if err == nil {
+				if closer, ok := file.Data.(io.Closer); ok {
+					_ = closer.Close()
+				}
+				t.Fatalf("Fetch accepted unsafe filename %q", filename)
+			}
+		})
+	}
+}
+
 func TestExtractVersionFromFilenamePicksHighest(t *testing.T) {
 	got := extractVersionFromFilename("tool_1.2.0_to_1.3.4_darwin_amd64")
 	if got != "1.3.4" {

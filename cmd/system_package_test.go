@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -145,9 +146,10 @@ func TestInstallSystemPackageDMGTracksInstalledAppBundle(t *testing.T) {
 		installProviderFactory = originalProviderFactory
 	}()
 
+	stream := &trackingReadCloser{reader: bytes.NewReader([]byte("fake dmg"))}
 	installProviderFactory = func(string, string) (providers.Provider, error) {
 		return testFetchProvider{file: &providers.File{
-			Data:        bytes.NewReader([]byte("fake dmg")),
+			Data:        stream,
 			Name:        "Paseo-0.1.64-arm64.dmg",
 			Version:     "0.1.64",
 			PackagePath: "Paseo.app",
@@ -205,6 +207,89 @@ func TestInstallSystemPackageDMGTracksInstalledAppBundle(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(applicationsDir, "Paseo.app", "Contents", "MacOS", "Paseo")); err != nil {
 		t.Fatalf("expected installed app executable: %v", err)
+	}
+	if stream.closeCount != 1 {
+		t.Fatalf("fetched stream closed %d times, want 1", stream.closeCount)
+	}
+}
+
+func TestInstallSystemPackageClosesFetchedStreamBeforeStaging(t *testing.T) {
+	setupTestConfig(t)
+	stream := &trackingReadCloser{reader: strings.NewReader("package")}
+	previousFactory := installProviderFactory
+	installProviderFactory = func(string, string) (providers.Provider, error) {
+		return testFetchProvider{file: &providers.File{Name: "unsupported.txt", Version: "1.0.0", Data: stream}}, nil
+	}
+	t.Cleanup(func() { installProviderFactory = previousFactory })
+
+	_, err := installSystemPackage(InstallOpts{URL: "https://example.test/package"})
+	if err == nil {
+		t.Fatal("expected unsupported package failure")
+	}
+	if stream.closeCount != 1 {
+		t.Fatalf("fetched stream closed %d times, want 1", stream.closeCount)
+	}
+}
+
+func TestWritePackageArtifactToTempRemovesArtifactAfterCopyFailure(t *testing.T) {
+	before, err := filepath.Glob(filepath.Join(os.TempDir(), "bin-system-package-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	known := make(map[string]bool, len(before))
+	for _, path := range before {
+		known[path] = true
+	}
+
+	stream := &trackingReadCloser{reader: failingReader{err: os.ErrClosed}}
+	_, err = writePackageArtifactToTemp("tool.deb", stream)
+	if err == nil {
+		t.Fatal("expected copy failure")
+	}
+	if stream.closeCount != 1 {
+		t.Fatalf("source stream closed %d times, want 1", stream.closeCount)
+	}
+	after, err := filepath.Glob(filepath.Join(os.TempDir(), "bin-system-package-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range after {
+		if !known[path] {
+			t.Fatalf("temporary package artifact was not removed: %s", path)
+		}
+	}
+}
+
+func TestWritePackageArtifactToTempRemovesArtifactAfterSourceCloseFailure(t *testing.T) {
+	before, err := filepath.Glob(filepath.Join(os.TempDir(), "bin-system-package-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	known := make(map[string]bool, len(before))
+	for _, path := range before {
+		known[path] = true
+	}
+
+	closeErr := os.ErrClosed
+	stream := &trackingReadCloser{reader: strings.NewReader("package"), closeErr: closeErr}
+	path, err := writePackageArtifactToTemp("tool.deb", stream)
+	if !errors.Is(err, closeErr) {
+		t.Fatalf("writePackageArtifactToTemp() error = %v, want %v", err, closeErr)
+	}
+	if path != "" {
+		t.Fatalf("writePackageArtifactToTemp() path = %q, want empty", path)
+	}
+	if stream.closeCount != 1 {
+		t.Fatalf("source stream closed %d times, want 1", stream.closeCount)
+	}
+	after, err := filepath.Glob(filepath.Join(os.TempDir(), "bin-system-package-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tempPath := range after {
+		if !known[tempPath] {
+			t.Fatalf("temporary package artifact was not removed: %s", tempPath)
+		}
 	}
 }
 

@@ -26,6 +26,12 @@ func installSystemPackage(opts InstallOpts) (*InstallResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	fetchedStreamOpen := true
+	defer func() {
+		if fetchedStreamOpen {
+			closeFetchedFile(pResult)
+		}
+	}()
 
 	_, minAgeDays, pinned := resolveInstallState(opts)
 	if err := ensureReleaseAge(p.GetID(), pResult.Version, pResult.PublishedAt, minAgeDays); err != nil {
@@ -49,6 +55,7 @@ func installSystemPackage(opts InstallOpts) (*InstallResult, error) {
 		}
 	}
 
+	fetchedStreamOpen = false // writePackageArtifactToTemp owns the stream from this point.
 	artifactPath, err := writePackageArtifactToTemp(pResult.Name, pResult.Data)
 	if err != nil {
 		return nil, err
@@ -126,11 +133,7 @@ func resolveTrackedSystemInstall(packageType, packageName, installedAppBundle st
 	return resolvedPath, trackedName, "", nil
 }
 
-func writePackageArtifactToTemp(name string, src io.Reader) (string, error) {
-	if closer, ok := src.(io.Closer); ok {
-		defer closer.Close()
-	}
-
+func writePackageArtifactToTemp(name string, src io.Reader) (path string, err error) {
 	ext := filepath.Ext(strings.ToLower(name))
 	if strings.HasSuffix(strings.ToLower(name), ".pkg.tar.zst") {
 		ext = ".pkg.tar.zst"
@@ -139,17 +142,44 @@ func writePackageArtifactToTemp(name string, src io.Reader) (string, error) {
 		ext = ".flatpak"
 	}
 
-	f, err := os.CreateTemp("", "bin-system-package-*"+ext)
+	var source io.Closer
+	if closer, ok := src.(io.Closer); ok {
+		source = closer
+	}
+
+	var f *os.File
+	defer func() {
+		if f != nil {
+			_ = f.Close()
+		}
+		if source != nil {
+			if closeErr := source.Close(); closeErr != nil && err == nil {
+				err = closeErr
+			}
+		}
+		if err != nil && path != "" {
+			_ = os.Remove(path)
+			path = ""
+		}
+	}()
+
+	f, err = os.CreateTemp("", "bin-system-package-*"+ext)
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	path = f.Name()
 
-	if _, err := io.Copy(f, src); err != nil {
-		return "", err
+	if _, err = io.Copy(f, src); err != nil {
+		return
+	}
+	closeErr := f.Close()
+	f = nil
+	if closeErr != nil {
+		err = closeErr
+		return
 	}
 
-	return f.Name(), nil
+	return path, nil
 }
 
 func installPackageArtifact(packageType, packagePath string) error {
@@ -469,7 +499,7 @@ func uninstallSystemPackage(b *config.Binary) error {
 }
 
 func resolveInstalledPackageID(b *config.Binary, packageType string) (string, error) {
-	path := os.ExpandEnv(b.Path)
+	path := expandTrackedBinaryPath(b.Path)
 
 	switch packageType {
 	case "deb":

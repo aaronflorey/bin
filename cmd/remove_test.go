@@ -62,6 +62,25 @@ func TestRemoveResolvesManagedAliasWhenPATHMatchIsUnmanaged(t *testing.T) {
 	}
 }
 
+func TestResolveTargetsKeepsTrackedFilenameLiteral(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	t.Setenv("remote_name", "outside/tool")
+	trackedPath := "$HOME/bin/$remote_name"
+	bins := map[string]*config.Binary{
+		trackedPath: {Path: trackedPath, RemoteName: "$remote_name"},
+	}
+
+	targets := resolveTargetsFromConfigPaths(bins, []string{trackedPath})
+	if len(targets) != 1 {
+		t.Fatalf("unexpected targets: %+v", targets)
+	}
+	want := filepath.Join(homeDir, "bin", "$remote_name")
+	if targets[0].deletePath != want {
+		t.Fatalf("unexpected delete path: got %q, want %q", targets[0].deletePath, want)
+	}
+}
+
 func TestRemoveWithoutArgsRequiresInteractive(t *testing.T) {
 	defaultPath := setupTestConfig(t)
 

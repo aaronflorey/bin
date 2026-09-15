@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/aaronflorey/bin/pkg/config"
 	"github.com/aaronflorey/bin/pkg/options"
@@ -977,6 +978,72 @@ func SanitizeName(name, version string) string {
 	return strings.Trim(name, "._-")
 }
 
+// ValidatePortableName reports whether name is a single filename component
+// that is valid on every supported platform.
+func ValidatePortableName(name string) error {
+	if name == "" || name == "." || name == ".." {
+		return fmt.Errorf("invalid filename %q", name)
+	}
+	if filepath.IsAbs(name) || strings.Contains(name, "/") || strings.ContainsRune(name, '\\') || hasWindowsDrivePrefix(name) {
+		return fmt.Errorf("invalid filename %q", name)
+	}
+	if strings.HasSuffix(name, ".") || strings.HasSuffix(name, " ") || hasNonPortableWindowsFilenameChars(name) || isWindowsReservedBaseName(name) {
+		return fmt.Errorf("invalid filename %q", name)
+	}
+	return nil
+}
+
+func hasNonPortableWindowsFilenameChars(name string) bool {
+	for _, r := range name {
+		if unicode.IsControl(r) || strings.ContainsRune(`<>:"|?*`, r) {
+			return true
+		}
+	}
+	return false
+}
+
+func isWindowsReservedBaseName(name string) bool {
+	base := name
+	if dot := strings.IndexRune(base, '.'); dot >= 0 {
+		base = base[:dot]
+	}
+	base = strings.ToUpper(base)
+	if base == "CON" || base == "PRN" || base == "AUX" || base == "NUL" {
+		return true
+	}
+	return len(base) == 4 && (strings.HasPrefix(base, "COM") || strings.HasPrefix(base, "LPT")) && base[3] >= '1' && base[3] <= '9'
+}
+
+func hasWindowsDrivePrefix(name string) bool {
+	if len(name) < 2 || name[1] != ':' {
+		return false
+	}
+	drive := name[0]
+	return (drive >= 'a' && drive <= 'z') || (drive >= 'A' && drive <= 'Z')
+}
+
+func archiveMemberLeaf(name string) (string, error) {
+	if name == "" || filepath.IsAbs(name) || hasWindowsDrivePrefix(name) {
+		return "", fmt.Errorf("invalid archive member %q", name)
+	}
+
+	components := strings.FieldsFunc(name, func(r rune) bool { return r == '/' || r == '\\' })
+	if len(components) == 0 || len(components) != strings.Count(name, "/")+strings.Count(name, "\\")+1 {
+		return "", fmt.Errorf("invalid archive member %q", name)
+	}
+	for _, component := range components {
+		if component == "." || component == ".." || strings.IndexByte(component, 0) >= 0 {
+			return "", fmt.Errorf("invalid archive member %q", name)
+		}
+	}
+
+	leaf := components[len(components)-1]
+	if err := ValidatePortableName(leaf); err != nil {
+		return "", fmt.Errorf("invalid archive member %q: %w", name, err)
+	}
+	return leaf, nil
+}
+
 func appendUnique(values []string, additions ...string) []string {
 	out := make([]string, 0, len(values)+len(additions))
 	seen := map[string]struct{}{}
@@ -1267,7 +1334,6 @@ func (f *Filter) processTar(name string, r io.Reader, autoSelect string) (*final
 		} else if header.FileInfo().IsDir() {
 			continue
 		}
-
 		allEntries = append(allEntries, header.Name)
 		matchesPackagePath := f.matchesPackagePath(header.Name)
 		log.Debugf("TAR archive entry %q: PackagePath match=%t", header.Name, matchesPackagePath)
@@ -1337,7 +1403,12 @@ func (f *Filter) processTar(name string, r io.Reader, autoSelect string) (*final
 		},
 	}
 
-	return &finalFile{Source: reader, Name: filepath.Base(selectedFile), PackagePath: selectedFile}, nil
+	leaf, err := archiveMemberLeaf(selectedFile)
+	if err != nil {
+		_ = reader.Close()
+		return nil, err
+	}
+	return &finalFile{Source: reader, Name: leaf, PackagePath: selectedFile}, nil
 }
 
 func (f *Filter) processBz2(name string, r io.Reader, _ string) (*finalFile, error) {
@@ -1383,7 +1454,6 @@ func (f *Filter) processZip(name string, r io.Reader, autoSelect string) (*final
 		} else if header.Mode().IsDir() {
 			continue
 		}
-
 		allEntries = append(allEntries, header.Name)
 		matchesPackagePath := f.matchesPackagePath(header.Name)
 		log.Debugf("ZIP archive entry %q: PackagePath match=%t", header.Name, matchesPackagePath)
@@ -1451,9 +1521,12 @@ func (f *Filter) processZip(name string, r io.Reader, autoSelect string) (*final
 		},
 	}
 
-	// return base of selected file since tar
-	// files usually have folders inside
-	return &finalFile{Name: filepath.Base(selectedFile), Source: reader, PackagePath: selectedFile}, nil
+	leaf, err := archiveMemberLeaf(selectedFile)
+	if err != nil {
+		_ = reader.Close()
+		return nil, err
+	}
+	return &finalFile{Name: leaf, Source: reader, PackagePath: selectedFile}, nil
 }
 
 // isSupportedExt checks if this provider supports

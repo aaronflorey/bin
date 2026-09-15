@@ -42,6 +42,9 @@ func (g *genericURL) Fetch(_ *FetchOpts) (*File, error) {
 	}
 
 	filename := resolvedFilename(metadata.contentDisposition, metadata.finalURL, g.url.String())
+	if err := assets.ValidatePortableName(filename); err != nil {
+		return nil, fmt.Errorf("invalid provider filename %q: %w", filename, err)
+	}
 	version := extractVersionFromFilename(filename)
 	if version == "" {
 		return nil, fmt.Errorf("unable to infer version from filename %q", filename)
@@ -49,6 +52,9 @@ func (g *genericURL) Fetch(_ *FetchOpts) (*File, error) {
 	name := assets.SanitizeName(filename, version)
 	if name == "" {
 		name = filename
+	}
+	if err := assets.ValidatePortableName(name); err != nil {
+		return nil, fmt.Errorf("invalid provider filename %q: %w", name, err)
 	}
 
 	req, err := http.NewRequest(http.MethodGet, g.url.String(), nil)

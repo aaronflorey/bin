@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/aaronflorey/bin/pkg/assets"
 	"github.com/aaronflorey/bin/pkg/config"
 	"github.com/aaronflorey/bin/pkg/providers"
 )
@@ -18,6 +20,7 @@ type runTestProvider struct {
 	name       string
 	version    string
 	content    string
+	data       io.Reader
 	fetchCount int
 	lastFetch  providers.FetchOpts
 	err        error
@@ -33,8 +36,12 @@ func (p *runTestProvider) Fetch(opts *providers.FetchOpts) (*providers.File, err
 	if p.err != nil {
 		return nil, p.err
 	}
+	data := p.data
+	if data == nil {
+		data = strings.NewReader(p.content)
+	}
 	return &providers.File{
-		Data:    strings.NewReader(p.content),
+		Data:    data,
 		Name:    p.name,
 		Version: p.version,
 	}, nil
@@ -106,6 +113,42 @@ func TestRunForwardsArgsAfterDash(t *testing.T) {
 	}
 	if len(config.Get().Bins) != 0 {
 		t.Fatalf("expected config to remain unchanged, got %d entries", len(config.Get().Bins))
+	}
+}
+
+func TestRunClosesFetchedStreamAfterCaching(t *testing.T) {
+	setupTestConfig(t)
+	cacheDir := t.TempDir()
+	stream := &trackingReadCloser{reader: strings.NewReader(runnableRunScript)}
+	provider := &runTestProvider{name: "tool", version: "1.2.3", data: stream}
+	cmd := newRunCmd()
+	cmd.newProvider = func(_, _ string) (providers.Provider, error) { return provider, nil }
+	cmd.userCacheDir = func() (string, error) { return cacheDir, nil }
+	cmd.execCommand = helperExecCommand(t, 0, nil)
+
+	cmd.cmd.SetArgs([]string{"github.com/cli/cli"})
+	if err := cmd.cmd.Execute(); err != nil {
+		t.Fatalf("unexpected run command error: %v", err)
+	}
+	if stream.closeCount != 1 {
+		t.Fatalf("fetched stream closed %d times, want 1", stream.closeCount)
+	}
+}
+
+func TestRunClosesFetchedStreamAfterCachePathFailure(t *testing.T) {
+	setupTestConfig(t)
+	stream := &trackingReadCloser{reader: strings.NewReader(runnableRunScript)}
+	provider := &runTestProvider{name: "../tool", version: "1.2.3", data: stream}
+	cmd := newRunCmd()
+	cmd.newProvider = func(_, _ string) (providers.Provider, error) { return provider, nil }
+	cmd.userCacheDir = func() (string, error) { return t.TempDir(), nil }
+
+	cmd.cmd.SetArgs([]string{"github.com/cli/cli"})
+	if err := cmd.cmd.Execute(); err == nil {
+		t.Fatal("expected cache-path failure")
+	}
+	if stream.closeCount != 1 {
+		t.Fatalf("fetched stream closed %d times, want 1", stream.closeCount)
 	}
 }
 
@@ -202,6 +245,119 @@ func TestRunSkipsFetchWhenIndexedCacheExists(t *testing.T) {
 	}
 	if gotPath != cachePath {
 		t.Fatalf("unexpected executable path: got %q want %q", gotPath, cachePath)
+	}
+}
+
+func TestRunCachePathRejectsProviderNameOutsideCache(t *testing.T) {
+	cacheDir := t.TempDir()
+
+	_, err := runCachePath(func() (string, error) { return cacheDir, nil }, "../../escape", "1.0.0")
+	if err == nil {
+		t.Fatal("expected unsafe provider name to be rejected")
+	}
+}
+
+func TestRunCacheVersionComponentsDoNotCollide(t *testing.T) {
+	cacheDir := t.TempDir()
+	userCacheDir := func() (string, error) { return cacheDir, nil }
+	unsafeVersion := "a/b"
+	literalVersion := "v-YS9i"
+
+	unsafePath, err := runCachePath(userCacheDir, "tool", unsafeVersion)
+	if err != nil {
+		t.Fatalf("unsafe version cache path: %v", err)
+	}
+	literalPath, err := runCachePath(userCacheDir, "tool", literalVersion)
+	if err != nil {
+		t.Fatalf("literal version cache path: %v", err)
+	}
+	if unsafePath == literalPath {
+		t.Fatalf("versions %q and %q share cache path %q", unsafeVersion, literalVersion, unsafePath)
+	}
+
+	for _, path := range []string{unsafePath, literalPath} {
+		relativePath, err := filepath.Rel(filepath.Join(cacheDir, "bin"), path)
+		if err != nil || relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) || filepath.Dir(relativePath) != "." {
+			t.Fatalf("cache path escaped cache directory: %q", path)
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir cache dir: %v", err)
+		}
+		if err := os.WriteFile(path, []byte(runnableRunScript), 0o755); err != nil {
+			t.Fatalf("seed cache file: %v", err)
+		}
+	}
+
+	const url = "https://example.test/tool"
+	if err := recordCachedRunBinary(userCacheDir, url, unsafeVersion, unsafePath); err != nil {
+		t.Fatalf("record unsafe version: %v", err)
+	}
+	if err := recordCachedRunBinary(userCacheDir, url, literalVersion, literalPath); err != nil {
+		t.Fatalf("record literal version: %v", err)
+	}
+	for version, wantPath := range map[string]string{unsafeVersion: unsafePath, literalVersion: literalPath} {
+		gotPath, ok, err := lookupCachedRunBinary(userCacheDir, url, version)
+		if err != nil {
+			t.Fatalf("lookup version %q: %v", version, err)
+		}
+		if !ok || gotPath != wantPath {
+			t.Fatalf("unexpected cache lookup for version %q: got (%q, %t), want %q", version, gotPath, ok, wantPath)
+		}
+	}
+}
+
+func TestRunEncodesReleaseLaneVersionInCacheFilename(t *testing.T) {
+	setupTestConfig(t)
+	cacheDir := t.TempDir()
+	version := "release/1.0\\stable"
+	provider := &runTestProvider{name: "tool", version: version, content: runnableRunScript}
+	cmd := newRunCmd()
+	cmd.newProvider = func(_, _ string) (providers.Provider, error) { return provider, nil }
+	cmd.userCacheDir = func() (string, error) { return cacheDir, nil }
+	cmd.execCommand = helperExecCommand(t, 0, nil)
+
+	cmd.cmd.SetArgs([]string{"github.com/cli/cli"})
+	if err := cmd.cmd.Execute(); err != nil {
+		t.Fatalf("unexpected first run command error: %v", err)
+	}
+
+	cachePath, err := runCachePath(cmd.userCacheDir, provider.name, version)
+	if err != nil {
+		t.Fatalf("cache path: %v", err)
+	}
+	relativePath, err := filepath.Rel(filepath.Join(cacheDir, "bin"), cachePath)
+	if err != nil || relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) || filepath.Dir(relativePath) != "." {
+		t.Fatalf("cache path escaped cache directory: %q", cachePath)
+	}
+	if err := assets.ValidatePortableName(filepath.Base(cachePath)); err != nil {
+		t.Fatalf("cache filename is not portable: %v", err)
+	}
+	if _, err := os.Stat(cachePath); err != nil {
+		t.Fatalf("expected contained cache file: %v", err)
+	}
+
+	resolved, err := resolveFetchRequest("github.com/cli/cli", "", providers.FetchOpts{})
+	if err != nil {
+		t.Fatalf("resolve request: %v", err)
+	}
+	indexPath, err := runCacheIndexPath(cmd.userCacheDir)
+	if err != nil {
+		t.Fatalf("cache index path: %v", err)
+	}
+	index, err := loadRunCacheIndex(indexPath)
+	if err != nil {
+		t.Fatalf("load cache index: %v", err)
+	}
+	if got := index[runCacheKey(resolved.url, version)]; got != cachePath {
+		t.Fatalf("cache index lost version identity: got path %q", got)
+	}
+
+	cmd.cmd.SetArgs([]string{"github.com/cli/cli"})
+	if err := cmd.cmd.Execute(); err != nil {
+		t.Fatalf("unexpected cached run command error: %v", err)
+	}
+	if provider.fetchCount != 1 {
+		t.Fatalf("expected indexed cache reuse, got %d fetches", provider.fetchCount)
 	}
 }
 

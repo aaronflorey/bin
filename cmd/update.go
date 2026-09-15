@@ -3,7 +3,6 @@ package cmd
 import (
 	"errors"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 
@@ -173,7 +172,7 @@ func newUpdateCmd() *updateCmd {
 					return err
 				}
 
-				log.Infof("Done updating %s to %s", os.ExpandEnv(b.Path), color.GreenString(res.Version))
+				log.Infof("Done updating %s to %s", expandTrackedBinaryPath(b.Path), color.GreenString(res.Version))
 			}
 			for b, err := range updateFailures {
 				if alreadyReportedFailures[b] {

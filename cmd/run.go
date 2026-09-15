@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -86,10 +87,10 @@ func newRunCmd() *runCmd {
 			if err != nil {
 				return err
 			}
+			defer closeFetchedFile(file)
 
 			cachePath, err := runCachePath(root.userCacheDir, file.Name, file.Version)
 			if err != nil {
-				closeFetchedFile(file)
 				return err
 			}
 
@@ -149,38 +150,50 @@ func runCachePath(userCacheDir func() (string, error), name, version string) (st
 	if err != nil {
 		return "", err
 	}
+	if err := assets.ValidatePortableName(name); err != nil {
+		return "", fmt.Errorf("invalid fetched binary name: %w", err)
+	}
 
 	fileName := assets.SanitizeName(name, version)
 	if fileName == "" {
 		fileName = name
 	}
 	if version != "" {
-		fileName = fmt.Sprintf("%s-%s", fileName, version)
+		fileName = fmt.Sprintf("%s-%s", fileName, runCacheVersionComponent(version))
+	}
+	if err := assets.ValidatePortableName(fileName); err != nil {
+		return "", fmt.Errorf("invalid cache filename: %w", err)
 	}
 
 	return filepath.Join(cacheDir, "bin", fileName), nil
 }
 
+func runCacheVersionComponent(version string) string {
+	if assets.ValidatePortableName(version) == nil {
+		if strings.HasPrefix(version, "~") {
+			return "~" + version
+		}
+		return version
+	}
+
+	return "~" + base64.RawURLEncoding.EncodeToString([]byte(version))
+}
+
 func ensureCachedBinary(file *providers.File, cachePath string) error {
 	if info, err := os.Stat(cachePath); err == nil {
 		if info.IsDir() {
-			closeFetchedFile(file)
 			return fmt.Errorf("cache path %s is a directory", cachePath)
 		}
 		if err := assets.ValidateRunnablePayload(cachePath, file.Name); err != nil {
-			closeFetchedFile(file)
 			return fmt.Errorf("cached binary %s is unsafe; remove it and retry: %w", cachePath, err)
 		}
-		closeFetchedFile(file)
 		log.Infof("Reusing cached binary %s", cachePath)
 		return nil
 	} else if !errors.Is(err, os.ErrNotExist) {
-		closeFetchedFile(file)
 		return err
 	}
 
 	if err := os.MkdirAll(filepath.Dir(cachePath), 0o755); err != nil {
-		closeFetchedFile(file)
 		return err
 	}
 

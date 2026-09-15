@@ -283,7 +283,7 @@ func getBinPath(name string) (string, error) {
 	}
 
 	for _, bin := range cfg.Bins {
-		if os.ExpandEnv(bin.Path) == f {
+		if expandTrackedBinaryPath(bin.Path) == f {
 			return bin.Path, nil
 		}
 	}

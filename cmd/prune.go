@@ -31,7 +31,7 @@ func newPruneCmd() *pruneCmd {
 
 			pathsToDel := []string{}
 			for _, b := range cfg.Bins {
-				ep := os.ExpandEnv(b.Path)
+				ep := expandTrackedBinaryPath(b.Path)
 				if _, err := os.Stat(ep); os.IsNotExist(err) {
 					log.Infof("%s not found removing", ep)
 					pathsToDel = append(pathsToDel, b.Path)
