@@ -29,7 +29,7 @@ func installSystemPackage(opts InstallOpts) (*InstallResult, error) {
 	fetchedStreamOpen := true
 	defer func() {
 		if fetchedStreamOpen {
-			closeFetchedFile(pResult)
+			_ = closeFetchedFile(pResult)
 		}
 	}()
 

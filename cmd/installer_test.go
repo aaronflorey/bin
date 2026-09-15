@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -42,6 +43,22 @@ func (r *trackingReadCloser) Close() error {
 type failingReader struct{ err error }
 
 func (r failingReader) Read([]byte) (int, error) { return 0, r.err }
+
+type gatedReader struct {
+	reader  io.Reader
+	ready   chan<- struct{}
+	release <-chan struct{}
+	started bool
+}
+
+func (r *gatedReader) Read(p []byte) (int, error) {
+	if !r.started {
+		r.started = true
+		r.ready <- struct{}{}
+		<-r.release
+	}
+	return r.reader.Read(p)
+}
 
 func (p fetchBinaryTestProvider) Fetch(opts *providers.FetchOpts) (*providers.File, error) {
 	if p.fetches != nil {
@@ -160,6 +177,7 @@ func TestSaveToDiskValidatesExpectedSHA(t *testing.T) {
 			t.Fatalf("unexpected installed mode: got %o, want 755", info.Mode().Perm())
 		}
 	}
+	assertNoStagedBinary(t, target)
 
 	_, err = saveToDisk(&providers.File{
 		Data:        strings.NewReader("world"),
@@ -197,6 +215,174 @@ func TestSaveToDiskChecksumMismatchPreservesExistingFile(t *testing.T) {
 	if string(raw) != "existing" {
 		t.Fatalf("expected original file to remain untouched, got %q", string(raw))
 	}
+	assertNoStagedBinary(t, target)
+}
+
+func TestSaveToDiskOverwritePublishesRunnableBytesAndCleansStage(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "tool")
+	if err := os.WriteFile(target, []byte("old executable"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	payload := "#!/bin/sh\necho updated\n"
+
+	hash, err := saveToDisk(&providers.File{Data: strings.NewReader(payload), Name: "tool"}, target, true)
+	if err != nil {
+		t.Fatalf("saveToDisk() error = %v", err)
+	}
+	if want := sha256.Sum256([]byte(payload)); !bytes.Equal(hash, want[:]) {
+		t.Fatalf("installed hash = %x, want %x", hash, want)
+	}
+	contents, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(contents) != payload {
+		t.Fatalf("installed bytes = %q, want %q", contents, payload)
+	}
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != 0o755 {
+			t.Fatalf("installed mode = %o, want 755", info.Mode().Perm())
+		}
+	}
+	assertNoStagedBinary(t, target)
+}
+
+func TestSaveToDiskConcurrentNonForcePublishesOneCandidate(t *testing.T) {
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" && runtime.GOOS != "windows" {
+		t.Skip("non-overwriting publication is platform-specific")
+	}
+	dir := t.TempDir()
+	target := filepath.Join(dir, "tool")
+	payloads := []string{"#!/bin/sh\necho first\n", "#!/bin/sh\necho second\n"}
+	start := make(chan struct{})
+	staged := make(chan struct{}, len(payloads))
+	release := make(chan struct{})
+	errs := make(chan error, len(payloads))
+	var wg sync.WaitGroup
+	for _, payload := range payloads {
+		wg.Add(1)
+		go func(payload string) {
+			defer wg.Done()
+			<-start
+			_, err := saveToDisk(&providers.File{Data: &gatedReader{reader: strings.NewReader(payload), ready: staged, release: release}, Name: "tool"}, target, false)
+			errs <- err
+		}(payload)
+	}
+	close(start)
+	for range payloads {
+		<-staged
+	}
+	close(release)
+	wg.Wait()
+	close(errs)
+
+	successes := 0
+	for err := range errs {
+		if err == nil {
+			successes++
+		}
+	}
+	if successes != 1 {
+		t.Fatalf("successful publications = %d, want 1", successes)
+	}
+	contents, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(contents) != payloads[0] && string(contents) != payloads[1] {
+		t.Fatalf("destination contains unexpected bytes %q", contents)
+	}
+	assertNoStagedBinary(t, target)
+}
+
+func TestSaveToDiskCloseFailurePreservesExistingFileAndCleansStage(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "tool")
+	if err := os.WriteFile(target, []byte("existing"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stream := &trackingReadCloser{reader: strings.NewReader(runnableRunScript), closeErr: errors.New("close failed")}
+
+	_, err := saveToDiskAndCloseInput(&providers.File{Data: stream, Name: "tool"}, target, true)
+	if err == nil || !strings.Contains(err.Error(), "close failed") {
+		t.Fatalf("saveToDisk() error = %v, want close failure", err)
+	}
+	if stream.closeCount != 1 {
+		t.Fatalf("fetched stream closed %d times, want 1", stream.closeCount)
+	}
+	contents, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(contents) != "existing" {
+		t.Fatalf("destination was replaced with %q", contents)
+	}
+	assertNoStagedBinary(t, target)
+}
+
+func TestSaveToDiskPublicationFailurePreservesDestinationAndCleansStage(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "tool")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := saveToDisk(&providers.File{Data: strings.NewReader(runnableRunScript), Name: "tool"}, target, true)
+	if err == nil {
+		t.Fatal("expected publication failure")
+	}
+	info, statErr := os.Stat(target)
+	if statErr != nil {
+		t.Fatal(statErr)
+	}
+	if !info.IsDir() {
+		t.Fatal("publication replaced the existing destination")
+	}
+	assertNoStagedBinary(t, target)
+}
+
+func TestSaveToDiskRejectsSymlinkDestination(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires privileges on Windows")
+	}
+	dir := t.TempDir()
+	target := filepath.Join(dir, "tool")
+	linkedTarget := filepath.Join(dir, "linked-tool")
+	if err := os.WriteFile(linkedTarget, []byte("existing"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(linkedTarget, target); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := saveToDisk(&providers.File{Data: strings.NewReader(runnableRunScript), Name: "tool"}, target, true)
+	if err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("saveToDisk() error = %v, want symlink rejection", err)
+	}
+	contents, err := os.ReadFile(linkedTarget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(contents) != "existing" {
+		t.Fatalf("symlink target was changed to %q", contents)
+	}
+	assertNoStagedBinary(t, target)
+}
+
+func assertNoStagedBinary(t *testing.T, destination string) {
+	t.Helper()
+	staged, err := filepath.Glob(destination + ".tmp-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(staged) != 0 {
+		t.Fatalf("staged binaries were not cleaned up: %v", staged)
+	}
 }
 
 func TestInstallIntegrityFailurePreservesPriorBinaryAndMetadata(t *testing.T) {
@@ -233,6 +419,43 @@ func TestInstallIntegrityFailurePreservesPriorBinaryAndMetadata(t *testing.T) {
 	if stored.Version != prior.Version || stored.Hash != prior.Hash || stored.InstalledIntegrity == nil || stored.InstalledIntegrity.Result != "verified" {
 		t.Fatalf("prior integrity metadata changed after failure: %#v", stored)
 	}
+}
+
+func TestInstallPublicationFailurePreservesPriorMetadata(t *testing.T) {
+	installDir := setupTestConfig(t)
+	target := filepath.Join(installDir, "tool")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	prior := &config.Binary{Path: target, RemoteName: "tool", Version: "1.0.0", Hash: "prior-hash", URL: "https://example.test/tool", Provider: "test",
+		InstalledIntegrity: &config.IntegrityRecord{Algorithm: "sha256", Observed: "prior-hash", Scope: "installed", Result: "verified"}}
+	if err := config.UpsertBinary(prior); err != nil {
+		t.Fatal(err)
+	}
+
+	previousFactory := installProviderFactory
+	installProviderFactory = func(string, string) (providers.Provider, error) {
+		return fetchBinaryTestProvider{id: "test", fetchFn: func(*providers.FetchOpts) (*providers.File, error) {
+			return &providers.File{Name: "tool", Version: "2.0.0", Data: strings.NewReader(runnableRunScript)}, nil
+		}}, nil
+	}
+	t.Cleanup(func() { installProviderFactory = previousFactory })
+
+	if _, err := installBinary(InstallOpts{URL: prior.URL, Provider: prior.Provider, Path: target, ConfigPath: target, LogicalName: "tool", Force: true}); err == nil {
+		t.Fatal("expected publication failure")
+	}
+	stored := config.Get().Bins[target]
+	if stored == nil || stored.Version != prior.Version || stored.Hash != prior.Hash || stored.InstalledIntegrity == nil || stored.InstalledIntegrity.Result != "verified" {
+		t.Fatalf("prior metadata changed after publication failure: %#v", stored)
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.IsDir() {
+		t.Fatal("publication replaced the existing destination")
+	}
+	assertNoStagedBinary(t, target)
 }
 
 func TestInstallBinaryPersistsScopedIntegrityRecords(t *testing.T) {
