@@ -164,6 +164,9 @@ func TestProcessURLRejectsArchiveChecksumMismatch(t *testing.T) {
 	if !strings.Contains(err.Error(), "sha256 mismatch") {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	if !errors.Is(err, ErrChecksumMismatch) {
+		t.Fatalf("error does not identify checksum mismatch: %v", err)
+	}
 }
 
 func TestProcessURLPreservesNameForTarGzArchives(t *testing.T) {
