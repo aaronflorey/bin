@@ -99,7 +99,7 @@ func runEnsure(args []string) error {
 			LogicalName:           binCfg.RemoteName,
 		}
 		res, err := strategy.install(opts)
-		if err != nil && installMode == installModeBinary && fetchOpts.PackagePath != "" && isPackagePathSelectionError(err) {
+		if err != nil && installMode == installModeBinary && fetchOpts.SelectionIntent == nil && fetchOpts.PackagePath != "" && isPackagePathSelectionError(err) {
 			log.Warnf("%s package path %q did not match the latest archive; retrying without package path", ep, fetchOpts.PackagePath)
 			opts.FetchOpts.PackagePath = ""
 			res, err = strategy.install(opts)

@@ -83,13 +83,14 @@ func (g *gitHub) Fetch(opts *FetchOpts) (*File, error) {
 		checksumAssets = append(checksumAssets, checksumAsset{Name: name, URL: url})
 	}
 	f := assets.NewFilter(&assets.FilterOpts{
-		SkipScoring:    opts.All,
-		PackagePath:    opts.PackagePath,
-		SkipPathCheck:  opts.SkipPatchCheck,
-		PackageName:    opts.PackageName,
-		SystemPackage:  opts.SystemPackage,
-		PackageType:    opts.PackageType,
-		NonInteractive: opts.NonInteractive,
+		SkipScoring:     opts.All,
+		PackagePath:     opts.PackagePath,
+		SkipPathCheck:   opts.SkipPatchCheck,
+		PackageName:     opts.PackageName,
+		SystemPackage:   opts.SystemPackage,
+		PackageType:     opts.PackageType,
+		NonInteractive:  opts.NonInteractive,
+		SelectionIntent: opts.SelectionIntent,
 	})
 
 	autoSelect := f.ParseAutoSelection(opts.AutoSelect)
@@ -151,6 +152,7 @@ func (g *gitHub) Fetch(opts *FetchOpts) (*File, error) {
 		DownloadIntegrity:   downloadIntegrity,
 		InstalledIntegrity:  installedIntegrity,
 		ProcessingUnchanged: outFile.UnchangedBytes,
+		SelectionIntent:     f.SelectionIntent(),
 	}
 
 	return file, nil

@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/aaronflorey/bin/pkg/assets"
 	"github.com/aaronflorey/bin/pkg/config"
 	"github.com/aaronflorey/bin/pkg/providers"
 	"github.com/spf13/cobra"
@@ -98,22 +99,23 @@ func buildExportPayload(format string, exportedBins []*portableBinary) ([]byte, 
 
 // portableBinary is the shared serialization format for export and import.
 type portableBinary struct {
-	Name               string                  `json:"name"`
-	RemoteName         string                  `json:"remote_name"`
-	Version            string                  `json:"version"`
-	Hash               string                  `json:"hash"`
-	URL                string                  `json:"url"`
-	Provider           string                  `json:"provider"`
-	InstallMode        string                  `json:"install_mode,omitempty"`
-	PackageType        string                  `json:"package_type,omitempty"`
-	AppBundle          string                  `json:"app_bundle,omitempty"`
-	PackagePath        string                  `json:"package_path"`
-	SourceAsset        string                  `json:"source_asset,omitempty"`
-	ReleaseTagPrefix   string                  `json:"release_tag_prefix,omitempty"`
-	DownloadIntegrity  *config.IntegrityRecord `json:"download_integrity,omitempty"`
-	InstalledIntegrity *config.IntegrityRecord `json:"installed_integrity,omitempty"`
-	Pinned             bool                    `json:"pinned"`
-	MinAgeDays         int                     `json:"min_age_days,omitempty"`
+	Name               string                      `json:"name"`
+	RemoteName         string                      `json:"remote_name"`
+	Version            string                      `json:"version"`
+	Hash               string                      `json:"hash"`
+	URL                string                      `json:"url"`
+	Provider           string                      `json:"provider"`
+	InstallMode        string                      `json:"install_mode,omitempty"`
+	PackageType        string                      `json:"package_type,omitempty"`
+	AppBundle          string                      `json:"app_bundle,omitempty"`
+	PackagePath        string                      `json:"package_path"`
+	SourceAsset        string                      `json:"source_asset,omitempty"`
+	SelectionIntent    *config.SelectionDescriptor `json:"selection_intent,omitempty"`
+	ReleaseTagPrefix   string                      `json:"release_tag_prefix,omitempty"`
+	DownloadIntegrity  *config.IntegrityRecord     `json:"download_integrity,omitempty"`
+	InstalledIntegrity *config.IntegrityRecord     `json:"installed_integrity,omitempty"`
+	Pinned             bool                        `json:"pinned"`
+	MinAgeDays         int                         `json:"min_age_days,omitempty"`
 }
 
 func buildExportBins(bins map[string]*config.Binary) ([]*portableBinary, []*config.Binary, error) {
@@ -155,6 +157,10 @@ func buildExportBins(bins map[string]*config.Binary) ([]*portableBinary, []*conf
 			normalizedBins = append(normalizedBins, updatedBin)
 		}
 
+		selectionIntent := updatedBin.SelectionIntent
+		if selectionIntent == nil {
+			selectionIntent = assets.DeriveSelectionDescriptor(updatedBin)
+		}
 		exportedBins = append(exportedBins, &portableBinary{
 			Name:               filepath.Base(ep),
 			RemoteName:         binCfg.RemoteName,
@@ -167,6 +173,7 @@ func buildExportBins(bins map[string]*config.Binary) ([]*portableBinary, []*conf
 			AppBundle:          updatedBin.AppBundle,
 			PackagePath:        updatedBin.PackagePath,
 			SourceAsset:        updatedBin.SourceAsset,
+			SelectionIntent:    config.CloneSelectionDescriptor(selectionIntent),
 			ReleaseTagPrefix:   updatedBin.ReleaseTagPrefix,
 			DownloadIntegrity:  updatedBin.DownloadIntegrity,
 			InstalledIntegrity: updatedBin.InstalledIntegrity,

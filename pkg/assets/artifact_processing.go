@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/aaronflorey/bin/pkg/config"
 	"github.com/krolaw/zipstream"
 	"github.com/xi2/xz"
 )
@@ -391,6 +392,12 @@ func (f *Filter) processReleaseArtifact(downloadPath, downloadSHA string) (*arti
 		}
 		return nil, err
 	}
+	if f.selectionIntent == nil {
+		f.selectionIntent = &config.SelectionDescriptor{}
+	}
+	// Versioned top-level wrappers are packaging details, not part of the
+	// portable member intent. Keep all other directories identity-bearing.
+	f.selectionIntent.ArchiveMember = normalizeArchiveMemberVersionWrapper(selectedEntry.identity)
 	file, err := os.Open(selectedEntry.stagedPath)
 	if err != nil {
 		_ = result.Close()
@@ -437,12 +444,24 @@ func (f *Filter) resolveReleaseArchiveMember(inventory *artifactInventory) (*art
 			logicalName = f.opts.PackageName
 		}
 	}
-	entry, err := resolveArchiveMember(inventory, archiveMemberResolutionRequest{
+	request := archiveMemberResolutionRequest{
 		packagePath:       packagePath,
 		logicalName:       logicalName,
 		explicit:          f.containedFile,
 		explicitSelection: f.containedFileSelected,
-	})
+	}
+	persistedMember := ""
+	if f.opts != nil && f.opts.SelectionIntent != nil {
+		persistedMember = f.opts.SelectionIntent.ArchiveMember
+	}
+	if persistedMember != "" {
+		entry, err := resolvePersistedArchiveMember(inventory, persistedMember)
+		if err != nil {
+			return nil, persistedSelectionError(PersistedSelectionMember, persistedMember)
+		}
+		return entry, nil
+	}
+	entry, err := resolveArchiveMember(inventory, request)
 	if !errors.Is(err, ErrAmbiguousArchiveMember) {
 		return entry, err
 	}
@@ -452,6 +471,23 @@ func (f *Filter) resolveReleaseArchiveMember(inventory *artifactInventory) (*art
 		return nil, err
 	}
 	return f.promptForArchiveMember(inventory, resolutionErr)
+}
+
+// resolvePersistedArchiveMember preserves an archive-member assertion while
+// ignoring only the established versioned top-level wrapper convention.
+func resolvePersistedArchiveMember(inventory *artifactInventory, member string) (*artifactInventoryEntry, error) {
+	identity, err := normalizeArtifactMemberIdentity(member)
+	if err != nil {
+		return nil, err
+	}
+	candidates := eligibleArchiveMembers(inventory)
+	if entry := resolveArchiveMemberIdentity(candidates, identity, false); entry != nil {
+		return entry, nil
+	}
+	if entry := resolveArchiveMemberIdentity(candidates, identity, true); entry != nil {
+		return entry, nil
+	}
+	return nil, archiveMemberResolutionError(ArchiveMemberNoEligible, member)
 }
 
 func (f *Filter) promptForArchiveMember(inventory *artifactInventory, resolutionErr *ArchiveMemberResolutionError) (*artifactInventoryEntry, error) {

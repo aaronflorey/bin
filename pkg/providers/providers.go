@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/aaronflorey/bin/pkg/config"
 )
 
 var ErrInvalidProvider = errors.New("invalid provider")
@@ -35,6 +37,9 @@ type File struct {
 	DownloadIntegrity   *IntegrityRecord
 	InstalledIntegrity  *IntegrityRecord
 	ProcessingUnchanged bool
+	// SelectionIntent is the portable selection resolved for this fetch. Source
+	// provenance remains in SourceAsset and PackagePath.
+	SelectionIntent *config.SelectionDescriptor
 }
 
 // IntegrityRecord describes evidence for one byte scope. It is intentionally
@@ -75,6 +80,7 @@ type FetchOpts struct {
 	Version          string
 	ReleaseTagPrefix string
 	NonInteractive   bool
+	SelectionIntent  *config.SelectionDescriptor
 }
 
 type CleanupOpts struct {

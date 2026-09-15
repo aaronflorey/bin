@@ -75,6 +75,7 @@ func newImportCmd() *importCmd {
 					AppBundle:          b.AppBundle,
 					PackagePath:        b.PackagePath,
 					SourceAsset:        b.SourceAsset,
+					SelectionIntent:    config.CloneSelectionDescriptor(b.SelectionIntent),
 					ReleaseTagPrefix:   b.ReleaseTagPrefix,
 					DownloadIntegrity:  config.CloneIntegrityRecord(b.DownloadIntegrity),
 					InstalledIntegrity: importedInstalledIntegrity(b.InstalledIntegrity),
@@ -193,11 +194,25 @@ func equalBinaryConfig(a, b *config.Binary) bool {
 		a.AppBundle == b.AppBundle &&
 		a.PackagePath == b.PackagePath &&
 		a.SourceAsset == b.SourceAsset &&
+		equalSelectionDescriptor(a.SelectionIntent, b.SelectionIntent) &&
 		a.ReleaseTagPrefix == b.ReleaseTagPrefix &&
 		equalIntegrityRecord(a.DownloadIntegrity, b.DownloadIntegrity) &&
 		equalIntegrityRecord(a.InstalledIntegrity, b.InstalledIntegrity) &&
 		a.Pinned == b.Pinned &&
 		a.MinAgeDays == b.MinAgeDays
+}
+
+func equalSelectionDescriptor(a, b *config.SelectionDescriptor) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	if a.LogicalProduct != b.LogicalProduct || a.ArchiveMember != b.ArchiveMember {
+		return false
+	}
+	if a.Target == nil || b.Target == nil {
+		return a.Target == b.Target
+	}
+	return *a.Target == *b.Target
 }
 
 func equalIntegrityRecord(a, b *config.IntegrityRecord) bool {

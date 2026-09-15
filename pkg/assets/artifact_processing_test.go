@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/aaronflorey/bin/pkg/config"
 )
 
 func TestArtifactFormatsRecognizeOnlySupportedDecoders(t *testing.T) {
@@ -558,6 +560,21 @@ func TestProcessReleaseArtifactResolvesArchiveMembersSafely(t *testing.T) {
 		defer result.Close()
 		if result.final.PackagePath != "release/bin/tool" {
 			t.Fatalf("PackagePath = %q", result.final.PackagePath)
+		}
+	})
+
+	t.Run("persisted version wrapper resolves and stores portable member", func(t *testing.T) {
+		filter := NewFilter(&FilterOpts{NonInteractive: true, SelectionIntent: &config.SelectionDescriptor{ArchiveMember: "tool-v1/bin/tool"}})
+		result, err := process(t, []archiveTestFile{{name: "tool-v2/bin/tool", body: "#!/bin/sh\nexit 0\n"}}, filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer result.Close()
+		if result.final.PackagePath != "tool-v2/bin/tool" {
+			t.Fatalf("PackagePath = %q", result.final.PackagePath)
+		}
+		if got := filter.SelectionIntent(); got == nil || got.ArchiveMember != "bin/tool" {
+			t.Fatalf("selection intent = %#v, want portable member bin/tool", got)
 		}
 	})
 

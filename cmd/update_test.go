@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -543,6 +544,50 @@ func TestUpdateYesFlagNoArgsSkipsInteractiveSelector(t *testing.T) {
 
 	if selectorCalled {
 		t.Fatal("did not expect interactive selector to be called with --yes")
+	}
+}
+
+func TestUpdateAppliesPersistedSelectionIntent(t *testing.T) {
+	installDir := setupTestConfig(t)
+	path := filepath.Join(installDir, "tool")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	intent := &config.SelectionDescriptor{LogicalProduct: "tool-cli", Target: &config.SelectionTarget{OS: "linux", Architecture: "amd64", ABI: "musl"}, ArchiveMember: "bin/tool"}
+	if err := config.UpsertBinary(&config.Binary{Path: path, RemoteName: "alias", Version: "1.0.0", URL: "github.com/acme/managed-intent-tool", Provider: "github", PackagePath: "tool-v1/bin/tool", ReleaseTagPrefix: "nightly-", Pinned: true, SelectionIntent: intent}); err != nil {
+		t.Fatal(err)
+	}
+
+	previousFactory := installProviderFactory
+	t.Cleanup(func() { installProviderFactory = previousFactory })
+	installProviderFactory = func(string, string) (providers.Provider, error) {
+		return fetchBinaryTestProvider{id: "github", fetchFn: func(opts *providers.FetchOpts) (*providers.File, error) {
+			if opts.SelectionIntent == nil || opts.SelectionIntent.LogicalProduct != "tool-cli" || opts.SelectionIntent.ArchiveMember != "bin/tool" {
+				t.Fatalf("update fetch selection intent = %#v", opts.SelectionIntent)
+			}
+			return &providers.File{
+				Data:             strings.NewReader("#!/bin/sh\nexit 0\n"),
+				Name:             "tool",
+				Version:          "v2.0.0",
+				SourceAsset:      "tool-cli-v2.0.0-linux-amd64-musl.tar.gz",
+				PackagePath:      "tool-v2/bin/tool",
+				ReleaseTagPrefix: "nightly-",
+				SelectionIntent:  opts.SelectionIntent,
+			}, nil
+		}}, nil
+	}
+
+	cmd := newUpdateCmd()
+	cmd.cmd.SetArgs([]string{"--yes", "github.com/acme/managed-intent-tool/releases/tag/v2.0.0"})
+	if err := cmd.cmd.Execute(); err != nil {
+		t.Fatalf("update error = %v", err)
+	}
+	updated := config.Get().Bins[path]
+	if updated.Version != "v2.0.0" || updated.RemoteName != "alias" || !updated.Pinned || updated.ReleaseTagPrefix != "nightly-" || updated.SourceAsset != "tool-cli-v2.0.0-linux-amd64-musl.tar.gz" || updated.PackagePath != "tool-v2/bin/tool" {
+		t.Fatalf("update did not preserve managed provenance and state: %#v", updated)
+	}
+	if !equalSelectionDescriptor(updated.SelectionIntent, intent) {
+		t.Fatalf("update did not persist managed selection intent: %#v", updated.SelectionIntent)
 	}
 }
 

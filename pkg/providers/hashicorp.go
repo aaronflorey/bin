@@ -111,13 +111,14 @@ func (g *hashiCorp) Fetch(opts *FetchOpts) (*File, error) {
 	}
 
 	f := assets.NewFilter(&assets.FilterOpts{
-		SkipScoring:    opts.All,
-		PackagePath:    opts.PackagePath,
-		SkipPathCheck:  opts.SkipPatchCheck,
-		PackageName:    opts.PackageName,
-		SystemPackage:  opts.SystemPackage,
-		PackageType:    opts.PackageType,
-		NonInteractive: opts.NonInteractive,
+		SkipScoring:     opts.All,
+		PackagePath:     opts.PackagePath,
+		SkipPathCheck:   opts.SkipPatchCheck,
+		PackageName:     opts.PackageName,
+		SystemPackage:   opts.SystemPackage,
+		PackageType:     opts.PackageType,
+		NonInteractive:  opts.NonInteractive,
+		SelectionIntent: opts.SelectionIntent,
 	})
 	autoSelect := f.ParseAutoSelection(opts.AutoSelect)
 	log.Debugf("Filtering %d HashiCorp assets for %s (autoSelect=%q)", len(candidates), g.repo, autoSelect)
@@ -169,6 +170,7 @@ func (g *hashiCorp) Fetch(opts *FetchOpts) (*File, error) {
 		DownloadIntegrity:   downloadIntegrity,
 		InstalledIntegrity:  installedIntegrity,
 		ProcessingUnchanged: outFile.UnchangedBytes,
+		SelectionIntent:     f.SelectionIntent(),
 	}
 
 	return file, nil

@@ -61,6 +61,7 @@ var lifecycleRegistry = map[string]lifecycleStrategy{
 			// source asset hint.
 			fetchOpts.PackageName = b.RemoteName
 			fetchOpts.ReleaseTagPrefix = providers.EffectiveReleaseTagPrefix(b.Version, b.ReleaseTagPrefix)
+			fetchOpts.SelectionIntent = storedSelectionIntent(b)
 			return nil
 		},
 		applyRequestFetch: func(requestedName string, fetchOpts *providers.FetchOpts) error {
@@ -84,6 +85,7 @@ var lifecycleRegistry = map[string]lifecycleStrategy{
 			fetchOpts.PackagePath = b.PackagePath
 			fetchOpts.PackageName = b.RemoteName
 			fetchOpts.ReleaseTagPrefix = providers.EffectiveReleaseTagPrefix(b.Version, b.ReleaseTagPrefix)
+			fetchOpts.SelectionIntent = storedSelectionIntent(b)
 			fetchOpts.SystemPackage = true
 			fetchOpts.PackageType = packageType
 			return nil
@@ -98,6 +100,20 @@ var lifecycleRegistry = map[string]lifecycleStrategy{
 			return false
 		},
 	},
+}
+
+// storedSelectionIntent preserves a recorded deliberate selection. Older
+// records only gain an intent when their persisted artifact facts can be
+// conservatively parsed; otherwise their legacy package-name/path behavior is
+// retained.
+func storedSelectionIntent(binary *config.Binary) *config.SelectionDescriptor {
+	if binary == nil {
+		return nil
+	}
+	if binary.SelectionIntent != nil {
+		return config.CloneSelectionDescriptor(binary.SelectionIntent)
+	}
+	return assets.DeriveSelectionDescriptor(binary)
 }
 
 func validateStoredBinaryForReuse(b *config.Binary) error {

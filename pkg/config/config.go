@@ -141,6 +141,10 @@ type Binary struct {
 	PackagePath string `json:"package_path"`
 	// SourceAsset stores the raw outer release asset selected for this binary.
 	SourceAsset string `json:"source_asset,omitempty"`
+	// SelectionIntent records the portable, version-independent choices used to
+	// select a release product. SourceAsset remains provenance for the bytes
+	// that were installed.
+	SelectionIntent *SelectionDescriptor `json:"selection_intent,omitempty"`
 	// ReleaseTagPrefix keeps the exact tag lane prefix for multi-track repos.
 	ReleaseTagPrefix string `json:"release_tag_prefix,omitempty"`
 	// DownloadIntegrity describes verification of the raw release artifact;
@@ -151,6 +155,23 @@ type Binary struct {
 	InstalledIntegrity *IntegrityRecord `json:"installed_integrity,omitempty"`
 	Pinned             bool             `json:"pinned"`
 	MinAgeDays         int              `json:"min_age_days,omitempty"`
+}
+
+// SelectionDescriptor identifies a deliberate logical product and compatible
+// build without relying on a versioned release filename.
+type SelectionDescriptor struct {
+	LogicalProduct string           `json:"logical_product,omitempty"`
+	Target         *SelectionTarget `json:"target,omitempty"`
+	ArchiveMember  string           `json:"archive_member,omitempty"`
+}
+
+// SelectionTarget records the target constraints for a selected release
+// product. Empty fields leave that constraint unspecified.
+type SelectionTarget struct {
+	OS           string `json:"os,omitempty"`
+	Architecture string `json:"architecture,omitempty"`
+	ABI          string `json:"abi,omitempty"`
+	CPUVariant   string `json:"cpu_variant,omitempty"`
 }
 
 // UnresolvedBinaryTransaction records a direct-binary commit whose executable
@@ -191,15 +212,31 @@ type IntegrityRecord struct {
 }
 
 // CloneBinary returns an independent copy of binary, including optional
-// integrity records.
+// integrity records and selection intent.
 func CloneBinary(binary *Binary) *Binary {
 	if binary == nil {
 		return nil
 	}
 
 	clone := *binary
+	clone.SelectionIntent = CloneSelectionDescriptor(binary.SelectionIntent)
 	clone.DownloadIntegrity = CloneIntegrityRecord(binary.DownloadIntegrity)
 	clone.InstalledIntegrity = CloneIntegrityRecord(binary.InstalledIntegrity)
+	return &clone
+}
+
+// CloneSelectionDescriptor returns an independent copy of a selection
+// descriptor.
+func CloneSelectionDescriptor(descriptor *SelectionDescriptor) *SelectionDescriptor {
+	if descriptor == nil {
+		return nil
+	}
+
+	clone := *descriptor
+	if descriptor.Target != nil {
+		target := *descriptor.Target
+		clone.Target = &target
+	}
 	return &clone
 }
 
