@@ -21,12 +21,13 @@ func TestExportWritesInstalledBinsToStdout(t *testing.T) {
 	}
 
 	if err := config.UpsertBinary(&config.Binary{
-		Path:       installedPath,
-		RemoteName: "generic-tool",
-		Version:    "1.2.3",
-		Hash:       "stale-hash",
-		URL:        "https://example.com/tools/generic-tool/releases/tag/v1.2.3",
-		Provider:   "github",
+		Path:        installedPath,
+		RemoteName:  "generic-tool",
+		Version:     "1.2.3",
+		Hash:        "stale-hash",
+		URL:         "https://example.com/tools/generic-tool/releases/tag/v1.2.3",
+		Provider:    "github",
+		PackagePath: "legacy/tool",
 	}); err != nil {
 		t.Fatalf("failed to upsert installed binary: %v", err)
 	}
@@ -69,6 +70,9 @@ func TestExportWritesInstalledBinsToStdout(t *testing.T) {
 	got := exported[0]
 	if _, ok := got["path"]; ok {
 		t.Fatalf("did not expect exported payload to include path")
+	}
+	if _, ok := got["selection_intent"]; ok {
+		t.Fatalf("did not expect export without selection intent to include it")
 	}
 	if got["name"] != "generic-tool" {
 		t.Fatalf("unexpected exported name: got %#v, want %q", got["name"], "generic-tool")
@@ -781,6 +785,122 @@ func TestExportImportRoundTripsInstallMetadata(t *testing.T) {
 	}
 	if binCfg.ReleaseTagPrefix != "pi-v" {
 		t.Fatalf("unexpected imported release tag prefix: %s", binCfg.ReleaseTagPrefix)
+	}
+}
+
+func TestExportImportDerivesAndRoundTripsSelectionIntent(t *testing.T) {
+	setupTestConfig(t)
+
+	installedPath := filepath.Join(t.TempDir(), "tool")
+	if err := os.WriteFile(installedPath, []byte("tool-content"), 0o755); err != nil {
+		t.Fatalf("write installed binary: %v", err)
+	}
+	legacy := &config.Binary{
+		Path:        installedPath,
+		RemoteName:  "tool",
+		Version:     "2.0.0",
+		Hash:        "old-hash",
+		URL:         "https://example.test/tool",
+		Provider:    "generic",
+		SourceAsset: "tool-cli-v2.0.0-linux-amd64-musl-avx2.tar.gz",
+		PackagePath: "tool-v2/bin/tool",
+	}
+	intent := storedSelectionIntent(legacy)
+	if intent == nil || intent.LogicalProduct != "tool" || intent.Target == nil || intent.Target.CPUVariant != "avx2" || intent.ArchiveMember != "bin/tool" {
+		t.Fatalf("derived selection intent = %#v", intent)
+	}
+	if err := config.UpsertBinary(legacy); err != nil {
+		t.Fatalf("seed binary: %v", err)
+	}
+
+	exportCmd := newExportCmd().cmd
+	var out bytes.Buffer
+	exportCmd.SetOut(&out)
+	if err := exportCmd.Execute(); err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	var exported []portableBinary
+	if err := json.Unmarshal(out.Bytes(), &exported); err != nil {
+		t.Fatalf("decode export: %v", err)
+	}
+	if len(exported) != 1 || !equalSelectionDescriptor(exported[0].SelectionIntent, intent) {
+		t.Fatalf("exported selection intent = %#v, want %#v", exported, intent)
+	}
+	if config.Get().Bins[installedPath].SelectionIntent != nil {
+		t.Fatal("export changed the descriptor-less legacy record")
+	}
+	if exported[0].SourceAsset != "tool-cli-v2.0.0-linux-amd64-musl-avx2.tar.gz" {
+		t.Fatalf("exported source asset = %q", exported[0].SourceAsset)
+	}
+
+	setupTestConfig(t)
+	payload, err := json.Marshal(exported)
+	if err != nil {
+		t.Fatalf("marshal import payload: %v", err)
+	}
+	importCmd := newImportCmd().cmd
+	importCmd.SetIn(bytes.NewReader(payload))
+	importCmd.SetArgs([]string{"--skip-ensure"})
+	if err := importCmd.Execute(); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	imported := config.Get().Bins[filepath.Join(config.Get().DefaultPath, "tool")]
+	if imported == nil || !equalSelectionDescriptor(imported.SelectionIntent, intent) {
+		t.Fatalf("imported selection intent = %#v, want %#v", imported, intent)
+	}
+	if imported.SourceAsset != "tool-cli-v2.0.0-linux-amd64-musl-avx2.tar.gz" {
+		t.Fatalf("imported source asset = %q", imported.SourceAsset)
+	}
+}
+
+func TestExportImportLeavesUnsupportedLegacySelectionIntentAbsent(t *testing.T) {
+	setupTestConfig(t)
+
+	installedPath := filepath.Join(t.TempDir(), "legacy-tool")
+	if err := os.WriteFile(installedPath, []byte("tool-content"), 0o755); err != nil {
+		t.Fatalf("write installed binary: %v", err)
+	}
+	legacy := &config.Binary{
+		Path:        installedPath,
+		RemoteName:  "legacy-tool",
+		Version:     "1.0.0",
+		Hash:        "old-hash",
+		URL:         "https://example.test/legacy-tool",
+		Provider:    "generic",
+		PackagePath: "legacy/tool",
+	}
+	if err := config.UpsertBinary(legacy); err != nil {
+		t.Fatalf("seed legacy binary: %v", err)
+	}
+
+	exportCmd := newExportCmd().cmd
+	var out bytes.Buffer
+	exportCmd.SetOut(&out)
+	if err := exportCmd.Execute(); err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	var exported []portableBinary
+	if err := json.Unmarshal(out.Bytes(), &exported); err != nil {
+		t.Fatalf("decode export: %v", err)
+	}
+	if len(exported) != 1 || exported[0].SelectionIntent != nil {
+		t.Fatalf("unsupported legacy export selection intent = %#v", exported)
+	}
+
+	setupTestConfig(t)
+	payload, err := json.Marshal(exported)
+	if err != nil {
+		t.Fatalf("marshal import payload: %v", err)
+	}
+	importCmd := newImportCmd().cmd
+	importCmd.SetIn(bytes.NewReader(payload))
+	importCmd.SetArgs([]string{"--skip-ensure"})
+	if err := importCmd.Execute(); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	imported := config.Get().Bins[filepath.Join(config.Get().DefaultPath, "legacy-tool")]
+	if imported == nil || imported.SelectionIntent != nil || imported.PackagePath != "legacy/tool" {
+		t.Fatalf("unsupported legacy import = %#v", imported)
 	}
 }
 

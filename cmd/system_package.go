@@ -33,7 +33,7 @@ func installSystemPackage(opts InstallOpts) (*InstallResult, error) {
 		}
 	}()
 
-	_, minAgeDays, pinned := resolveInstallState(opts)
+	existing, minAgeDays, pinned := resolveInstallState(opts)
 	if err := ensureReleaseAge(p.GetID(), pResult.Version, pResult.PublishedAt, minAgeDays); err != nil {
 		return nil, err
 	}
@@ -102,6 +102,7 @@ func installSystemPackage(opts InstallOpts) (*InstallResult, error) {
 		AppBundle:         appBundle,
 		PackagePath:       pResult.PackagePath,
 		SourceAsset:       pResult.SourceAsset,
+		SelectionIntent:   installedSelectionIntent(pResult, opts.FetchOpts, existing),
 		ReleaseTagPrefix:  pResult.ReleaseTagPrefix,
 		DownloadIntegrity: configIntegrityRecord(pResult.DownloadIntegrity),
 		Pinned:            pinned,

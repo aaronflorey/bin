@@ -60,6 +60,15 @@ records the raw outer release asset selected during the last successful install;
 `package_path` continues to identify the selected inner archive entry. Older
 configuration files without `source_asset` remain valid.
 
+`selection_intent`, when present, records the portable logical product, target
+(including ABI/CPU variant), and archive-member choice used for managed
+updates. It is a selector rather than provenance: `source_asset` and
+`package_path` still describe the bytes most recently installed. A versioned
+top-level archive wrapper such as `tool-v1/bin/tool` is stored as `bin/tool`,
+while meaningful internal directories remain part of the member identity.
+Older records without `selection_intent` remain valid; `bin` derives it only
+from unambiguous persisted artifact facts when reusing the record.
+
 `download_integrity` and `installed_integrity` are optional integrity evidence
 records. Each records an algorithm, expected and observed digest, source,
 scope, and result. `hash` remains the SHA-256 of the installed bytes; older

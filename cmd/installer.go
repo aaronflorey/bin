@@ -120,7 +120,7 @@ func installBinary(opts InstallOpts) (result *InstallResult, err error) {
 	}()
 	log.Debugf("Fetched %s version %s from provider %q", pResult.Name, pResult.Version, p.GetID())
 
-	_, minAgeDays, pinned := resolveInstallState(opts)
+	existing, minAgeDays, pinned := resolveInstallState(opts)
 	if err := ensureReleaseAge(p.GetID(), pResult.Version, pResult.PublishedAt, minAgeDays); err != nil {
 		return nil, err
 	}
@@ -181,6 +181,7 @@ func installBinary(opts InstallOpts) (result *InstallResult, err error) {
 		AppBundle:          "",
 		PackagePath:        pResult.PackagePath,
 		SourceAsset:        pResult.SourceAsset,
+		SelectionIntent:    installedSelectionIntent(pResult, opts.FetchOpts, existing),
 		ReleaseTagPrefix:   pResult.ReleaseTagPrefix,
 		DownloadIntegrity:  configIntegrityRecord(pResult.DownloadIntegrity),
 		InstalledIntegrity: installedIntegrityRecord(pResult.InstalledIntegrity, hashString),
@@ -233,6 +234,19 @@ func installedIntegrityRecord(record *providers.IntegrityRecord, installedHash s
 	return configIntegrityRecord(record)
 }
 
+func installedSelectionIntent(file *providers.File, fetchOpts providers.FetchOpts, existing *config.Binary) *config.SelectionDescriptor {
+	if file != nil && file.SelectionIntent != nil {
+		return config.CloneSelectionDescriptor(file.SelectionIntent)
+	}
+	if fetchOpts.SelectionIntent != nil {
+		return config.CloneSelectionDescriptor(fetchOpts.SelectionIntent)
+	}
+	if existing != nil {
+		return config.CloneSelectionDescriptor(existing.SelectionIntent)
+	}
+	return nil
+}
+
 func fetchBinary(newProvider providerFactory, url, forcedProvider string, fetchOpts providers.FetchOpts, allowProviderFallback bool) (providers.Provider, *providers.File, error) {
 	p, err := newProvider(url, forcedProvider)
 	if err != nil {
@@ -271,7 +285,7 @@ func fetchBinary(newProvider providerFactory, url, forcedProvider string, fetchO
 }
 
 func shouldFallbackProviderFetch(err error) bool {
-	return isCompatibilityError(err)
+	return !errors.Is(err, assets.ErrUnavailablePersistedSelection) && isCompatibilityError(err)
 }
 
 func isCompatibilityError(err error) bool {

@@ -203,6 +203,59 @@ func TestBinaryIntegrityRecordsLoadAndCloneWithoutMigration(t *testing.T) {
 	}
 }
 
+func TestBinarySelectionIntentLoadsClonesAndPersists(t *testing.T) {
+	t.Cleanup(func() { cfg = config{} })
+
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	defaultPath := t.TempDir()
+	t.Setenv("BIN_CONFIG", configPath)
+	t.Setenv("BIN_EXE_DIR", defaultPath)
+	oldConfig := fmt.Sprintf(`{"default_path":%q,"bins":{"/tmp/old":{"path":"/tmp/old","remote_name":"old","version":"1.0.0","hash":"old-hash","url":"https://example.test/old","provider":"generic"}}}`, defaultPath)
+	if err := os.WriteFile(configPath, []byte(oldConfig), 0o600); err != nil {
+		t.Fatalf("write old config: %v", err)
+	}
+	if err := CheckAndLoad(); err != nil {
+		t.Fatalf("load old config: %v", err)
+	}
+	if got := cfg.Bins["/tmp/old"]; got == nil || got.SelectionIntent != nil {
+		t.Fatalf("old config selection intent = %#v, want nil", got)
+	}
+
+	bin := &Binary{
+		Path: "/tmp/new",
+		SelectionIntent: &SelectionDescriptor{
+			LogicalProduct: "tool",
+			Target:         &SelectionTarget{OS: "linux", Architecture: "amd64", ABI: "gnu", CPUVariant: "avx2"},
+			ArchiveMember:  "tool/bin/tool",
+		},
+	}
+	clone := CloneBinary(bin)
+	clone.SelectionIntent.Target.CPUVariant = "baseline"
+	if bin.SelectionIntent.Target.CPUVariant != "avx2" {
+		t.Fatalf("clone mutated source selection intent: %#v", bin.SelectionIntent)
+	}
+	if err := UpsertBinary(bin); err != nil {
+		t.Fatalf("upsert binary: %v", err)
+	}
+	bin.SelectionIntent.ArchiveMember = "changed/tool"
+	stored := cfg.Bins[bin.Path]
+	if stored.SelectionIntent == nil || stored.SelectionIntent.ArchiveMember != "tool/bin/tool" {
+		t.Fatalf("upsert retained caller-owned selection intent: %#v", stored)
+	}
+
+	if err := CheckAndLoad(); err != nil {
+		t.Fatalf("reload config: %v", err)
+	}
+	stored = cfg.Bins[bin.Path]
+	if stored.SelectionIntent == nil || stored.SelectionIntent.LogicalProduct != "tool" ||
+		stored.SelectionIntent.Target == nil || stored.SelectionIntent.Target.OS != "linux" ||
+		stored.SelectionIntent.Target.Architecture != "amd64" || stored.SelectionIntent.Target.ABI != "gnu" ||
+		stored.SelectionIntent.Target.CPUVariant != "avx2" ||
+		stored.SelectionIntent.ArchiveMember != "tool/bin/tool" {
+		t.Fatalf("selection intent did not round trip: %#v", stored)
+	}
+}
+
 func TestCheckAndLoadDoesNotRewriteExistingConfigWithoutDefaultPath(t *testing.T) {
 	t.Cleanup(func() {
 		cfg = config{}

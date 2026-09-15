@@ -181,6 +181,7 @@ type Filter struct {
 	packagePath           string
 	containedFile         string
 	containedFileSelected bool
+	selectionIntent       *config.SelectionDescriptor
 }
 
 type FilterOpts struct {
@@ -206,6 +207,10 @@ type FilterOpts struct {
 	// NonInteractive disables all interactive prompts and fails when selection
 	// remains ambiguous.
 	NonInteractive bool
+
+	// SelectionIntent constrains release and archive-member resolution using a
+	// portable selection recorded by a previous managed install.
+	SelectionIntent *config.SelectionDescriptor
 }
 
 type runtimeResolver struct{}
@@ -325,7 +330,13 @@ func (f *Filter) FilterAssets(repoName string, as []*Asset, autoSelect string) (
 		gf = matches[0]
 	}
 
+	f.selectionIntent = selectionDescriptorForCandidate(describeReleaseCandidate(&Asset{Name: gf.Name}, f.preferredMatchName(repoName)))
 	return gf, nil
+}
+
+// SelectionIntent returns the descriptor resolved for the current fetch.
+func (f *Filter) SelectionIntent() *config.SelectionDescriptor {
+	return config.CloneSelectionDescriptor(f.selectionIntent)
 }
 
 // CompatibleAssets returns installable assets compatible with the current
@@ -362,7 +373,7 @@ func (f *Filter) describeReleaseAssets(as []*Asset, intendedProduct string) []de
 func (f *Filter) resolveReleaseAssets(as []*Asset, intendedProduct, explicitSelection string) ([]*Asset, error) {
 	intendedProduct = releaseProduct(intendedProduct)
 	described := f.describeReleaseAssets(as, intendedProduct)
-	if explicitSelection == "" && f.opts.SkipScoring {
+	if explicitSelection == "" && f.opts.SkipScoring && f.opts.SelectionIntent == nil {
 		return currentTargetReleaseAssets(described), nil
 	}
 	candidates := make([]ReleaseCandidate, 0, len(described))
@@ -385,7 +396,7 @@ func (f *Filter) resolveReleaseAssets(as []*Asset, intendedProduct, explicitSele
 	} else if hasReleaseProduct(candidates, intendedProduct) {
 		request.Product = intendedProduct
 	}
-	resolution, err := ResolveReleaseCandidate(candidates, request)
+	resolution, err := ResolvePersistedSelection(candidates, request, f.opts.SelectionIntent)
 	if err != nil {
 		if explicitSelection != "" {
 			return nil, fmt.Errorf("selected asset %q is not compatible or is not installable: %w", explicitSelection, err)

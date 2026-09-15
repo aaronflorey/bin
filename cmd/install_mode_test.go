@@ -86,6 +86,31 @@ func TestLifecycleForModeSystemPackageAppliesStoredMetadata(t *testing.T) {
 	}
 }
 
+func TestLifecycleStoredFetchPreservesSelectionIntentOrDerivesLegacyIntent(t *testing.T) {
+	strategy := lifecycleForMode(installModeBinary)
+	stored := &config.SelectionDescriptor{LogicalProduct: "tool", Target: &config.SelectionTarget{OS: "linux", Architecture: "amd64", ABI: "musl"}, ArchiveMember: "bin/tool"}
+	fetchOpts := providers.FetchOpts{}
+	if err := strategy.applyStoredFetch(&config.Binary{Path: filepath.Join(t.TempDir(), "missing"), RemoteName: "alias", SourceAsset: "tool-1.0.0-linux-amd64-musl.tar.gz", SelectionIntent: stored}, &fetchOpts); err != nil {
+		t.Fatalf("applyStoredFetch() error = %v", err)
+	}
+	if fetchOpts.SelectionIntent == nil || fetchOpts.SelectionIntent.LogicalProduct != "tool" || fetchOpts.SelectionIntent.ArchiveMember != "bin/tool" {
+		t.Fatalf("stored selection intent was not applied: %#v", fetchOpts.SelectionIntent)
+	}
+	fetchOpts.SelectionIntent.LogicalProduct = "changed"
+	if stored.LogicalProduct != "tool" {
+		t.Fatal("stored selection intent was not cloned")
+	}
+
+	fetchOpts = providers.FetchOpts{}
+	legacy := &config.Binary{Path: filepath.Join(t.TempDir(), "legacy"), RemoteName: "alias", SourceAsset: "tool-1.0.0-linux-amd64-musl.tar.gz", PackagePath: "release-v1/bin/tool"}
+	if err := strategy.applyStoredFetch(legacy, &fetchOpts); err != nil {
+		t.Fatalf("applyStoredFetch() legacy error = %v", err)
+	}
+	if fetchOpts.SelectionIntent == nil || fetchOpts.SelectionIntent.ArchiveMember != "release-v1/bin/tool" {
+		t.Fatalf("legacy selection intent was not derived: %#v", fetchOpts.SelectionIntent)
+	}
+}
+
 func TestLifecycleForModeSystemPackageRequiresPackageType(t *testing.T) {
 	strategy := lifecycleForMode(installModeSystemPackage)
 	err := strategy.applyStoredFetch(&config.Binary{Path: "/tmp/tool"}, &providers.FetchOpts{})

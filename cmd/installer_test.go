@@ -134,6 +134,56 @@ func TestInstallBinaryPreservesArchiveMemberResolutionOutcomes(t *testing.T) {
 	})
 }
 
+func TestInstallBinaryPersistsResolvedSelectionIntent(t *testing.T) {
+	installDir := setupTestConfig(t)
+	previousFactory := installProviderFactory
+	t.Cleanup(func() { installProviderFactory = previousFactory })
+	intent := &config.SelectionDescriptor{LogicalProduct: "tool-cli", Target: &config.SelectionTarget{OS: "linux", Architecture: "amd64", ABI: "musl"}, ArchiveMember: "bin/tool"}
+	installProviderFactory = func(string, string) (providers.Provider, error) {
+		return fetchBinaryTestProvider{id: "test", fetchFn: func(*providers.FetchOpts) (*providers.File, error) {
+			return &providers.File{Data: strings.NewReader("#!/bin/sh\nexit 0\n"), Name: "tool", Version: "2.0.0", ReleaseTagPrefix: "nightly-", SourceAsset: "tool-cli-v2.0.0-linux-amd64-musl.tar.gz", PackagePath: "tool-v2/bin/tool", SelectionIntent: intent}, nil
+		}}, nil
+	}
+
+	path := filepath.Join(installDir, "alias")
+	if _, err := installBinary(InstallOpts{URL: "https://example.test/tool", Path: path, ConfigPath: path, LogicalName: "alias", Force: true, Pinned: true, FetchOpts: providers.FetchOpts{ReleaseTagPrefix: "nightly-"}}); err != nil {
+		t.Fatalf("installBinary() error = %v", err)
+	}
+	installed := config.Get().Bins[path]
+	if installed.RemoteName != "alias" || !installed.Pinned || installed.ReleaseTagPrefix != "nightly-" || installed.SourceAsset != "tool-cli-v2.0.0-linux-amd64-musl.tar.gz" || installed.PackagePath != "tool-v2/bin/tool" {
+		t.Fatalf("install metadata changed meaning: %#v", installed)
+	}
+	if installed.SelectionIntent == nil || installed.SelectionIntent.LogicalProduct != "tool-cli" || installed.SelectionIntent.ArchiveMember != "bin/tool" {
+		t.Fatalf("selection intent was not persisted: %#v", installed.SelectionIntent)
+	}
+}
+
+func TestProviderFallbackDoesNotDiscardUnavailableStoredSelection(t *testing.T) {
+	for _, reason := range []assets.PersistedSelectionReason{
+		assets.PersistedSelectionTarget,
+		assets.PersistedSelectionVariant,
+		assets.PersistedSelectionMember,
+	} {
+		t.Run(string(reason), func(t *testing.T) {
+			fallbackFetches := 0
+			_, _, err := fetchBinary(func(_ string, forcedProvider string) (providers.Provider, error) {
+				if forcedProvider == "" {
+					return fetchBinaryTestProvider{id: "fallback", fetches: &fallbackFetches}, nil
+				}
+				return fetchBinaryTestProvider{id: "stored", fetchFn: func(*providers.FetchOpts) (*providers.File, error) {
+					return nil, &assets.PersistedSelectionError{Reason: reason, Selection: "stored"}
+				}}, nil
+			}, "https://example.test/tool", "github", providers.FetchOpts{SelectionIntent: &config.SelectionDescriptor{LogicalProduct: "tool"}}, true)
+			if !errors.Is(err, assets.ErrUnavailablePersistedSelection) {
+				t.Fatalf("fetchBinary() error = %v", err)
+			}
+			if fallbackFetches != 0 {
+				t.Fatalf("fallback fetched %d times after unavailable stored selection", fallbackFetches)
+			}
+		})
+	}
+}
+
 func TestAbsExpandedPath(t *testing.T) {
 	homeDir := t.TempDir()
 	workDir := t.TempDir()
