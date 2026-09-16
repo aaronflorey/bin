@@ -384,8 +384,10 @@ func (f *Filter) processReleaseArtifact(downloadPath, downloadSHA string) (*arti
 		return nil, fmt.Errorf("archive contains a macOS app bundle (%s) instead of a standalone binary: %w", bundleName, ErrNoCompatibleFiles)
 	}
 	recordArchiveMemberEligibility(result.inventory)
+	f.recordArchiveInventory(result.inventory)
 	selectedEntry, err := f.resolveReleaseArchiveMember(result.inventory)
 	if err != nil {
+		f.recordArchiveFailure(err)
 		_ = result.Close()
 		if errors.Is(err, ErrNoEligibleArchiveMember) {
 			return nil, fmt.Errorf("%w: %w", ErrNoCompatibleFiles, err)
@@ -395,6 +397,7 @@ func (f *Filter) processReleaseArtifact(downloadPath, downloadSHA string) (*arti
 	if f.selectionIntent == nil {
 		f.selectionIntent = &config.SelectionDescriptor{}
 	}
+	f.setArchiveSelection(selectedEntry.identity)
 	// Versioned top-level wrappers are packaging details, not part of the
 	// portable member intent. Keep all other directories identity-bearing.
 	f.selectionIntent.ArchiveMember = normalizeArchiveMemberVersionWrapper(selectedEntry.identity)
@@ -558,14 +561,17 @@ func (f *Filter) collectArtifact(inputPath, name, scope, root string, tracker *a
 	}
 	if format == artifactFormatTar {
 		*transformed = true
+		f.recordTransformation(format)
 		return f.collectTar(input, scope, root, tracker, inventory, transformed)
 	}
 	if format == artifactFormatZip {
 		*transformed = true
+		f.recordTransformation(format)
 		return f.collectZip(input, scope, root, tracker, inventory, transformed)
 	}
 	if format == artifactFormatGzip || format == artifactFormatXz || format == artifactFormatBzip2 {
 		*transformed = true
+		f.recordTransformation(format)
 		if err := tracker.enterArchive(); err != nil {
 			return err
 		}

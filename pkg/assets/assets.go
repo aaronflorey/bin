@@ -182,6 +182,7 @@ type Filter struct {
 	containedFile         string
 	containedFileSelected bool
 	selectionIntent       *config.SelectionDescriptor
+	evidence              *ArtifactEvidence
 }
 
 type FilterOpts struct {
@@ -274,7 +275,9 @@ func (f *Filter) ParseAutoSelection(autoSelect string) string {
 // FilterAssets receives a slice of GL assets and tries to
 // select the proper one and ask the user to manually select one
 // in case it can't determine it
-func (f *Filter) FilterAssets(repoName string, as []*Asset, autoSelect string) (*FilteredAsset, error) {
+func (f *Filter) FilterAssets(repoName string, as []*Asset, autoSelect string) (result *FilteredAsset, err error) {
+	defer func() { err = f.attachEvidence(err) }()
+
 	f.repoName = repoName
 	if f.opts == nil {
 		f.opts = &FilterOpts{}
@@ -330,6 +333,7 @@ func (f *Filter) FilterAssets(repoName string, as []*Asset, autoSelect string) (
 		gf = matches[0]
 	}
 
+	f.completeReleaseSelection(gf.Name)
 	f.selectionIntent = selectionDescriptorForCandidate(describeReleaseCandidate(&Asset{Name: gf.Name}, f.preferredMatchName(repoName)))
 	return gf, nil
 }
@@ -398,6 +402,7 @@ func (f *Filter) resolveReleaseAssets(as []*Asset, intendedProduct, explicitSele
 	}
 	resolution, err := ResolvePersistedSelection(candidates, request, f.opts.SelectionIntent)
 	if err != nil {
+		f.recordReleaseFailure(candidates, err)
 		if explicitSelection != "" {
 			return nil, fmt.Errorf("selected asset %q is not compatible or is not installable: %w", explicitSelection, err)
 		}
@@ -406,6 +411,7 @@ func (f *Filter) resolveReleaseAssets(as []*Asset, intendedProduct, explicitSele
 		}
 		return nil, fmt.Errorf("%w: Could not find any compatible files: %w", ErrNoCompatibleFiles, err)
 	}
+	f.recordReleaseResolution(candidates, resolution)
 	selectedFormat := resolution.Candidate.Format
 	assets := make([]*Asset, 0, len(resolution.EligibleCandidates))
 	for _, candidate := range resolution.EligibleCandidates {
@@ -853,7 +859,9 @@ func (f *Filter) ProcessURL(gf *FilteredAsset, expectedSHA string, verifyArchive
 
 // ProcessReader processes an already-open artifact stream. The caller retains
 // ownership of reader; the returned source owns all temporary artifact files.
-func (f *Filter) ProcessReader(name string, contentLength int64, reader io.Reader, expectedSHA string, verifyArchiveChecksum bool) (*finalFile, error) {
+func (f *Filter) ProcessReader(name string, contentLength int64, reader io.Reader, expectedSHA string, verifyArchiveChecksum bool) (out *finalFile, err error) {
+	defer func() { err = f.attachEvidence(err) }()
+
 	if err := validateProcessArtifactName(name); err != nil {
 		return nil, err
 	}
@@ -903,6 +911,7 @@ func (f *Filter) ProcessReader(name string, contentLength int64, reader io.Reade
 		if err != nil {
 			return nil, err
 		}
+		f.recordProcessingIntegrity(final)
 		cleanupTempFile = false
 		return final, nil
 	}
@@ -914,6 +923,7 @@ func (f *Filter) ProcessReader(name string, contentLength int64, reader io.Reade
 	cleanupTempFile = false
 	final := *result.final
 	final.Source = &artifactResultReader{result: result, reader: result.final.Source}
+	f.recordProcessingIntegrity(&final)
 	return &final, nil
 }
 

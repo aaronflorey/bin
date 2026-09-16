@@ -106,6 +106,7 @@ func (g *genericURL) Fetch(opts *FetchOpts) (*File, error) {
 		PackagePath:         outFile.PackagePath,
 		ProcessingUnchanged: outFile.UnchangedBytes,
 		SelectionIntent:     f.SelectionIntent(),
+		Evidence:            f.Evidence(),
 	}, nil
 }
 

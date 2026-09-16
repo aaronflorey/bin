@@ -1,16 +1,15 @@
 # Local Issue State
 
-Generated: 2026-09-15T22:49:23Z
+Generated: 2026-09-16T01:01:57Z
 
 NOTE: This file is auto-generated. Do not edit manually.
 
-Tickets: 10 active, 11 resolved
+Tickets: 9 active, 12 resolved
 
 ## Active Tickets
 
 | Effort | Ticket | Type | Mode | Status | Blocked by |
 | --- | --- | --- | --- | --- | --- |
-| [reliability-managed-completions](reliability-managed-completions/spec.md) | [12-inspect-artifacts](reliability-managed-completions/issues/12-inspect-artifacts.md) | — | — | ready-for-agent | 11 / Process generic URLs through the shared resolver |
 | [reliability-managed-completions](reliability-managed-completions/spec.md) | [13-completion-policy-state](reliability-managed-completions/issues/13-completion-policy-state.md) | — | — | ready-for-agent | 10 / Select DMG bundles by managed identity; 12 / Inspect artifact decisions without side effects |
 | [reliability-managed-completions](reliability-managed-completions/spec.md) | [14-discover-bundled-completions](reliability-managed-completions/issues/14-discover-bundled-completions.md) | — | — | ready-for-agent | 13 / Define managed-completion policy and local state |
 | [reliability-managed-completions](reliability-managed-completions/spec.md) | [15-bounded-completion-runner](reliability-managed-completions/issues/15-bounded-completion-runner.md) | — | — | ready-for-agent | 14 / Discover completion scripts from artifact inventory |
@@ -36,3 +35,4 @@ Tickets: 10 active, 11 resolved
 | [reliability-managed-completions](reliability-managed-completions/spec.md) | [09-persist-selection-intent](reliability-managed-completions/issues/09-persist-selection-intent.md) | — | — | resolved | 08 / Resolve release products before packaging |
 | [reliability-managed-completions](reliability-managed-completions/spec.md) | [10-select-dmg-bundle](reliability-managed-completions/issues/10-select-dmg-bundle.md) | — | — | resolved | 01 / Contain remote names and clean failed fetches; 09 / Persist stable selection intent |
 | [reliability-managed-completions](reliability-managed-completions/spec.md) | [11-process-generic-urls](reliability-managed-completions/issues/11-process-generic-urls.md) | — | — | resolved | 09 / Persist stable selection intent |
+| [reliability-managed-completions](reliability-managed-completions/spec.md) | [12-inspect-artifacts](reliability-managed-completions/issues/12-inspect-artifacts.md) | — | — | resolved | 11 / Process generic URLs through the shared resolver |
