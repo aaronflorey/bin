@@ -272,6 +272,51 @@ func TestGenericURLFetchProcessesArchivesAndResolvesMembers(t *testing.T) {
 	}
 }
 
+func TestGenericURLFetchRecordsArtifactEvidence(t *testing.T) {
+	filename := genericArtifactName("", ".zip")
+	archive := genericZip(t, map[string][]byte{
+		"bin/tool" + genericScriptExtension(): genericRunnablePayload(t),
+	})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+		_, _ = w.Write(archive)
+	}))
+	defer server.Close()
+
+	file, err := newGenericProvider(t, server.URL).Fetch(&FetchOpts{NonInteractive: true})
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	data := file.Data
+	t.Cleanup(func() {
+		if err := closeFileData(data); err != nil {
+			t.Errorf("close fetched file: %v", err)
+		}
+	})
+
+	if file.Evidence == nil {
+		t.Fatal("File.Evidence = nil, want recorded decisions")
+	}
+	if file.Evidence.Release.Selected != filename {
+		t.Fatalf("release selected = %q, want %q", file.Evidence.Release.Selected, filename)
+	}
+	if file.Evidence.Archive.Selected != file.PackagePath {
+		t.Fatalf("archive selected = %q, want package path %q", file.Evidence.Archive.Selected, file.PackagePath)
+	}
+	if file.Evidence.Archive.Selected == "" || file.Evidence.Archive.Reason != "" {
+		t.Fatalf("archive evidence = %#v", file.Evidence.Archive)
+	}
+	if len(file.Evidence.Transformations) != 1 || file.Evidence.Transformations[0] != "zip" {
+		t.Fatalf("transformations = %#v, want [zip]", file.Evidence.Transformations)
+	}
+	if file.Evidence.Integrity.UnchangedBytes {
+		t.Fatal("archive fetch reported unchanged bytes")
+	}
+	if file.Evidence.Integrity.DownloadSHA256 == "" || file.Evidence.Integrity.InstalledSHA256 == "" {
+		t.Fatalf("missing integrity digests: %#v", file.Evidence.Integrity)
+	}
+}
+
 func TestGenericURLFetchProcessesTarAndRejectsNonRunnablePayload(t *testing.T) {
 	t.Run("tar", func(t *testing.T) {
 		filename := genericArtifactName("", ".tar")

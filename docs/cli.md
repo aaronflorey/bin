@@ -25,6 +25,7 @@
 | `remove` | Uninstall tracked binaries | Aliases: `rm`, `r`, `uninstall`. With no args, opens an interactive picker. `--yes` is required for system-package removals in non-interactive mode. |
 | `list` | List tracked binaries | Alias: `ls`. `--format=table|json`. |
 | `prune` | Remove config entries whose binaries no longer exist | `--force` skips the confirmation prompt. |
+| `inspect` | Resolve a supported release or generic-URL source read-only and report artifact decisions | Requires `--json`, which is the only supported output and writes the stable automation report to stdout. Never prompts, runs no hooks, package managers, or completion work, and rejects effectful Docker, Go-install, and forced non-release providers without creating config, cache, log, or install state. |
 | `version` | Print the `bin` version | Useful for installation checks. |
 
 ## Notes

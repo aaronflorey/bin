@@ -153,6 +153,7 @@ func (g *gitHub) Fetch(opts *FetchOpts) (*File, error) {
 		InstalledIntegrity:  installedIntegrity,
 		ProcessingUnchanged: outFile.UnchangedBytes,
 		SelectionIntent:     f.SelectionIntent(),
+		Evidence:            f.Evidence(),
 	}
 
 	return file, nil

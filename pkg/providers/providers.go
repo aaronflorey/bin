@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aaronflorey/bin/pkg/assets"
 	"github.com/aaronflorey/bin/pkg/config"
 )
 
@@ -40,6 +41,9 @@ type File struct {
 	// SelectionIntent is the portable selection resolved for this fetch. Source
 	// provenance remains in SourceAsset and PackagePath.
 	SelectionIntent *config.SelectionDescriptor
+	// Evidence is the read-only record of the shared resolver's release,
+	// archive-member, transformation, and download decisions for this fetch.
+	Evidence *assets.ArtifactEvidence
 }
 
 // IntegrityRecord describes evidence for one byte scope. It is intentionally

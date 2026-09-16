@@ -41,7 +41,7 @@ CI additionally exercises `install.sh` and live provider/system-package installs
 ## Architecture and control flow
 
 - `main.go` supplies build metadata and delegates all execution to `cmd.Execute`.
-- `cmd/` owns the Cobra surface and orchestration. `cmd/root.go` configures logging, loads config before all commands except `version`, and starts the spinner. Command files execute lifecycle hooks and delegate provider/asset/system-package work.
+- `cmd/` owns the Cobra surface and orchestration. `cmd/root.go` configures logging, loads config before all commands except the read-only `version` and `inspect` commands, and starts the spinner. Command files execute lifecycle hooks and delegate provider/asset/system-package work.
 - `pkg/providers/` detects sources and implements a shared `Provider` contract (`Fetch`, latest-version lookup, cleanup, ID). Release-history support is optional through `ReleaseHistoryProvider`.
 - `pkg/assets/` performs platform filtering, product ranking, archive extraction, checksum handling, and executable validation. Keep provider transport concerns out of this package and asset-selection concerns out of command handlers.
 - `pkg/config/` owns config-path resolution, locking, JSON persistence, lifecycle hooks, and stored binary metadata.
