@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Implementation boundary:** Start with `parseRepo` in `pkg/providers/goinstall.go`, which currently applies `filepath.Clean` to an import path. Preserve the slash-delimited input when separating its version; retain `filepath` for local output paths. Fix the existing parsing/build flow and extend its table tests. No new import-path parser, provider, or configuration is needed.
+
 - [ ] Parsing a versioned Go-install target never rewrites `/` separators to `\` on Windows.
 - [ ] Base-module discovery retains a nested command path and constructs a valid `module/subpackage@version` argument.
 - [ ] Proxy metadata requests continue to address the base module while build commands include the selected subpackage.

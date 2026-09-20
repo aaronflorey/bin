@@ -16,6 +16,10 @@ Reuse the deterministic release resolver and persisted-selection work in the rel
 - Persisted product, ABI, CPU-variant, and archive-member intent remains owned by `reliability-managed-completions/09`.
 - No duplicate Windows-only selection mechanism or update-time `--select` flag is introduced.
 
+## Implementation size
+
+Use the existing shared command targeting and install-mode helpers, stdlib path handling, and the current Go test workflow. Fix the demonstrated Windows assumptions in place; do not add a platform abstraction, replacement resolver, import-path parser, or new test harness. Tickets 08 and 09 above are already complete. These Windows fixes do not wait for managed completions; their single native CI job also runs later completion tests where applicable.
+
 ## Out of Scope
 
 - Changing non-interactive `prune` confirmation behavior.
