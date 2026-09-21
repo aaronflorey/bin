@@ -184,6 +184,66 @@ func TestExportImportPreservesIntegrityProvenanceWithoutLocalVerification(t *tes
 	}
 }
 
+func TestExportImportKeepsCompletionOwnershipLocal(t *testing.T) {
+	defaultPath := setupTestConfig(t)
+	installedPath := filepath.Join(defaultPath, "completion-tool")
+	if err := os.WriteFile(installedPath, []byte("completion-tool-content"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	localOwnership := map[string]*config.CompletionOwnershipRecord{
+		"bash": {Path: filepath.Join(filepath.Dir(os.Getenv("BIN_CONFIG")), "completions", "bash", "completion-tool"), SHA256: "local-hash"},
+	}
+	if err := config.UpsertBinary(&config.Binary{
+		Path: installedPath, RemoteName: "completion-tool", Version: "1.0.0", Hash: "old-hash", URL: "https://example.test/tool", Provider: "generic",
+		CompletionOwnership: localOwnership,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	exportCmd := newExportCmd().cmd
+	var exported bytes.Buffer
+	exportCmd.SetOut(&exported)
+	if err := exportCmd.Execute(); err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	var exportedPayload []map[string]any
+	if err := json.Unmarshal(exported.Bytes(), &exportedPayload); err != nil {
+		t.Fatalf("decode export: %v", err)
+	}
+	if len(exportedPayload) != 1 {
+		t.Fatalf("exported entries = %#v", exportedPayload)
+	}
+	if _, found := exportedPayload[0]["completion_ownership"]; found {
+		t.Fatalf("portable export included local completion ownership: %#v", exportedPayload[0])
+	}
+	if got := config.Get().Bins[installedPath].CompletionOwnership["bash"]; got == nil || got.SHA256 != "local-hash" {
+		t.Fatalf("export normalization discarded local completion ownership: %#v", config.Get().Bins[installedPath])
+	}
+
+	importPayload, err := json.Marshal([]map[string]any{{
+		"name":                 "completion-tool",
+		"remote_name":          "completion-tool",
+		"version":              "2.0.0",
+		"hash":                 "new-hash",
+		"url":                  "https://example.test/tool",
+		"provider":             "generic",
+		"completion_ownership": map[string]any{"bash": map[string]any{"path": "remote-path", "sha256": "remote-hash"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	importCmd := newImportCmd().cmd
+	importCmd.SetIn(bytes.NewReader(importPayload))
+	importCmd.SetArgs([]string{"--skip-ensure"})
+	if err := importCmd.Execute(); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	updated := config.Get().Bins[installedPath]
+	if updated == nil || updated.Version != "2.0.0" || updated.CompletionOwnership["bash"].Path != localOwnership["bash"].Path || updated.CompletionOwnership["bash"].SHA256 != "local-hash" {
+		t.Fatalf("import did not preserve destination-local completion ownership: %#v", updated)
+	}
+}
+
 func TestExportListWritesURLsToStdout(t *testing.T) {
 	setupTestConfig(t)
 
