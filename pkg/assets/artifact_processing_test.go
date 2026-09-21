@@ -610,6 +610,124 @@ func TestReleaseArtifactInventoryStagesCompletionsAndCleansUp(t *testing.T) {
 	}
 }
 
+func TestProcessReleaseArtifactSelectsBundledCompletionInExecutableScope(t *testing.T) {
+	originalResolver := resolver
+	resolver = testLinuxAMDResolver
+	t.Cleanup(func() { resolver = originalResolver })
+
+	for _, test := range []struct {
+		name      string
+		archive   string
+		shell     string
+		candidate string
+	}{
+		{name: "zip bash filename", archive: "tool.zip", shell: "bash", candidate: "share/completions/tool.bash"},
+		{name: "tar bash directory", archive: "tool.tar", shell: "bash", candidate: "share/autocomplete/bash/tool"},
+		{name: "zip zsh", archive: "tool.zip", shell: "zsh", candidate: "share/complete/_tool"},
+		{name: "tar fish", archive: "tool.tar", shell: "fish", candidate: "share/completions/tool.fish"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			selected := buildTestZipArchive(t, map[string]string{
+				"bin/tool":     "#!/bin/sh\nexit 0\n",
+				test.candidate: "selected completion\n",
+			})
+			other := buildTestZipArchive(t, map[string]string{
+				"bin/other":    "#!/bin/sh\nexit 0\n",
+				test.candidate: "other completion\n",
+			})
+			files := map[string]string{"selected.zip": string(selected), "other.zip": string(other)}
+			var archive []byte
+			if test.archive == "tool.tar" {
+				archive = tarPayload(t, files)
+			} else {
+				archive = buildTestZipArchive(t, files)
+			}
+
+			download := writeArtifactDownload(t, archive)
+			filter := NewFilter(&FilterOpts{
+				NonInteractive:           true,
+				SelectionIntent:          &config.SelectionDescriptor{ArchiveMember: "selected.zip!/bin/tool"},
+				BundledCompletionShell:   test.shell,
+				BundledCompletionCommand: "tool",
+			})
+			filter.repoName, filter.name = "tool", test.archive
+			result, err := filter.processReleaseArtifact(download, "download")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.final.PackagePath != "selected.zip!/bin/tool" {
+				t.Fatalf("selected PackagePath = %q", result.final.PackagePath)
+			}
+			if got := string(result.final.BundledCompletion); got != "selected completion\n" {
+				t.Fatalf("BundledCompletion = %q", got)
+			}
+			if got := result.final.BundledCompletionName; got != "selected.zip!/"+test.candidate {
+				t.Fatalf("BundledCompletionName = %q", got)
+			}
+			if err := result.Close(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestProcessReleaseArtifactSkipsUnusableBundledCompletions(t *testing.T) {
+	originalResolver := resolver
+	resolver = testLinuxAMDResolver
+	t.Cleanup(func() { resolver = originalResolver })
+
+	for _, test := range []struct {
+		name        string
+		command     string
+		completions map[string]string
+	}{
+		{name: "default operation", completions: map[string]string{"share/completions/tool.bash": "complete tool\n"}},
+		{name: "duplicate exact match", command: "tool", completions: map[string]string{"share/completions/tool.bash": "one", "share/complete/tool.bash": "two"}},
+		{name: "wrong command", command: "tool", completions: map[string]string{"share/completions/other.bash": "complete other\n"}},
+		{name: "renamed command", command: "alias", completions: map[string]string{"share/completions/tool.bash": "complete tool\n"}},
+		{name: "empty", command: "tool", completions: map[string]string{"share/completions/tool.bash": ""}},
+		{name: "non utf8", command: "tool", completions: map[string]string{"share/completions/tool.bash": "\xff"}},
+		{name: "nul", command: "tool", completions: map[string]string{"share/completions/tool.bash": "complete\x00tool"}},
+		{name: "oversized", command: "tool", completions: map[string]string{"share/completions/tool.bash": strings.Repeat("x", bundledCompletionMaxBytes+1)}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			files := map[string]string{"bin/tool": "#!/bin/sh\nexit 0\n"}
+			for name, content := range test.completions {
+				files[name] = content
+			}
+			download := writeArtifactDownload(t, buildTestZipArchive(t, files))
+			filter := NewFilter(&FilterOpts{NonInteractive: true, BundledCompletionShell: "bash", BundledCompletionCommand: test.command})
+			filter.repoName, filter.name = "tool", "tool.zip"
+			result, err := filter.processReleaseArtifact(download, "download")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer result.Close()
+			if result.final.PackagePath != "bin/tool" {
+				t.Fatalf("PackagePath = %q, want selected executable", result.final.PackagePath)
+			}
+			if result.final.BundledCompletion != nil || result.final.BundledCompletionName != "" {
+				t.Fatalf("unexpected bundled completion = %q (%q)", result.final.BundledCompletion, result.final.BundledCompletionName)
+			}
+		})
+	}
+}
+
+func writeArtifactDownload(t *testing.T, content []byte) string {
+	t.Helper()
+	download, err := os.CreateTemp(t.TempDir(), "artifact-download-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := download.Write(content); err != nil {
+		t.Fatal(err)
+	}
+	if err := download.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return download.Name()
+}
+
 func TestProcessReleaseArtifactResolvesArchiveMembersSafely(t *testing.T) {
 	originalResolver := resolver
 	resolver = testLinuxAMDResolver
