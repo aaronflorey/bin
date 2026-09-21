@@ -680,17 +680,19 @@ func TestProcessReleaseArtifactSkipsUnusableBundledCompletions(t *testing.T) {
 		name        string
 		command     string
 		completions map[string]string
+		warn        bool
 	}{
 		{name: "default operation", completions: map[string]string{"share/completions/tool.bash": "complete tool\n"}},
-		{name: "duplicate exact match", command: "tool", completions: map[string]string{"share/completions/tool.bash": "one", "share/complete/tool.bash": "two"}},
+		{name: "duplicate exact match", command: "tool", completions: map[string]string{"share/completions/tool.bash": "one", "share/complete/tool.bash": "two"}, warn: true},
 		{name: "wrong command", command: "tool", completions: map[string]string{"share/completions/other.bash": "complete other\n"}},
 		{name: "renamed command", command: "alias", completions: map[string]string{"share/completions/tool.bash": "complete tool\n"}},
-		{name: "empty", command: "tool", completions: map[string]string{"share/completions/tool.bash": ""}},
-		{name: "non utf8", command: "tool", completions: map[string]string{"share/completions/tool.bash": "\xff"}},
-		{name: "nul", command: "tool", completions: map[string]string{"share/completions/tool.bash": "complete\x00tool"}},
-		{name: "oversized", command: "tool", completions: map[string]string{"share/completions/tool.bash": strings.Repeat("x", bundledCompletionMaxBytes+1)}},
+		{name: "empty", command: "tool", completions: map[string]string{"share/completions/tool.bash": ""}, warn: true},
+		{name: "non utf8", command: "tool", completions: map[string]string{"share/completions/tool.bash": "\xff"}, warn: true},
+		{name: "nul", command: "tool", completions: map[string]string{"share/completions/tool.bash": "complete\x00tool"}, warn: true},
+		{name: "oversized", command: "tool", completions: map[string]string{"share/completions/tool.bash": strings.Repeat("x", bundledCompletionMaxBytes+1)}, warn: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			logs := captureDebugLogs(t)
 			files := map[string]string{"bin/tool": "#!/bin/sh\nexit 0\n"}
 			for name, content := range test.completions {
 				files[name] = content
@@ -708,6 +710,10 @@ func TestProcessReleaseArtifactSkipsUnusableBundledCompletions(t *testing.T) {
 			}
 			if result.final.BundledCompletion != nil || result.final.BundledCompletionName != "" {
 				t.Fatalf("unexpected bundled completion = %q (%q)", result.final.BundledCompletion, result.final.BundledCompletionName)
+			}
+			warned := strings.Contains(logs.String(), "Skipping bundled completion") || strings.Contains(logs.String(), "Skipping ambiguous bundled")
+			if warned != test.warn {
+				t.Fatalf("bundled completion warning = %t, want %t: %q", warned, test.warn, logs.String())
 			}
 		})
 	}
