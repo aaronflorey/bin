@@ -66,14 +66,16 @@ func (c *codeberg) Fetch(opts *FetchOpts) (*File, error) {
 		checksumAssets = append(checksumAssets, checksumAsset{Name: a.Name, URL: a.DownloadURL})
 	}
 	f := assets.NewFilter(&assets.FilterOpts{
-		SkipScoring:     opts.All,
-		PackagePath:     opts.PackagePath,
-		SkipPathCheck:   opts.SkipPatchCheck,
-		PackageName:     opts.PackageName,
-		SystemPackage:   opts.SystemPackage,
-		PackageType:     opts.PackageType,
-		NonInteractive:  opts.NonInteractive,
-		SelectionIntent: opts.SelectionIntent,
+		SkipScoring:              opts.All,
+		PackagePath:              opts.PackagePath,
+		SkipPathCheck:            opts.SkipPatchCheck,
+		PackageName:              opts.PackageName,
+		SystemPackage:            opts.SystemPackage,
+		PackageType:              opts.PackageType,
+		NonInteractive:           opts.NonInteractive,
+		SelectionIntent:          opts.SelectionIntent,
+		BundledCompletionShell:   opts.BundledCompletionShell,
+		BundledCompletionCommand: opts.BundledCompletionCommand,
 	})
 
 	autoSelect := f.ParseAutoSelection(opts.AutoSelect)
@@ -121,19 +123,21 @@ func (c *codeberg) Fetch(opts *FetchOpts) (*File, error) {
 	version := release.TagName
 
 	file := &File{
-		Data:                outFile.Source,
-		Name:                outFile.Name,
-		Version:             version,
-		ReleaseTagPrefix:    fetchedReleaseTagPrefix(version, opts.ReleaseTagPrefix),
-		ExpectedSHA:         finalExpectedSHA,
-		PackagePath:         outFile.PackagePath,
-		SourceAsset:         gf.Name,
-		PublishedAt:         codebergPublishedAt(release),
-		DownloadIntegrity:   downloadIntegrity,
-		InstalledIntegrity:  installedIntegrity,
-		ProcessingUnchanged: outFile.UnchangedBytes,
-		SelectionIntent:     f.SelectionIntent(),
-		Evidence:            f.Evidence(),
+		Data:                  outFile.Source,
+		Name:                  outFile.Name,
+		Version:               version,
+		ReleaseTagPrefix:      fetchedReleaseTagPrefix(version, opts.ReleaseTagPrefix),
+		ExpectedSHA:           finalExpectedSHA,
+		PackagePath:           outFile.PackagePath,
+		SourceAsset:           gf.Name,
+		PublishedAt:           codebergPublishedAt(release),
+		DownloadIntegrity:     downloadIntegrity,
+		InstalledIntegrity:    installedIntegrity,
+		ProcessingUnchanged:   outFile.UnchangedBytes,
+		SelectionIntent:       f.SelectionIntent(),
+		Evidence:              f.Evidence(),
+		BundledCompletion:     outFile.BundledCompletion,
+		BundledCompletionName: outFile.BundledCompletionName,
 	}
 
 	return file, nil

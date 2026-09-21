@@ -317,6 +317,42 @@ func TestGenericURLFetchRecordsArtifactEvidence(t *testing.T) {
 	}
 }
 
+func TestGenericURLFetchCarriesRequestedBundledCompletion(t *testing.T) {
+	filename := genericArtifactName("", ".zip")
+	command := "tool" + genericScriptExtension()
+	completionName := "share/completions/" + command + ".bash"
+	archive := genericZip(t, map[string][]byte{
+		"bin/" + command: genericRunnablePayload(t),
+		completionName:   []byte("complete bundled\n"),
+	})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+		_, _ = w.Write(archive)
+	}))
+	defer server.Close()
+
+	file, err := newGenericProvider(t, server.URL).Fetch(&FetchOpts{
+		NonInteractive:           true,
+		BundledCompletionShell:   "bash",
+		BundledCompletionCommand: command,
+	})
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	data := file.Data
+	t.Cleanup(func() {
+		if err := closeFileData(data); err != nil {
+			t.Errorf("close fetched file: %v", err)
+		}
+	})
+	if got := string(file.BundledCompletion); got != "complete bundled\n" {
+		t.Fatalf("BundledCompletion = %q", got)
+	}
+	if file.BundledCompletionName != completionName {
+		t.Fatalf("BundledCompletionName = %q, want %q", file.BundledCompletionName, completionName)
+	}
+}
+
 func TestGenericURLFetchProcessesTarAndRejectsNonRunnablePayload(t *testing.T) {
 	t.Run("tar", func(t *testing.T) {
 		filename := genericArtifactName("", ".tar")

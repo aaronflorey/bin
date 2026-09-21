@@ -44,6 +44,10 @@ type File struct {
 	// Evidence is the read-only record of the shared resolver's release,
 	// archive-member, transformation, and download decisions for this fetch.
 	Evidence *assets.ArtifactEvidence
+	// BundledCompletion carries the exact completion script requested during
+	// artifact processing. BundledCompletionName is its archive member identity.
+	BundledCompletion     []byte
+	BundledCompletionName string
 }
 
 // IntegrityRecord describes evidence for one byte scope. It is intentionally
@@ -74,17 +78,19 @@ func (f *File) Hash() ([]byte, error) {
 }
 
 type FetchOpts struct {
-	All              bool
-	AutoSelect       string
-	PackageName      string
-	PackagePath      string
-	SystemPackage    bool
-	PackageType      string
-	SkipPatchCheck   bool
-	Version          string
-	ReleaseTagPrefix string
-	NonInteractive   bool
-	SelectionIntent  *config.SelectionDescriptor
+	All                      bool
+	AutoSelect               string
+	PackageName              string
+	PackagePath              string
+	SystemPackage            bool
+	PackageType              string
+	SkipPatchCheck           bool
+	Version                  string
+	ReleaseTagPrefix         string
+	NonInteractive           bool
+	SelectionIntent          *config.SelectionDescriptor
+	BundledCompletionShell   string
+	BundledCompletionCommand string
 }
 
 type CleanupOpts struct {
