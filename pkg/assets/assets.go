@@ -150,6 +150,10 @@ type finalFile struct {
 	DownloadSHA256  string
 	InstalledSHA256 string
 	UnchangedBytes  bool
+	// BundledCompletion carries the one exact completion script requested for
+	// this fetch. It is copied from the staged artifact before cleanup.
+	BundledCompletion     []byte
+	BundledCompletionName string
 }
 
 type cleanupReadCloser struct {
@@ -212,6 +216,12 @@ type FilterOpts struct {
 	// SelectionIntent constrains release and archive-member resolution using a
 	// portable selection recorded by a previous managed install.
 	SelectionIntent *config.SelectionDescriptor
+
+	// BundledCompletionShell and BundledCompletionCommand request one exact
+	// bundled completion script from the selected executable's archive scope.
+	// Empty values leave completion discovery disabled.
+	BundledCompletionShell   string
+	BundledCompletionCommand string
 }
 
 type runtimeResolver struct{}
