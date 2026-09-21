@@ -78,14 +78,16 @@ func (g *genericURL) Fetch(opts *FetchOpts) (*File, error) {
 	}
 
 	f := assets.NewFilter(&assets.FilterOpts{
-		SkipScoring:     opts.All,
-		SkipPathCheck:   opts.SkipPatchCheck,
-		PackageName:     opts.PackageName,
-		PackagePath:     opts.PackagePath,
-		SystemPackage:   opts.SystemPackage,
-		PackageType:     opts.PackageType,
-		NonInteractive:  opts.NonInteractive,
-		SelectionIntent: opts.SelectionIntent,
+		SkipScoring:              opts.All,
+		SkipPathCheck:            opts.SkipPatchCheck,
+		PackageName:              opts.PackageName,
+		PackagePath:              opts.PackagePath,
+		SystemPackage:            opts.SystemPackage,
+		PackageType:              opts.PackageType,
+		NonInteractive:           opts.NonInteractive,
+		SelectionIntent:          opts.SelectionIntent,
+		BundledCompletionShell:   opts.BundledCompletionShell,
+		BundledCompletionCommand: opts.BundledCompletionCommand,
 	})
 	autoSelect := f.ParseAutoSelection(opts.AutoSelect)
 	if _, err := f.FilterAssets(name, []*assets.Asset{{Name: filename}}, autoSelect); err != nil {
@@ -98,15 +100,17 @@ func (g *genericURL) Fetch(opts *FetchOpts) (*File, error) {
 	}
 
 	return &File{
-		Data:                outFile.Source,
-		Name:                outFile.Name,
-		SourceAsset:         filename,
-		Version:             version,
-		Length:              resp.ContentLength,
-		PackagePath:         outFile.PackagePath,
-		ProcessingUnchanged: outFile.UnchangedBytes,
-		SelectionIntent:     f.SelectionIntent(),
-		Evidence:            f.Evidence(),
+		Data:                  outFile.Source,
+		Name:                  outFile.Name,
+		SourceAsset:           filename,
+		Version:               version,
+		Length:                resp.ContentLength,
+		PackagePath:           outFile.PackagePath,
+		ProcessingUnchanged:   outFile.UnchangedBytes,
+		SelectionIntent:       f.SelectionIntent(),
+		Evidence:              f.Evidence(),
+		BundledCompletion:     outFile.BundledCompletion,
+		BundledCompletionName: outFile.BundledCompletionName,
 	}, nil
 }
 

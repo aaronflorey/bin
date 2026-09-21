@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/aaronflorey/bin/pkg/config"
 	"github.com/krolaw/zipstream"
@@ -25,6 +26,8 @@ var (
 )
 
 var artifactProcessingBudgets = defaultArtifactBudgets()
+
+const bundledCompletionMaxBytes = 1 << 20
 
 var (
 	removeArtifactDownload = os.Remove
@@ -401,6 +404,7 @@ func (f *Filter) processReleaseArtifact(downloadPath, downloadSHA string) (*arti
 	// Versioned top-level wrappers are packaging details, not part of the
 	// portable member intent. Keep all other directories identity-bearing.
 	f.selectionIntent.ArchiveMember = normalizeArchiveMemberVersionWrapper(selectedEntry.identity)
+	bundledCompletion, bundledCompletionName := f.selectBundledCompletion(result.inventory, selectedEntry)
 	file, err := os.Open(selectedEntry.stagedPath)
 	if err != nil {
 		_ = result.Close()
@@ -422,8 +426,115 @@ func (f *Filter) processReleaseArtifact(downloadPath, downloadSHA string) (*arti
 	if !result.transformed {
 		packagePath = f.packagePath
 	}
-	result.final = &finalFile{Name: leaf, PackagePath: packagePath, Source: file, DownloadSHA256: downloadSHA, InstalledSHA256: installedSHA, UnchangedBytes: !result.transformed}
+	result.final = &finalFile{
+		Source:                file,
+		Name:                  leaf,
+		PackagePath:           packagePath,
+		DownloadSHA256:        downloadSHA,
+		InstalledSHA256:       installedSHA,
+		UnchangedBytes:        !result.transformed,
+		BundledCompletion:     bundledCompletion,
+		BundledCompletionName: bundledCompletionName,
+	}
 	return result, nil
+}
+
+func (f *Filter) selectBundledCompletion(inventory *artifactInventory, executable *artifactInventoryEntry) ([]byte, string) {
+	entry := f.bundledCompletionEntry(inventory, executable)
+	if entry == nil {
+		return nil, ""
+	}
+	content, err := readBundledCompletion(entry.stagedPath)
+	if err != nil {
+		return nil, ""
+	}
+	return content, entry.identity
+}
+
+func (f *Filter) bundledCompletionEntry(inventory *artifactInventory, executable *artifactInventoryEntry) *artifactInventoryEntry {
+	if f.opts == nil || f.opts.BundledCompletionShell == "" || f.opts.BundledCompletionCommand == "" || executable == nil {
+		return nil
+	}
+
+	scope, _ := artifactEntryScope(executable.identity)
+	var match *artifactInventoryEntry
+	for index := range inventory.entries {
+		entry := &inventory.entries[index]
+		if !isBundledCompletionCandidate(entry, scope, f.opts.BundledCompletionShell, f.opts.BundledCompletionCommand) {
+			continue
+		}
+		if match != nil {
+			return nil
+		}
+		match = entry
+	}
+	return match
+}
+
+func artifactEntryScope(identity string) (string, string) {
+	index := strings.LastIndex(identity, "!/")
+	if index < 0 {
+		return "", identity
+	}
+	return identity[:index], identity[index+2:]
+}
+
+func isBundledCompletionCandidate(entry *artifactInventoryEntry, scope, shell, command string) bool {
+	if entry.class != artifactEntryCompletion || entry.stagedPath == "" {
+		return false
+	}
+	entryScope, member := artifactEntryScope(entry.identity)
+	if entryScope != scope {
+		return false
+	}
+	parts := strings.Split(member, "/")
+	for index, part := range parts {
+		if !isCompletionDirectory(part) {
+			continue
+		}
+		return exactCompletionPath(parts[index+1:], shell, command)
+	}
+	return false
+}
+
+func isCompletionDirectory(name string) bool {
+	switch strings.ToLower(name) {
+	case "autocomplete", "completions", "complete":
+		return true
+	default:
+		return false
+	}
+}
+
+func exactCompletionPath(parts []string, shell, command string) bool {
+	switch shell {
+	case "bash":
+		return (len(parts) == 1 && parts[0] == command+".bash") ||
+			(len(parts) == 2 && parts[0] == "bash" && parts[1] == command)
+	case "zsh":
+		return len(parts) == 1 && parts[0] == "_"+command
+	case "fish":
+		return len(parts) == 1 && parts[0] == command+".fish"
+	default:
+		return false
+	}
+}
+
+func readBundledCompletion(stagedPath string) ([]byte, error) {
+	file, err := os.Open(stagedPath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	content, err := io.ReadAll(io.LimitReader(file, bundledCompletionMaxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(content) == 0 || len(content) > bundledCompletionMaxBytes || !utf8.Valid(content) || bytes.IndexByte(content, 0) >= 0 {
+		return nil, fmt.Errorf("invalid bundled completion")
+	}
+	return content, nil
 }
 
 // recordArchiveMemberEligibility captures runtime-dependent and staged-payload
