@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -100,6 +101,10 @@ type InstallOpts struct {
 	// install, interpreted as an explicit DMG bundle identity. PackageName still
 	// reaches providers as the release-product selection hint.
 	RequestedAppBundle string
+
+	// CompletionShell is the optional automatic completion shell selection. A
+	// non-nil empty value explicitly disables future automatic refresh.
+	CompletionShell *string
 }
 
 // InstallResult holds the outcome of a successful installation.
@@ -114,7 +119,19 @@ type InstallResult struct {
 func installBinary(opts InstallOpts) (result *InstallResult, err error) {
 	log.Debugf("Installing %q with provider=%q path=%q resolvePath=%t", opts.URL, opts.Provider, opts.Path, opts.ResolvePath)
 
-	p, pResult, err := fetchBinary(installProviderFactory, opts.URL, opts.Provider, opts.FetchOpts, opts.AllowProviderFallback)
+	existing, minAgeDays, pinned := resolveInstallState(opts)
+	fetchOpts := opts.FetchOpts
+	// installBinary is also the shared update and ensure path. Only this
+	// automatic opt-in may request a bundled completion from its fetch.
+	fetchOpts.BundledCompletionShell = ""
+	fetchOpts.BundledCompletionCommand = ""
+	automaticShell, automaticCommand := automaticCompletionFetchRequest(opts, existing)
+	if automaticShell != "" && automaticCommand != "" {
+		fetchOpts.BundledCompletionShell = automaticShell
+		fetchOpts.BundledCompletionCommand = automaticCommand
+	}
+
+	p, pResult, err := fetchBinary(installProviderFactory, opts.URL, opts.Provider, fetchOpts, opts.AllowProviderFallback)
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +146,6 @@ func installBinary(opts InstallOpts) (result *InstallResult, err error) {
 	}()
 	log.Debugf("Fetched %s version %s from provider %q", pResult.Name, pResult.Version, p.GetID())
 
-	existing, minAgeDays, pinned := resolveInstallState(opts)
 	if err := ensureReleaseAge(p.GetID(), pResult.Version, pResult.PublishedAt, minAgeDays); err != nil {
 		return nil, err
 	}
@@ -190,10 +206,11 @@ func installBinary(opts InstallOpts) (result *InstallResult, err error) {
 		AppBundle:          "",
 		PackagePath:        pResult.PackagePath,
 		SourceAsset:        pResult.SourceAsset,
-		SelectionIntent:    installedSelectionIntent(pResult, opts.FetchOpts, existing),
+		SelectionIntent:    installedSelectionIntent(pResult, fetchOpts, existing),
 		ReleaseTagPrefix:   pResult.ReleaseTagPrefix,
 		DownloadIntegrity:  configIntegrityRecord(pResult.DownloadIntegrity),
 		InstalledIntegrity: installedIntegrityRecord(pResult.InstalledIntegrity, hashString),
+		CompletionShell:    config.CloneCompletionShell(opts.CompletionShell),
 		Pinned:             pinned,
 		MinAgeDays:         minAgeDays,
 	}
@@ -213,12 +230,107 @@ func installBinary(opts InstallOpts) (result *InstallResult, err error) {
 	}
 	warnDuplicateManagedHash(installed.Path, installed.Hash)
 	log.Debugf("Saved installed binary config for %q at %s", logicalName, configPath)
+	refreshAutomaticCompletion(configPath, resolvedPath, pResult, automaticCommand)
 
 	return &InstallResult{
 		Name:    logicalName,
 		Version: pResult.Version,
 		Path:    configPath,
 	}, nil
+}
+
+// automaticCompletionFetchRequest returns the one bundled script request that
+// can be made while fetching this artifact. A fresh artifact's executable name
+// is unavailable until after Fetch, so the request uses the intended installed
+// command. Bundled publication is skipped unless that command and the fetched
+// executable both match the installed executable; native fallback only needs
+// the fetched executable to match.
+func automaticCompletionFetchRequest(opts InstallOpts, existing *config.Binary) (string, string) {
+	shell := selectedAutomaticCompletionShell(opts.CompletionShell, existing)
+	if shell == "" {
+		return "", ""
+	}
+
+	command := knownInstallCommand(opts)
+	if command == "" {
+		command = completionCommandFromURL(opts.URL)
+	}
+	if _, err := completionFilename(shell, command); err != nil {
+		return "", ""
+	}
+	return shell, command
+}
+
+func selectedAutomaticCompletionShell(requested *string, existing *config.Binary) string {
+	if requested != nil {
+		return *requested
+	}
+	if existing != nil && existing.CompletionShell != nil {
+		return *existing.CompletionShell
+	}
+	return ""
+}
+
+func knownInstallCommand(opts InstallOpts) string {
+	if opts.Path != "" && !opts.ResolvePath {
+		return filepath.Base(expandTrackedBinaryPath(opts.Path))
+	}
+	if opts.Path != "" {
+		path := expandTrackedBinaryPath(opts.Path)
+		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+			return filepath.Base(path)
+		}
+	}
+	return opts.LogicalName
+}
+
+func completionCommandFromURL(source string) string {
+	parsed, err := url.Parse(source)
+	if err != nil {
+		return ""
+	}
+	return filepath.Base(strings.TrimSuffix(parsed.Path, "/"))
+}
+
+// refreshAutomaticCompletion is deliberately best-effort. It runs only after
+// the executable and its managed record have committed, so a completion
+// failure can never affect the binary lifecycle result.
+func refreshAutomaticCompletion(configPath, executablePath string, fetched *providers.File, requestedCommand string) {
+	binary, err := config.GetBinary(configPath)
+	if err != nil || binary == nil {
+		if err == nil {
+			err = errors.New("binary is not managed")
+		}
+		log.Warnf("Could not load completion metadata for %s: %v", configPath, err)
+		return
+	}
+	if binary.CompletionShell == nil || *binary.CompletionShell == "" {
+		return
+	}
+
+	shell := *binary.CompletionShell
+	command := filepath.Base(executablePath)
+	if fetched == nil || !commandNameMatches(fetched.Name, command) {
+		log.Debugf("Skipping automatic completion for renamed command %q", command)
+		return
+	}
+	if _, err := completionFilename(shell, command); err != nil {
+		log.Warnf("Could not refresh %s completion for %s: %v", shell, command, err)
+		return
+	}
+
+	if commandNameMatches(requestedCommand, command) && len(fetched.BundledCompletion) != 0 {
+		if _, err := publishManagedCompletion(binary.Path, binary.Hash, shell, command, fetched.BundledCompletion); err == nil {
+			return
+		} else {
+			log.Warnf("Could not publish bundled %s completion for %s; trying native generation: %v", shell, command, err)
+		}
+	} else if len(fetched.BundledCompletion) != 0 {
+		log.Debugf("Skipping bundled completion requested for %q because installed command is %q", requestedCommand, command)
+	}
+	if _, err := syncNativeCompletion(binary.Path, shell, command, nil); err != nil {
+		log.Warnf("Could not refresh %s completion for %s: %v", shell, command, err)
+	}
 }
 
 func configIntegrityRecord(record *providers.IntegrityRecord) *config.IntegrityRecord {

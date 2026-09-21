@@ -63,7 +63,8 @@ func TestIsPackagePathSelectionError(t *testing.T) {
 func TestEnsureAppliesPersistedSelectionIntent(t *testing.T) {
 	installDir := setupTestConfig(t)
 	path := filepath.Join(installDir, "missing-tool")
-	if err := config.UpsertBinary(&config.Binary{Path: path, RemoteName: "alias", Version: "1.0.0", URL: "https://example.test/tool", Provider: "github", SourceAsset: "tool-cli-v1.0.0-linux-amd64-musl.tar.gz", PackagePath: "tool-v1/bin/tool"}); err != nil {
+	shell := "bash"
+	if err := config.UpsertBinary(&config.Binary{Path: path, RemoteName: "missing-tool", Version: "1.0.0", URL: "https://example.test/tool", Provider: "github", SourceAsset: "tool-cli-v1.0.0-linux-amd64-musl.tar.gz", PackagePath: "tool-v1/bin/tool", CompletionShell: &shell}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -74,13 +75,17 @@ func TestEnsureAppliesPersistedSelectionIntent(t *testing.T) {
 			if opts.SelectionIntent == nil || opts.SelectionIntent.LogicalProduct != "tool" || opts.SelectionIntent.ArchiveMember != "bin/tool" {
 				t.Fatalf("ensure derived selection intent = %#v", opts.SelectionIntent)
 			}
+			if opts.BundledCompletionShell != shell || opts.BundledCompletionCommand != "missing-tool" {
+				t.Fatalf("ensure bundled completion request = (%q, %q)", opts.BundledCompletionShell, opts.BundledCompletionCommand)
+			}
 			return &providers.File{
-				Data:            strings.NewReader("#!/bin/sh\nexit 0\n"),
-				Name:            "tool",
-				Version:         "1.0.0",
-				SourceAsset:     "tool-cli-v2.0.0-linux-amd64-musl.tar.gz",
-				PackagePath:     "tool-v2/bin/tool",
-				SelectionIntent: opts.SelectionIntent,
+				Data:              strings.NewReader("#!/bin/sh\nexit 0\n"),
+				Name:              "missing-tool",
+				Version:           "1.0.0",
+				BundledCompletion: []byte("bundled completion"),
+				SourceAsset:       "tool-cli-v2.0.0-linux-amd64-musl.tar.gz",
+				PackagePath:       "tool-v2/bin/tool",
+				SelectionIntent:   opts.SelectionIntent,
 			}, nil
 		}}, nil
 	}
@@ -95,6 +100,10 @@ func TestEnsureAppliesPersistedSelectionIntent(t *testing.T) {
 	if ensured.SelectionIntent == nil || ensured.SelectionIntent.LogicalProduct != "tool" || ensured.SelectionIntent.ArchiveMember != "bin/tool" {
 		t.Fatalf("ensure did not persist derived selection intent: %#v", ensured.SelectionIntent)
 	}
+	if ensured.CompletionShell == nil || *ensured.CompletionShell != shell {
+		t.Fatalf("ensure did not preserve completion policy: %#v", ensured)
+	}
+	assertCompletionContent(t, shell, "missing-tool", "bundled completion")
 }
 
 func TestEnsureUsesPersistedDMGExecutablePath(t *testing.T) {

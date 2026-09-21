@@ -12,6 +12,7 @@ import (
 	"github.com/aaronflorey/bin/pkg/config"
 	"github.com/aaronflorey/bin/pkg/prompt"
 	"github.com/aaronflorey/bin/pkg/providers"
+	"github.com/caarlos0/log"
 )
 
 type removeTestProvider struct{ cleanupErr error }
@@ -274,4 +275,156 @@ func TestRemoveCleanupFailurePreservesBinaryAndConfig(t *testing.T) {
 	if _, ok := config.Get().Bins[trackedPath]; !ok {
 		t.Fatalf("expected config entry %s to remain", trackedPath)
 	}
+}
+
+func TestRemoveCleansOwnedCompletionsAfterBinaryRemoval(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		contents []byte
+	}{
+		{name: "matching file", contents: []byte("completion")},
+		{name: "missing file", contents: []byte("completion")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			installDir := setupTestConfig(t)
+			binaryPath, destination := setupOwnedCompletionRemoval(t, installDir, tc.contents)
+			if tc.name == "missing file" {
+				if err := os.Remove(destination); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			originalRemove := removeManagedCompletionFile
+			removeManagedCompletionFile = func(path string) error {
+				if path != destination {
+					t.Fatalf("removed completion path = %q, want %q", path, destination)
+				}
+				if _, err := os.Stat(binaryPath); !os.IsNotExist(err) {
+					t.Fatalf("completion cleanup ran before binary removal: %v", err)
+				}
+				return originalRemove(path)
+			}
+			t.Cleanup(func() { removeManagedCompletionFile = originalRemove })
+
+			root := newRemoveCmd()
+			root.newProvider = func(string, string) (providers.Provider, error) { return removeTestProvider{}, nil }
+			root.cmd.SetArgs([]string{binaryPath})
+			if err := root.cmd.Execute(); err != nil {
+				t.Fatalf("remove: %v", err)
+			}
+			if _, ok := config.Get().Bins[binaryPath]; ok {
+				t.Fatalf("remove retained config entry %s", binaryPath)
+			}
+			if _, err := os.Lstat(destination); !os.IsNotExist(err) {
+				t.Fatalf("completion file remains after remove: %v", err)
+			}
+		})
+	}
+}
+
+func TestRemoveWarnsAndForgetsOwnershipWhenCompletionCleanupFails(t *testing.T) {
+	installDir := setupTestConfig(t)
+	binaryPath, destination := setupOwnedCompletionRemoval(t, installDir, []byte("completion"))
+	originalRemove := removeManagedCompletionFile
+	removeManagedCompletionFile = func(path string) error {
+		if path != destination {
+			t.Fatalf("removed completion path = %q, want %q", path, destination)
+		}
+		if _, err := os.Stat(binaryPath); !os.IsNotExist(err) {
+			t.Fatalf("completion cleanup ran before binary removal: %v", err)
+		}
+		return errors.New("completion cleanup boom")
+	}
+	t.Cleanup(func() { removeManagedCompletionFile = originalRemove })
+
+	previousLogger := log.Log
+	var logs bytes.Buffer
+	logger := log.New(&logs)
+	logger.Level = log.WarnLevel
+	log.Log = logger
+	t.Cleanup(func() { log.Log = previousLogger })
+
+	root := newRemoveCmd()
+	root.newProvider = func(string, string) (providers.Provider, error) { return removeTestProvider{}, nil }
+	root.cmd.SetArgs([]string{binaryPath})
+	if err := root.cmd.Execute(); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if _, ok := config.Get().Bins[binaryPath]; ok {
+		t.Fatalf("remove retained config entry %s", binaryPath)
+	}
+	if _, err := os.Lstat(destination); err != nil {
+		t.Fatalf("cleanup failure removed completion: %v", err)
+	}
+	if !strings.Contains(logs.String(), destination) || !strings.Contains(logs.String(), "completion cleanup boom") {
+		t.Fatalf("cleanup failure warning = %q", logs.String())
+	}
+}
+
+func TestRemovePreservesNoncanonicalCompletionOwnershipPath(t *testing.T) {
+	installDir := setupTestConfig(t)
+	binaryPath, _ := setupOwnedCompletionRemoval(t, installDir, []byte("completion"))
+	outsidePath := filepath.Join(t.TempDir(), "outside-completion")
+	if err := os.WriteFile(outsidePath, []byte("completion"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	managed := config.CloneBinary(config.Get().Bins[binaryPath])
+	managed.CompletionOwnership["bash"] = &config.CompletionOwnershipRecord{Path: outsidePath, SHA256: completionHash([]byte("completion"))}
+	if err := config.UpsertBinary(managed); err != nil {
+		t.Fatal(err)
+	}
+
+	previousLogger := log.Log
+	var logs bytes.Buffer
+	logger := log.New(&logs)
+	logger.Level = log.WarnLevel
+	log.Log = logger
+	t.Cleanup(func() { log.Log = previousLogger })
+
+	root := newRemoveCmd()
+	root.newProvider = func(string, string) (providers.Provider, error) { return removeTestProvider{}, nil }
+	root.cmd.SetArgs([]string{binaryPath})
+	if err := root.cmd.Execute(); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if _, ok := config.Get().Bins[binaryPath]; ok {
+		t.Fatalf("remove retained config entry %s", binaryPath)
+	}
+	if _, err := os.Lstat(outsidePath); err != nil {
+		t.Fatalf("remove deleted noncanonical completion path: %v", err)
+	}
+	if !strings.Contains(logs.String(), outsidePath) || !strings.Contains(logs.String(), "canonical managed destination") {
+		t.Fatalf("noncanonical ownership warning = %q", logs.String())
+	}
+}
+
+func setupOwnedCompletionRemoval(t *testing.T, installDir string, contents []byte) (string, string) {
+	t.Helper()
+	binaryPath := filepath.Join(installDir, "tool")
+	writeTestBinary(t, binaryPath)
+	destination, err := completionDestination(os.Getenv("BIN_CONFIG"), "bash", "tool")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(destination, contents, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.UpsertBinary(&config.Binary{
+		Path:        binaryPath,
+		RemoteName:  "tool",
+		Version:     "1.0.0",
+		Hash:        "hash",
+		URL:         "https://example.test/tool",
+		Provider:    "test",
+		InstallMode: installModeBinary,
+		CompletionOwnership: map[string]*config.CompletionOwnershipRecord{
+			"bash": {Path: destination, SHA256: completionHash(contents)},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return binaryPath, destination
 }

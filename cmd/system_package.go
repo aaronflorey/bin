@@ -22,6 +22,11 @@ var lookPathCommand = exec.LookPath
 var applicationsDir = "/Applications"
 
 func installSystemPackage(opts InstallOpts) (*InstallResult, error) {
+	// System packages never participate in managed completion fetching or
+	// generation, even if an internal caller populated these direct-binary
+	// fields.
+	opts.FetchOpts.BundledCompletionShell = ""
+	opts.FetchOpts.BundledCompletionCommand = ""
 	p, pResult, err := fetchBinary(installProviderFactory, opts.URL, opts.Provider, opts.FetchOpts, opts.AllowProviderFallback)
 	if err != nil {
 		return nil, err

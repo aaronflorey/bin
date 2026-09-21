@@ -1,16 +1,15 @@
 # Local Issue State
 
-Generated: 2026-09-21T14:10:36Z
+Generated: 2026-09-21T22:47:25Z
 
 NOTE: This file is auto-generated. Do not edit manually.
 
-Tickets: 5 active, 14 resolved
+Tickets: 4 active, 15 resolved
 
 ## Active Tickets
 
 | Effort | Ticket | Type | Mode | Status | Blocked by |
 | --- | --- | --- | --- | --- | --- |
-| [reliability-managed-completions](reliability-managed-completions/spec.md) | [17-integrate-completion-lifecycle](reliability-managed-completions/issues/17-integrate-completion-lifecycle.md) | — | — | ready-for-agent | 14 / Prefer exact bundled completion files. |
 | [reliability-managed-completions](reliability-managed-completions/spec.md) | [18-document-and-verify](reliability-managed-completions/issues/18-document-and-verify.md) | — | — | ready-for-agent | 17 / Refresh opted-in completions and clean up owned files. |
 | [windows-compatibility](windows-compatibility/spec.md) | [01-resolve-managed-windows-targets](windows-compatibility/issues/01-resolve-managed-windows-targets.md) | — | — | ready-for-agent | None (can start immediately). |
 | [windows-compatibility](windows-compatibility/spec.md) | [02-preserve-go-import-paths](windows-compatibility/issues/02-preserve-go-import-paths.md) | — | — | ready-for-agent | None (can start immediately). |
@@ -34,3 +33,4 @@ Tickets: 5 active, 14 resolved
 | [reliability-managed-completions](reliability-managed-completions/spec.md) | [12-inspect-artifacts](reliability-managed-completions/issues/12-inspect-artifacts.md) | — | — | resolved | 11 / Process generic URLs through the shared resolver |
 | [reliability-managed-completions](reliability-managed-completions/spec.md) | [13-sync-managed-completions](reliability-managed-completions/issues/13-sync-managed-completions.md) | — | — | resolved | 12 / Inspect artifact decisions without side effects (resolved). |
 | [reliability-managed-completions](reliability-managed-completions/spec.md) | [14-use-bundled-completions](reliability-managed-completions/issues/14-use-bundled-completions.md) | — | — | resolved | 13 / Sync completions for one managed binary. |
+| [reliability-managed-completions](reliability-managed-completions/spec.md) | [17-integrate-completion-lifecycle](reliability-managed-completions/issues/17-integrate-completion-lifecycle.md) | — | — | resolved | 14 / Prefer exact bundled completion files. |

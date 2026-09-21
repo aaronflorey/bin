@@ -1,6 +1,6 @@
 # 17: Refresh opted-in completions and clean up owned files
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 **Blocked by:** 14 / Prefer exact bundled completion files.
 
@@ -25,3 +25,19 @@ After a direct binary has been removed, or prune has confirmed its absence, atte
 ## Verification
 
 Extend the existing install/update/ensure/remove/prune tests and portable-config tests at their current injectable seams. Reuse the helper and filesystem cases from 13 instead of duplicating them for every command. Run the focused tests and the repository lint, race, test, verify, and build checks from the spec.
+
+## Progress
+
+- [x] Slice 1: persist the machine-local automatic shell choice, expose the install flag, and preserve/export it correctly.
+- [x] Slice 2: refresh opted-in completions at the shared successful direct-binary install boundary.
+- [x] Slice 3: clean recorded completion files during remove and prune without blocking binary removal.
+- [x] Slice 4: run focused/full verification and address integration gaps.
+- [x] Review the completed task with `code-review` and commit the approved result.
+
+## Answer
+
+Implemented the machine-local `--completions` opt-in across direct install, update, and actual ensure reinstall paths. Automatic refresh reuses the fetched artifact after the binary/config commit, prefers an exact bundled script, falls back to native generation where safe, and keeps failures warning-only. Portable export/import excludes and preserves local completion policy and ownership.
+
+Remove and prune now clean only canonical, unmodified, exclusively owned completion files under the active config's completion subtree after confirming the binary is absent. Unsafe or failed cleanup is warned and forgotten without blocking binary removal.
+
+The final implementation passed focused integration coverage, `mise run lint`, `mise run test-race`, `mise run test`, `mise run verify`, and `mise run build`, and received approval on both standards and spec review axes.

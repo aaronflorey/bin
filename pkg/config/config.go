@@ -153,6 +153,11 @@ type Binary struct {
 	// recorded continue to load unchanged.
 	DownloadIntegrity  *IntegrityRecord `json:"download_integrity,omitempty"`
 	InstalledIntegrity *IntegrityRecord `json:"installed_integrity,omitempty"`
+	// CompletionShell is the optional shell selected on this machine for
+	// automatic completion refresh. A nil value leaves automatic refresh off.
+	// It is intentionally excluded from portable export and preserved when a
+	// managed record is otherwise updated.
+	CompletionShell *string `json:"completion_shell,omitempty"`
 	// CompletionOwnership records bin-owned completion files on this machine.
 	// It is intentionally excluded from portable export and preserved when a
 	// managed record is otherwise updated.
@@ -223,7 +228,7 @@ type IntegrityRecord struct {
 }
 
 // CloneBinary returns an independent copy of binary, including optional
-// integrity records, selection intent, and local completion ownership.
+// integrity records, selection intent, and local completion settings.
 func CloneBinary(binary *Binary) *Binary {
 	if binary == nil {
 		return nil
@@ -233,7 +238,19 @@ func CloneBinary(binary *Binary) *Binary {
 	clone.SelectionIntent = CloneSelectionDescriptor(binary.SelectionIntent)
 	clone.DownloadIntegrity = CloneIntegrityRecord(binary.DownloadIntegrity)
 	clone.InstalledIntegrity = CloneIntegrityRecord(binary.InstalledIntegrity)
+	clone.CompletionShell = CloneCompletionShell(binary.CompletionShell)
 	clone.CompletionOwnership = CloneCompletionOwnership(binary.CompletionOwnership)
+	return &clone
+}
+
+// CloneCompletionShell returns an independent copy of the optional local
+// automatic-completion shell choice.
+func CloneCompletionShell(shell *string) *string {
+	if shell == nil {
+		return nil
+	}
+
+	clone := *shell
 	return &clone
 }
 
@@ -605,7 +622,7 @@ func CommitBinaryTransaction(transaction BinaryTransaction) error {
 		}
 
 		previous := CloneBinary(loaded.Bins[transaction.Intended.Path])
-		transaction.Intended = preserveCompletionOwnership(previous, transaction.Intended)
+		transaction.Intended = preserveLocalCompletionSettings(previous, transaction.Intended)
 		unresolved, err := prepareUnresolvedTransaction(transaction, previous)
 		if err != nil {
 			cfg = loaded
@@ -867,8 +884,18 @@ func restoreTransactionRecord(current *config, path string, previous *Binary) {
 	current.Bins[path] = CloneBinary(previous)
 }
 
-func preserveCompletionOwnership(existing, replacement *Binary) *Binary {
+func preserveLocalCompletionSettings(existing, replacement *Binary) *Binary {
 	updated := CloneBinary(replacement)
+	completionShellSpecified := updated.CompletionShell != nil
+	if !completionShellSpecified && existing != nil {
+		updated.CompletionShell = CloneCompletionShell(existing.CompletionShell)
+	}
+	// An empty non-nil value is a transient explicit "off" request from a
+	// caller. Persist off as the absence of a local choice.
+	if updated.CompletionShell != nil && *updated.CompletionShell == "" {
+		updated.CompletionShell = nil
+	}
+
 	if existing == nil || len(existing.CompletionOwnership) == 0 {
 		return updated
 	}
@@ -980,7 +1007,7 @@ func UpsertBinary(c *Binary) error {
 		if err := checkBinaryResolved(current, c.Path); err != nil {
 			return err
 		}
-		current.Bins[c.Path] = preserveCompletionOwnership(current.Bins[c.Path], c)
+		current.Bins[c.Path] = preserveLocalCompletionSettings(current.Bins[c.Path], c)
 		return nil
 	})
 }
@@ -997,26 +1024,66 @@ func UpsertBinaries(binaries []*Binary) error {
 				if err := checkBinaryResolved(current, c.Path); err != nil {
 					return err
 				}
-				current.Bins[c.Path] = preserveCompletionOwnership(current.Bins[c.Path], c)
+				current.Bins[c.Path] = preserveLocalCompletionSettings(current.Bins[c.Path], c)
 			}
 		}
 		return nil
 	})
 }
 
-// RemoveBinaries removes the specified paths
-// from bin configuration. It doesn't care about the order
+// RemoveBinaries removes the specified paths from bin configuration.
 func RemoveBinaries(paths []string) error {
+	return RemoveBinariesLocked(paths, nil)
+}
+
+// RemoveBinariesLocked removes paths while holding the config locks. When
+// beforeRemove is present, it runs for each current record before any record
+// is forgotten. The callback is for best-effort cleanup; it cannot prevent
+// removal. Other records are snapshots of all other current binaries, so a
+// callback can make ownership checks without a concurrent config change.
+func RemoveBinariesLocked(paths []string, beforeRemove func(configPath string, binary *Binary, others []*Binary)) error {
 	cfgMu.Lock()
 	defer cfgMu.Unlock()
 
-	return mutateConfigLocked(func(current *config) error {
+	configPath, err := getConfigPath()
+	if err != nil {
+		return err
+	}
+
+	return withConfigLock(configPath, func() error {
+		current, _, err := loadConfigLocked(configPath)
+		if err != nil {
+			return err
+		}
 		for _, p := range paths {
-			if err := checkBinaryResolved(current, p); err != nil {
+			if err := checkBinaryResolved(&current, p); err != nil {
+				cfg = current
 				return err
 			}
+		}
+		for _, p := range paths {
+			binary, ok := current.Bins[p]
+			if !ok {
+				continue
+			}
+			if beforeRemove != nil {
+				others := make([]*Binary, 0, len(current.Bins)-1)
+				for otherPath, other := range current.Bins {
+					if otherPath != p {
+						others = append(others, CloneBinary(other))
+					}
+				}
+				beforeRemove(configPath, CloneBinary(binary), others)
+			}
+		}
+		for _, p := range paths {
 			delete(current.Bins, p)
 		}
+		if err := writeConfig(configPath, current); err != nil {
+			cfg = current
+			return err
+		}
+		cfg = current
 		return nil
 	})
 }
