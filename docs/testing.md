@@ -34,6 +34,29 @@ mise run coverage
 - Provider normalization, untrusted remote-name rejection, and asset selection in `pkg/providers/*_test.go`
 - Portable executable-name and archive-member validation in `pkg/assets/*_test.go`
 - System package support in `pkg/systempackage/*_test.go`
+- Managed completion sync, bounded native generation, ownership cleanup, and
+  automatic-refresh policy in `cmd/*_test.go` and `pkg/assets/*_test.go`
+
+## Managed-completion native smoke expectations
+
+Completion tests use a controlled helper executable and disposable config,
+install, and temporary directories. They must not fetch a live release, use a
+privileged package operation, read a developer config, or alter persistent
+shell startup files.
+
+When exercising shell loading outside the Go suite, use a disposable `HOME` and
+`BIN_CONFIG` and configure the shell explicitly. The isolated smoke expectation
+is that Bash can source the owned Bash file, Zsh has the owned Zsh directory in
+`fpath` before `compinit` and accepts a file whose first line is `#compdef
+<command>`, and Fish has the owned Fish directory in `fish_complete_path`. Do
+not rely on a developer's shell initialization or completion directories.
+
+The workflow runs the Go suite on `ubuntu-latest` and `macos-latest`; its race
+and coverage suites run on `ubuntu-latest`. This provides native Linux and
+macOS Go-suite evidence. The isolated shell-loading subtests skip and report
+unavailable shells as untested; unavailable platforms are likewise untested.
+Windows compatibility coverage is owned by its separate platform work rather
+than a second completion matrix.
 
 ## CI smoke coverage
 
