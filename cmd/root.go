@@ -163,6 +163,7 @@ func newRootCmd(version string, exit func(int)) *rootCmd {
 		newRecoverCmd().cmd,
 		newListCmd().cmd,
 		newPruneCmd().cmd,
+		newCompletionsCmd().cmd,
 		newVersionCmd(version).cmd,
 		newInspectCmd().cmd,
 	)
@@ -290,9 +291,9 @@ func getBinPath(name string) (string, error) {
 	cfg := config.Get()
 	if err != nil {
 		log.Log.Debugf("binary %s not found in PATH %v", name, err)
-		if !strings.Contains(name, "/") {
+		if !strings.ContainsAny(name, `/\\`) {
 			for _, b := range cfg.Bins {
-				if filepath.Base(b.Path) == name {
+				if b != nil && commandNameMatches(filepath.Base(b.Path), name) {
 					return b.Path, nil
 				}
 			}

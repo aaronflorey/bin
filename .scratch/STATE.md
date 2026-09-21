@@ -1,16 +1,15 @@
 # Local Issue State
 
-Generated: 2026-09-20T03:38:12Z
+Generated: 2026-09-21T12:26:53Z
 
 NOTE: This file is auto-generated. Do not edit manually.
 
-Tickets: 7 active, 12 resolved
+Tickets: 6 active, 13 resolved
 
 ## Active Tickets
 
 | Effort | Ticket | Type | Mode | Status | Blocked by |
 | --- | --- | --- | --- | --- | --- |
-| [reliability-managed-completions](reliability-managed-completions/spec.md) | [13-sync-managed-completions](reliability-managed-completions/issues/13-sync-managed-completions.md) | — | — | ready-for-agent | 12 / Inspect artifact decisions without side effects (resolved). |
 | [reliability-managed-completions](reliability-managed-completions/spec.md) | [14-use-bundled-completions](reliability-managed-completions/issues/14-use-bundled-completions.md) | — | — | ready-for-agent | 13 / Sync completions for one managed binary. |
 | [reliability-managed-completions](reliability-managed-completions/spec.md) | [17-integrate-completion-lifecycle](reliability-managed-completions/issues/17-integrate-completion-lifecycle.md) | — | — | ready-for-agent | 14 / Prefer exact bundled completion files. |
 | [reliability-managed-completions](reliability-managed-completions/spec.md) | [18-document-and-verify](reliability-managed-completions/issues/18-document-and-verify.md) | — | — | ready-for-agent | 17 / Refresh opted-in completions and clean up owned files. |
@@ -34,3 +33,4 @@ Tickets: 7 active, 12 resolved
 | [reliability-managed-completions](reliability-managed-completions/spec.md) | [10-select-dmg-bundle](reliability-managed-completions/issues/10-select-dmg-bundle.md) | — | — | resolved | 01 / Contain remote names and clean failed fetches; 09 / Persist stable selection intent |
 | [reliability-managed-completions](reliability-managed-completions/spec.md) | [11-process-generic-urls](reliability-managed-completions/issues/11-process-generic-urls.md) | — | — | resolved | 09 / Persist stable selection intent |
 | [reliability-managed-completions](reliability-managed-completions/spec.md) | [12-inspect-artifacts](reliability-managed-completions/issues/12-inspect-artifacts.md) | — | — | resolved | 11 / Process generic URLs through the shared resolver |
+| [reliability-managed-completions](reliability-managed-completions/spec.md) | [13-sync-managed-completions](reliability-managed-completions/issues/13-sync-managed-completions.md) | — | — | resolved | 12 / Inspect artifact decisions without side effects (resolved). |

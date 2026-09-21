@@ -153,8 +153,19 @@ type Binary struct {
 	// recorded continue to load unchanged.
 	DownloadIntegrity  *IntegrityRecord `json:"download_integrity,omitempty"`
 	InstalledIntegrity *IntegrityRecord `json:"installed_integrity,omitempty"`
-	Pinned             bool             `json:"pinned"`
-	MinAgeDays         int              `json:"min_age_days,omitempty"`
+	// CompletionOwnership records bin-owned completion files on this machine.
+	// It is intentionally excluded from portable export and preserved when a
+	// managed record is otherwise updated.
+	CompletionOwnership map[string]*CompletionOwnershipRecord `json:"completion_ownership,omitempty"`
+	Pinned              bool                                  `json:"pinned"`
+	MinAgeDays          int                                   `json:"min_age_days,omitempty"`
+}
+
+// CompletionOwnershipRecord identifies a bin-owned completion file and the
+// SHA-256 digest of the content bin wrote to it.
+type CompletionOwnershipRecord struct {
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256"`
 }
 
 // SelectionDescriptor identifies a deliberate logical product and compatible
@@ -212,7 +223,7 @@ type IntegrityRecord struct {
 }
 
 // CloneBinary returns an independent copy of binary, including optional
-// integrity records and selection intent.
+// integrity records, selection intent, and local completion ownership.
 func CloneBinary(binary *Binary) *Binary {
 	if binary == nil {
 		return nil
@@ -222,7 +233,27 @@ func CloneBinary(binary *Binary) *Binary {
 	clone.SelectionIntent = CloneSelectionDescriptor(binary.SelectionIntent)
 	clone.DownloadIntegrity = CloneIntegrityRecord(binary.DownloadIntegrity)
 	clone.InstalledIntegrity = CloneIntegrityRecord(binary.InstalledIntegrity)
+	clone.CompletionOwnership = CloneCompletionOwnership(binary.CompletionOwnership)
 	return &clone
+}
+
+// CloneCompletionOwnership returns an independent copy of completion
+// ownership records.
+func CloneCompletionOwnership(records map[string]*CompletionOwnershipRecord) map[string]*CompletionOwnershipRecord {
+	if records == nil {
+		return nil
+	}
+
+	clone := make(map[string]*CompletionOwnershipRecord, len(records))
+	for shell, record := range records {
+		if record == nil {
+			clone[shell] = nil
+			continue
+		}
+		copied := *record
+		clone[shell] = &copied
+	}
+	return clone
 }
 
 // CloneSelectionDescriptor returns an independent copy of a selection
@@ -475,6 +506,70 @@ func GetBinary(path string) (*Binary, error) {
 	return CloneBinary(cfg.Bins[path]), nil
 }
 
+// MutateBinaryLocked reloads one managed binary while holding both config
+// locks, lets mutate update its copy, and saves that copy before releasing the
+// locks. The other records are read-only snapshots for conflict checks.
+//
+// Callers that mutate an external file and its local metadata together can use
+// this to recheck current state immediately before publication. If saving fails
+// after mutate has changed an external file, this function intentionally does
+// not attempt to undo that external change.
+func MutateBinaryLocked(path string, mutate func(configPath string, binary *Binary, others []*Binary) error) error {
+	if path == "" {
+		return errors.New("managed binary path is required")
+	}
+	if mutate == nil {
+		return errors.New("managed binary mutation is required")
+	}
+
+	cfgMu.Lock()
+	defer cfgMu.Unlock()
+
+	configPath, err := getConfigPath()
+	if err != nil {
+		return err
+	}
+
+	return withConfigLock(configPath, func() error {
+		loaded, _, err := loadConfigLocked(configPath)
+		if err != nil {
+			return err
+		}
+		if err := checkBinaryResolved(&loaded, path); err != nil {
+			cfg = loaded
+			return err
+		}
+
+		binary := CloneBinary(loaded.Bins[path])
+		otherCapacity := len(loaded.Bins)
+		if otherCapacity > 0 {
+			otherCapacity--
+		}
+		others := make([]*Binary, 0, otherCapacity)
+		for otherPath, other := range loaded.Bins {
+			if otherPath != path {
+				others = append(others, CloneBinary(other))
+			}
+		}
+		if err := mutate(configPath, binary, others); err != nil {
+			cfg = loaded
+			return err
+		}
+		if binary == nil || binary.Path != path {
+			cfg = loaded
+			return errors.New("managed binary mutation changed its identity")
+		}
+
+		loaded.Bins[path] = binary
+		if err := writeConfig(configPath, loaded); err != nil {
+			cfg = loaded
+			return err
+		}
+		cfg = loaded
+		return nil
+	})
+}
+
 // CheckBinaryResolved prevents lifecycle callers from acting on a direct
 // binary whose executable/config commit needs reconciliation.
 func CheckBinaryResolved(path string) error {
@@ -510,6 +605,7 @@ func CommitBinaryTransaction(transaction BinaryTransaction) error {
 		}
 
 		previous := CloneBinary(loaded.Bins[transaction.Intended.Path])
+		transaction.Intended = preserveCompletionOwnership(previous, transaction.Intended)
 		unresolved, err := prepareUnresolvedTransaction(transaction, previous)
 		if err != nil {
 			cfg = loaded
@@ -771,6 +867,28 @@ func restoreTransactionRecord(current *config, path string, previous *Binary) {
 	current.Bins[path] = CloneBinary(previous)
 }
 
+func preserveCompletionOwnership(existing, replacement *Binary) *Binary {
+	updated := CloneBinary(replacement)
+	if existing == nil || len(existing.CompletionOwnership) == 0 {
+		return updated
+	}
+	if updated.CompletionOwnership == nil {
+		updated.CompletionOwnership = make(map[string]*CompletionOwnershipRecord, len(existing.CompletionOwnership))
+	}
+	for shell, ownership := range existing.CompletionOwnership {
+		if _, exists := updated.CompletionOwnership[shell]; exists {
+			continue
+		}
+		if ownership == nil {
+			updated.CompletionOwnership[shell] = nil
+			continue
+		}
+		copied := *ownership
+		updated.CompletionOwnership[shell] = &copied
+	}
+	return updated
+}
+
 func checkBinaryResolved(current *config, path string) error {
 	if _, ok := current.UnresolvedTransactions[path]; ok {
 		return fmt.Errorf("%w: %s", ErrBinaryRecoveryRequired, path)
@@ -862,7 +980,7 @@ func UpsertBinary(c *Binary) error {
 		if err := checkBinaryResolved(current, c.Path); err != nil {
 			return err
 		}
-		current.Bins[c.Path] = CloneBinary(c)
+		current.Bins[c.Path] = preserveCompletionOwnership(current.Bins[c.Path], c)
 		return nil
 	})
 }
@@ -879,7 +997,7 @@ func UpsertBinaries(binaries []*Binary) error {
 				if err := checkBinaryResolved(current, c.Path); err != nil {
 					return err
 				}
-				current.Bins[c.Path] = CloneBinary(c)
+				current.Bins[c.Path] = preserveCompletionOwnership(current.Bins[c.Path], c)
 			}
 		}
 		return nil

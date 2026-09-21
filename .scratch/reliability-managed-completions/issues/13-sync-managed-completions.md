@@ -1,6 +1,6 @@
 # 13: Sync completions for one managed binary
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 **Blocked by:** 12 / Inspect artifact decisions without side effects (resolved).
 
@@ -16,13 +16,21 @@ Keep these fields local during config cloning and export/import. Print the insta
 
 ## Acceptance
 
-- [ ] A local helper generates Bash, Zsh, and Fish files through both the default argv and an explicit argv override, with no shell interpretation of arguments.
-- [ ] Invalid shell, missing/changed/unmanaged binary, system-package target, timeout, output overflow, empty/non-text output, and nonzero exit leave an existing completion intact.
-- [ ] Owned regular files can be refreshed or recreated if missing; unowned, modified, symlinked, non-regular, and differently owned files remain untouched, including cooperating concurrent sync attempts. Results made stale by concurrent binary update/removal are discarded before publication.
-- [ ] Ownership save failure leaves an explicit manual-cleanup result and never rolls back the installed binary or silently adopts an unrecorded file later.
-- [ ] Local ownership survives ordinary config updates and stays out of portable export/import. No invocation enables future execution.
-- [ ] Cobra's singular `completion` command and shell startup files remain unchanged.
+- [x] A local helper generates Bash, Zsh, and Fish files through both the default argv and an explicit argv override, with no shell interpretation of arguments.
+- [x] Invalid shell, missing/changed/unmanaged binary, system-package target, timeout, output overflow, empty/non-text output, and nonzero exit leave an existing completion intact.
+- [x] Owned regular files can be refreshed or recreated if missing; unowned, modified, symlinked, non-regular, and differently owned files remain untouched, including cooperating concurrent sync attempts. Results made stale by concurrent binary update/removal are discarded before publication.
+- [x] Ownership save failure leaves an explicit manual-cleanup result and never rolls back the installed binary or silently adopts an unrecorded file later.
+- [x] Local ownership survives ordinary config updates and stays out of portable export/import. No invocation enables future execution.
+- [x] Cobra's singular `completion` command and shell startup files remain unchanged.
 
 ## Verification
 
 Add focused behavioral cases to the existing command/config suites using `setupTestConfig` and controlled helpers. Reuse platform publication coverage; do not build a parallel publication test framework. Run the applicable focused, lint, race, test, verify, and build checks from the spec once the implementation is complete.
+
+## Implementation progress
+
+- [x] Add local completion ownership metadata with clone/export/import preservation rules.
+- [x] Implement bounded native generator execution and owned-file publication.
+- [x] Add and register `completions sync` with focused command coverage.
+- [x] Run final repository verification and address failures.
+- [x] Complete independent code review.
