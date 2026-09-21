@@ -193,8 +193,10 @@ func TestExportImportKeepsCompletionOwnershipLocal(t *testing.T) {
 	localOwnership := map[string]*config.CompletionOwnershipRecord{
 		"bash": {Path: filepath.Join(filepath.Dir(os.Getenv("BIN_CONFIG")), "completions", "bash", "completion-tool"), SHA256: "local-hash"},
 	}
+	localShell := "bash"
 	if err := config.UpsertBinary(&config.Binary{
 		Path: installedPath, RemoteName: "completion-tool", Version: "1.0.0", Hash: "old-hash", URL: "https://example.test/tool", Provider: "generic",
+		CompletionShell:     &localShell,
 		CompletionOwnership: localOwnership,
 	}); err != nil {
 		t.Fatal(err)
@@ -216,8 +218,11 @@ func TestExportImportKeepsCompletionOwnershipLocal(t *testing.T) {
 	if _, found := exportedPayload[0]["completion_ownership"]; found {
 		t.Fatalf("portable export included local completion ownership: %#v", exportedPayload[0])
 	}
-	if got := config.Get().Bins[installedPath].CompletionOwnership["bash"]; got == nil || got.SHA256 != "local-hash" {
-		t.Fatalf("export normalization discarded local completion ownership: %#v", config.Get().Bins[installedPath])
+	if _, found := exportedPayload[0]["completion_shell"]; found {
+		t.Fatalf("portable export included local completion shell: %#v", exportedPayload[0])
+	}
+	if got := config.Get().Bins[installedPath]; got.CompletionShell == nil || *got.CompletionShell != "bash" || got.CompletionOwnership["bash"] == nil || got.CompletionOwnership["bash"].SHA256 != "local-hash" {
+		t.Fatalf("export normalization discarded local completion settings: %#v", got)
 	}
 
 	importPayload, err := json.Marshal([]map[string]any{{
@@ -227,6 +232,7 @@ func TestExportImportKeepsCompletionOwnershipLocal(t *testing.T) {
 		"hash":                 "new-hash",
 		"url":                  "https://example.test/tool",
 		"provider":             "generic",
+		"completion_shell":     "fish",
 		"completion_ownership": map[string]any{"bash": map[string]any{"path": "remote-path", "sha256": "remote-hash"}},
 	}})
 	if err != nil {
@@ -239,8 +245,8 @@ func TestExportImportKeepsCompletionOwnershipLocal(t *testing.T) {
 		t.Fatalf("import: %v", err)
 	}
 	updated := config.Get().Bins[installedPath]
-	if updated == nil || updated.Version != "2.0.0" || updated.CompletionOwnership["bash"].Path != localOwnership["bash"].Path || updated.CompletionOwnership["bash"].SHA256 != "local-hash" {
-		t.Fatalf("import did not preserve destination-local completion ownership: %#v", updated)
+	if updated == nil || updated.Version != "2.0.0" || updated.CompletionShell == nil || *updated.CompletionShell != "bash" || updated.CompletionOwnership["bash"].Path != localOwnership["bash"].Path || updated.CompletionOwnership["bash"].SHA256 != "local-hash" {
+		t.Fatalf("import did not preserve destination-local completion settings: %#v", updated)
 	}
 }
 

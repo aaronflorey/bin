@@ -49,7 +49,7 @@ func newPruneCmd() *pruneCmd {
 				}
 			}
 
-			return config.RemoveBinaries(pathsToDel)
+			return config.RemoveBinariesLocked(pathsToDel, cleanupManagedCompletions)
 		},
 	}
 

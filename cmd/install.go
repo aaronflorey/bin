@@ -29,6 +29,8 @@ type installOpts struct {
 	preferSystemPackage bool
 	packageType         string
 	nonInteractive      bool
+	completions         string
+	completionShell     *string
 }
 
 type installTarget struct {
@@ -63,6 +65,11 @@ func newInstallCmd() *installCmd {
 				}
 				root.opts.packageType = systempackage.NormalizeType(root.opts.packageType)
 			}
+			completionShell, err := selectedCompletionShell(root.opts.completions, cmd.Flags().Changed("completions"))
+			if err != nil {
+				return err
+			}
+			root.opts.completionShell = completionShell
 
 			targets, err := parseInstallTargets(args, root.opts.systemPackage)
 			if err != nil {
@@ -104,7 +111,22 @@ func newInstallCmd() *installCmd {
 	root.cmd.Flags().BoolVar(&root.opts.preferSystemPackage, "prefer-system-package", false, "Prefer compatible system package artifacts before direct binaries when installing")
 	root.cmd.Flags().StringVar(&root.opts.packageType, "package-type", "", "Restrict system package selection to a specific type (deb, rpm, apk, flatpak, dmg)")
 	root.cmd.Flags().BoolVar(&root.opts.nonInteractive, "non-interactive", false, "Disable prompts and fail on ambiguous choices")
+	root.cmd.Flags().StringVar(&root.opts.completions, "completions", "off", "Automatically refresh completions for bash, zsh, fish, or off")
 	return root
+}
+
+func selectedCompletionShell(value string, changed bool) (*string, error) {
+	if !changed {
+		return nil, nil
+	}
+	if value == "off" {
+		disabled := ""
+		return &disabled, nil
+	}
+	if _, err := completionFilename(value, "command"); err != nil {
+		return nil, fmt.Errorf("unsupported --completions %q", value)
+	}
+	return &value, nil
 }
 
 func ensureInstallTargetsResolved(bins map[string]*config.Binary, targets []installTarget, forcedProvider string) error {
@@ -288,6 +310,7 @@ func (root *installCmd) installTarget(cmd *cobra.Command, target installTarget) 
 				LogicalName:           existing.RemoteName,
 				AppBundle:             existing.AppBundle,
 				RequestedAppBundle:    requestedAppBundle,
+				CompletionShell:       root.opts.completionShell,
 			})
 			if err != nil {
 				log.WithError(err).Debugf("Failed to update existing install for %q", resolved.url)
@@ -333,6 +356,7 @@ func (root *installCmd) installTarget(cmd *cobra.Command, target installTarget) 
 				AllowProviderFallback: false,
 				LogicalName:           requestedLogicalName(target.path),
 				RequestedAppBundle:    requestedAppBundle,
+				CompletionShell:       root.opts.completionShell,
 			})
 			if err == nil {
 				log.Infof("Done installing %s %s", res.Name, res.Version)

@@ -158,6 +158,200 @@ func TestInstallBinaryPersistsResolvedSelectionIntent(t *testing.T) {
 	}
 }
 
+func TestInstallBinaryRefreshesOptedInCompletionsAfterCommit(t *testing.T) {
+	t.Run("publishes bundled completion after binary commit", func(t *testing.T) {
+		installDir := setupTestConfig(t)
+		target := filepath.Join(installDir, "tool")
+		shell := "bash"
+		committed := false
+		originalFactory := installProviderFactory
+		originalCommit := commitBinaryTransaction
+		originalMutate := mutateLockedBinary
+		t.Cleanup(func() {
+			installProviderFactory = originalFactory
+			commitBinaryTransaction = originalCommit
+			mutateLockedBinary = originalMutate
+		})
+
+		installProviderFactory = func(string, string) (providers.Provider, error) {
+			return fetchBinaryTestProvider{id: "test", fetchFn: func(opts *providers.FetchOpts) (*providers.File, error) {
+				if opts.BundledCompletionShell != shell || opts.BundledCompletionCommand != "tool" {
+					t.Fatalf("bundled completion fetch request = (%q, %q)", opts.BundledCompletionShell, opts.BundledCompletionCommand)
+				}
+				return &providers.File{Name: "tool", Version: "1.0.0", Data: strings.NewReader(runnableRunScript), BundledCompletion: []byte("bundled completion")}, nil
+			}}, nil
+		}
+		commitBinaryTransaction = func(transaction config.BinaryTransaction) error {
+			err := originalCommit(transaction)
+			committed = err == nil
+			return err
+		}
+		mutateLockedBinary = func(path string, mutate func(string, *config.Binary, []*config.Binary) error) error {
+			if !committed {
+				t.Fatal("completion publication ran before binary commit")
+			}
+			return originalMutate(path, mutate)
+		}
+
+		if _, err := installBinary(InstallOpts{URL: "https://example.test/tool", Path: target, ConfigPath: target, LogicalName: "tool", Force: true, CompletionShell: &shell}); err != nil {
+			t.Fatalf("installBinary: %v", err)
+		}
+		assertCompletionContent(t, shell, "tool", "bundled completion")
+	})
+
+	t.Run("falls back after unusable bundled completion and warns", func(t *testing.T) {
+		requirePOSIXShellFixture(t)
+		installDir := setupTestConfig(t)
+		target := filepath.Join(installDir, "tool")
+		shell := "bash"
+		originalFactory := installProviderFactory
+		originalElevated := completionProcessElevated
+		previousLogger := log.Log
+		var logs bytes.Buffer
+		logger := log.New(&logs)
+		logger.Level = log.WarnLevel
+		installProviderFactory = func(string, string) (providers.Provider, error) {
+			return fetchBinaryTestProvider{id: "test", fetchFn: func(*providers.FetchOpts) (*providers.File, error) {
+				return &providers.File{Name: "tool", Version: "1.0.0", Data: strings.NewReader("#!/bin/sh\nprintf native\n"), BundledCompletion: []byte{0}}, nil
+			}}, nil
+		}
+		completionProcessElevated = func() bool { return false }
+		log.Log = logger
+		t.Cleanup(func() {
+			installProviderFactory = originalFactory
+			completionProcessElevated = originalElevated
+			log.Log = previousLogger
+		})
+
+		if _, err := installBinary(InstallOpts{URL: "https://example.test/tool", Path: target, ConfigPath: target, LogicalName: "tool", Force: true, CompletionShell: &shell}); err != nil {
+			t.Fatalf("installBinary: %v", err)
+		}
+		assertCompletionContent(t, shell, "tool", "native")
+		if !strings.Contains(logs.String(), "Could not publish bundled bash completion") {
+			t.Fatalf("completion fallback did not warn: %q", logs.String())
+		}
+	})
+}
+
+func TestInstallBinarySkipsAutomaticCompletionsWhenOffRenamedOrFailed(t *testing.T) {
+	requirePOSIXShellFixture(t)
+
+	off := ""
+	for name, completionShell := range map[string]*string{"fresh default": nil, "off": &off} {
+		t.Run(name+" does no completion work", func(t *testing.T) {
+			installDir := setupTestConfig(t)
+			target := filepath.Join(installDir, "tool")
+			marker := filepath.Join(t.TempDir(), "generated")
+			originalFactory := installProviderFactory
+			installProviderFactory = func(string, string) (providers.Provider, error) {
+				return fetchBinaryTestProvider{id: "test", fetchFn: func(opts *providers.FetchOpts) (*providers.File, error) {
+					if opts.BundledCompletionShell != "" || opts.BundledCompletionCommand != "" {
+						t.Fatalf("%s install requested bundled completion: %#v", name, opts)
+					}
+					return &providers.File{Name: "tool", Version: "1.0.0", Data: strings.NewReader("#!/bin/sh\n[ \"$1\" = completion ] && touch '" + marker + "'\n"), BundledCompletion: []byte("ignored")}, nil
+				}}, nil
+			}
+			t.Cleanup(func() { installProviderFactory = originalFactory })
+
+			if _, err := installBinary(InstallOpts{URL: "https://example.test/tool", Path: target, ConfigPath: target, LogicalName: "tool", Force: true, CompletionShell: completionShell}); err != nil {
+				t.Fatalf("installBinary: %v", err)
+			}
+			if _, err := os.Stat(marker); !os.IsNotExist(err) {
+				t.Fatalf("%s install generated a completion: %v", name, err)
+			}
+			if installed := config.Get().Bins[target]; installed == nil || installed.CompletionShell != nil || installed.CompletionOwnership != nil {
+				t.Fatalf("%s install saved completion state: %#v", name, installed)
+			}
+		})
+	}
+
+	t.Run("renamed command skips bundled and native completion", func(t *testing.T) {
+		installDir := setupTestConfig(t)
+		target := filepath.Join(installDir, "alias")
+		marker := filepath.Join(t.TempDir(), "generated")
+		shell := "fish"
+		originalFactory := installProviderFactory
+		installProviderFactory = func(string, string) (providers.Provider, error) {
+			return fetchBinaryTestProvider{id: "test", fetchFn: func(opts *providers.FetchOpts) (*providers.File, error) {
+				if opts.BundledCompletionCommand != "alias" {
+					t.Fatalf("renamed install bundled command = %q, want alias", opts.BundledCompletionCommand)
+				}
+				return &providers.File{Name: "upstream", Version: "1.0.0", Data: strings.NewReader("#!/bin/sh\n[ \"$1\" = completion ] && touch '" + marker + "'\n"), BundledCompletion: []byte("bundled")}, nil
+			}}, nil
+		}
+		t.Cleanup(func() { installProviderFactory = originalFactory })
+
+		if _, err := installBinary(InstallOpts{URL: "https://example.test/upstream", Path: target, ConfigPath: target, LogicalName: "alias", Force: true, CompletionShell: &shell}); err != nil {
+			t.Fatalf("installBinary: %v", err)
+		}
+		if _, err := os.Stat(marker); !os.IsNotExist(err) {
+			t.Fatalf("renamed install generated a completion: %v", err)
+		}
+		destination, err := completionDestination(os.Getenv("BIN_CONFIG"), shell, "alias")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Lstat(destination); !os.IsNotExist(err) {
+			t.Fatalf("renamed install published a completion: %v", err)
+		}
+	})
+
+	t.Run("fresh URL command mismatch skips bundled completion but generates native", func(t *testing.T) {
+		installDir := setupTestConfig(t)
+		marker := filepath.Join(t.TempDir(), "generated")
+		shell := "fish"
+		originalFactory := installProviderFactory
+		installProviderFactory = func(string, string) (providers.Provider, error) {
+			return fetchBinaryTestProvider{id: "test", fetchFn: func(opts *providers.FetchOpts) (*providers.File, error) {
+				if opts.BundledCompletionCommand != "project" {
+					t.Fatalf("fresh install bundled command = %q, want project", opts.BundledCompletionCommand)
+				}
+				return &providers.File{Name: "tool", Version: "1.0.0", Data: strings.NewReader("#!/bin/sh\n[ \"$1\" = completion ] && { touch '" + marker + "'; printf native; }\n"), BundledCompletion: []byte("wrong completion")}, nil
+			}}, nil
+		}
+		t.Cleanup(func() { installProviderFactory = originalFactory })
+
+		if _, err := installBinary(InstallOpts{URL: "https://example.test/acme/project", Path: installDir, ResolvePath: true, Force: true, CompletionShell: &shell}); err != nil {
+			t.Fatalf("installBinary: %v", err)
+		}
+		if _, err := os.Stat(marker); err != nil {
+			t.Fatalf("fresh mismatched install did not generate a native completion: %v", err)
+		}
+		assertCompletionContent(t, shell, "tool", "native")
+	})
+
+	t.Run("failed install does not publish or save completion ownership", func(t *testing.T) {
+		installDir := setupTestConfig(t)
+		target := filepath.Join(installDir, "tool")
+		shell := "bash"
+		originalFactory := installProviderFactory
+		originalCommit := commitBinaryTransaction
+		originalMutate := mutateLockedBinary
+		installProviderFactory = func(string, string) (providers.Provider, error) {
+			return fetchBinaryTestProvider{id: "test", fetchFn: func(*providers.FetchOpts) (*providers.File, error) {
+				return &providers.File{Name: "tool", Version: "1.0.0", Data: strings.NewReader(runnableRunScript), BundledCompletion: []byte("bundled")}, nil
+			}}, nil
+		}
+		commitBinaryTransaction = func(config.BinaryTransaction) error { return errors.New("commit failed") }
+		mutateLockedBinary = func(string, func(string, *config.Binary, []*config.Binary) error) error {
+			t.Fatal("failed install published a completion")
+			return nil
+		}
+		t.Cleanup(func() {
+			installProviderFactory = originalFactory
+			commitBinaryTransaction = originalCommit
+			mutateLockedBinary = originalMutate
+		})
+
+		if _, err := installBinary(InstallOpts{URL: "https://example.test/tool", Path: target, ConfigPath: target, LogicalName: "tool", Force: true, CompletionShell: &shell}); err == nil || !strings.Contains(err.Error(), "commit failed") {
+			t.Fatalf("installBinary error = %v, want commit failure", err)
+		}
+		if installed := config.Get().Bins[target]; installed != nil {
+			t.Fatalf("failed install saved completion state: %#v", installed)
+		}
+	})
+}
+
 func TestProviderFallbackDoesNotDiscardUnavailableStoredSelection(t *testing.T) {
 	for _, reason := range []assets.PersistedSelectionReason{
 		assets.PersistedSelectionTarget,

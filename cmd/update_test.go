@@ -554,7 +554,8 @@ func TestUpdateAppliesPersistedSelectionIntent(t *testing.T) {
 		t.Fatal(err)
 	}
 	intent := &config.SelectionDescriptor{LogicalProduct: "tool-cli", Target: &config.SelectionTarget{OS: "linux", Architecture: "amd64", ABI: "musl"}, ArchiveMember: "bin/tool"}
-	if err := config.UpsertBinary(&config.Binary{Path: path, RemoteName: "alias", Version: "1.0.0", URL: "github.com/acme/managed-intent-tool", Provider: "github", PackagePath: "tool-v1/bin/tool", ReleaseTagPrefix: "nightly-", Pinned: true, SelectionIntent: intent}); err != nil {
+	shell := "fish"
+	if err := config.UpsertBinary(&config.Binary{Path: path, RemoteName: "alias", Version: "1.0.0", URL: "github.com/acme/managed-intent-tool", Provider: "github", PackagePath: "tool-v1/bin/tool", ReleaseTagPrefix: "nightly-", Pinned: true, SelectionIntent: intent, CompletionShell: &shell}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -565,14 +566,18 @@ func TestUpdateAppliesPersistedSelectionIntent(t *testing.T) {
 			if opts.SelectionIntent == nil || opts.SelectionIntent.LogicalProduct != "tool-cli" || opts.SelectionIntent.ArchiveMember != "bin/tool" {
 				t.Fatalf("update fetch selection intent = %#v", opts.SelectionIntent)
 			}
+			if opts.BundledCompletionShell != shell || opts.BundledCompletionCommand != "tool" {
+				t.Fatalf("update bundled completion request = (%q, %q)", opts.BundledCompletionShell, opts.BundledCompletionCommand)
+			}
 			return &providers.File{
-				Data:             strings.NewReader("#!/bin/sh\nexit 0\n"),
-				Name:             "tool",
-				Version:          "v2.0.0",
-				SourceAsset:      "tool-cli-v2.0.0-linux-amd64-musl.tar.gz",
-				PackagePath:      "tool-v2/bin/tool",
-				ReleaseTagPrefix: "nightly-",
-				SelectionIntent:  opts.SelectionIntent,
+				Data:              strings.NewReader("#!/bin/sh\nexit 0\n"),
+				Name:              "tool",
+				Version:           "v2.0.0",
+				BundledCompletion: []byte("bundled completion"),
+				SourceAsset:       "tool-cli-v2.0.0-linux-amd64-musl.tar.gz",
+				PackagePath:       "tool-v2/bin/tool",
+				ReleaseTagPrefix:  "nightly-",
+				SelectionIntent:   opts.SelectionIntent,
 			}, nil
 		}}, nil
 	}
@@ -583,12 +588,13 @@ func TestUpdateAppliesPersistedSelectionIntent(t *testing.T) {
 		t.Fatalf("update error = %v", err)
 	}
 	updated := config.Get().Bins[path]
-	if updated.Version != "v2.0.0" || updated.RemoteName != "alias" || !updated.Pinned || updated.ReleaseTagPrefix != "nightly-" || updated.SourceAsset != "tool-cli-v2.0.0-linux-amd64-musl.tar.gz" || updated.PackagePath != "tool-v2/bin/tool" {
+	if updated.Version != "v2.0.0" || updated.RemoteName != "alias" || updated.CompletionShell == nil || *updated.CompletionShell != shell || !updated.Pinned || updated.ReleaseTagPrefix != "nightly-" || updated.SourceAsset != "tool-cli-v2.0.0-linux-amd64-musl.tar.gz" || updated.PackagePath != "tool-v2/bin/tool" {
 		t.Fatalf("update did not preserve managed provenance and state: %#v", updated)
 	}
 	if !equalSelectionDescriptor(updated.SelectionIntent, intent) {
 		t.Fatalf("update did not persist managed selection intent: %#v", updated.SelectionIntent)
 	}
+	assertCompletionContent(t, shell, "tool", "bundled completion")
 }
 
 func TestUpdateRetainsManagedDMGBundleAndProviderProduct(t *testing.T) {
@@ -598,9 +604,10 @@ func TestUpdateRetainsManagedDMGBundleAndProviderProduct(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeTestBinary(t, path)
+	shell := "bash"
 	if err := config.UpsertBinary(&config.Binary{
 		Path: path, RemoteName: "spotify", Version: "1.0.0", Hash: "old", URL: "https://example.test/spotify", Provider: "github",
-		InstallMode: installModeSystemPackage, PackageType: "dmg", AppBundle: "Fastpotify.app", PackagePath: "spotify-macos-arm64.dmg",
+		InstallMode: installModeSystemPackage, PackageType: "dmg", AppBundle: "Fastpotify.app", PackagePath: "spotify-macos-arm64.dmg", CompletionShell: &shell,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -613,7 +620,7 @@ func TestUpdateRetainsManagedDMGBundleAndProviderProduct(t *testing.T) {
 			applyStoredFetch: originalRegistry[installModeSystemPackage].applyStoredFetch,
 			install: func(opts InstallOpts) (*InstallResult, error) {
 				updated = true
-				if opts.AppBundle != "Fastpotify.app" || opts.RequestedAppBundle != "" || opts.FetchOpts.PackageName != "spotify" {
+				if opts.AppBundle != "Fastpotify.app" || opts.RequestedAppBundle != "" || opts.FetchOpts.PackageName != "spotify" || opts.FetchOpts.BundledCompletionShell != "" || opts.FetchOpts.BundledCompletionCommand != "" {
 					t.Fatalf("update install options = %#v, want stored Fastpotify bundle and spotify product", opts)
 				}
 				return &InstallResult{Version: opts.FetchOpts.Version, Path: opts.Path}, nil

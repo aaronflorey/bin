@@ -322,15 +322,20 @@ func TestInstallSystemPackageDMGTracksInstalledAppBundle(t *testing.T) {
 
 	stream := &trackingReadCloser{reader: bytes.NewReader([]byte("fake dmg"))}
 	installProviderFactory = func(string, string) (providers.Provider, error) {
-		return testFetchProvider{file: &providers.File{
-			Data:        stream,
-			Name:        "Paseo-0.1.64-arm64.dmg",
-			Version:     "0.1.64",
-			PackagePath: "Paseo.app",
-			DownloadIntegrity: &providers.IntegrityRecord{
-				Algorithm: "sha256", Expected: "release-digest", Observed: "release-digest",
-				Source: "Paseo-0.1.64-arm64.dmg.sha256", Scope: "download", Result: "verified",
-			},
+		return fetchBinaryTestProvider{id: "test", fetchFn: func(opts *providers.FetchOpts) (*providers.File, error) {
+			if opts.BundledCompletionShell != "" || opts.BundledCompletionCommand != "" {
+				t.Fatalf("system package requested managed completion: (%q, %q)", opts.BundledCompletionShell, opts.BundledCompletionCommand)
+			}
+			return &providers.File{
+				Data:        stream,
+				Name:        "Paseo-0.1.64-arm64.dmg",
+				Version:     "0.1.64",
+				PackagePath: "Paseo.app",
+				DownloadIntegrity: &providers.IntegrityRecord{
+					Algorithm: "sha256", Expected: "release-digest", Observed: "release-digest",
+					Source: "Paseo-0.1.64-arm64.dmg.sha256", Scope: "download", Result: "verified",
+				},
+			}, nil
 		}}, nil
 	}
 
@@ -359,13 +364,17 @@ func TestInstallSystemPackageDMGTracksInstalledAppBundle(t *testing.T) {
 		}
 	})
 
+	shell := "bash"
 	res, err := installSystemPackage(InstallOpts{
 		URL:                "https://github.com/getpaseo/paseo/releases/tag/v0.1.64",
 		RequestedAppBundle: "Paseo",
+		CompletionShell:    &shell,
 		FetchOpts: providers.FetchOpts{
-			SystemPackage: true,
-			PackageType:   "dmg",
-			PackageName:   "Paseo",
+			SystemPackage:            true,
+			PackageType:              "dmg",
+			PackageName:              "Paseo",
+			BundledCompletionShell:   "fish",
+			BundledCompletionCommand: "Paseo",
 		},
 	})
 	if err != nil {
@@ -394,6 +403,9 @@ func TestInstallSystemPackageDMGTracksInstalledAppBundle(t *testing.T) {
 	if binCfg.InstalledIntegrity != nil {
 		t.Fatalf("package-manager install asserted installed-byte integrity: %#v", binCfg.InstalledIntegrity)
 	}
+	if binCfg.CompletionShell != nil {
+		t.Fatalf("system package persisted completion policy: %#v", binCfg)
+	}
 	if !strings.HasSuffix(binCfg.Path, "/Paseo.app/Contents/MacOS/Paseo") {
 		t.Fatalf("unexpected tracked path: %s", binCfg.Path)
 	}
@@ -418,9 +430,10 @@ func TestInstallSystemPackageDMGReinstallUsesStoredBundleOverSibling(t *testing.
 	})
 
 	trackedPath := filepath.Join(applicationsDir, "Fastpotify.app", "Contents", "MacOS", "Fastpotify-bin")
+	shell := "bash"
 	if err := config.UpsertBinary(&config.Binary{
 		Path: trackedPath, RemoteName: "spotify", Version: "1.0.0", Hash: "old", URL: "https://example.test/spotify", Provider: "github",
-		InstallMode: installModeSystemPackage, PackageType: "dmg", AppBundle: "Fastpotify.app", PackagePath: "spotify.dmg",
+		InstallMode: installModeSystemPackage, PackageType: "dmg", AppBundle: "Fastpotify.app", PackagePath: "spotify.dmg", CompletionShell: &shell,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -477,6 +490,9 @@ func TestInstallSystemPackageDMGReinstallUsesStoredBundleOverSibling(t *testing.
 	}
 	if _, err := os.Stat(sentinel); err != nil {
 		t.Fatalf("reinstall touched sibling app: %v", err)
+	}
+	if persisted := config.Get().Bins[trackedPath]; persisted.CompletionShell == nil || *persisted.CompletionShell != shell {
+		t.Fatalf("system package reinstall did not preserve local completion state: %#v", persisted)
 	}
 }
 

@@ -35,6 +35,63 @@ func TestInstallHasPinFlag(t *testing.T) {
 	}
 }
 
+func TestInstallCompletionFlag(t *testing.T) {
+	installDir := setupTestConfig(t)
+	originalProviderFactory := installProviderFactory
+	t.Cleanup(func() { installProviderFactory = originalProviderFactory })
+
+	installProviderFactory = func(string, string) (providers.Provider, error) {
+		return testFetchProvider{file: &providers.File{
+			Data:    strings.NewReader("#!/bin/sh\nexit 0\n"),
+			Name:    "tool",
+			Version: "1.0.0",
+		}}, nil
+	}
+
+	root := newInstallCmd()
+	root.cmd.SetArgs([]string{"--completions=fish", "https://example.test/acme/tool"})
+	if err := root.cmd.Execute(); err != nil {
+		t.Fatalf("install with --completions: %v", err)
+	}
+	installedPath := filepath.Join(installDir, "tool")
+	if installed := config.Get().Bins[installedPath]; installed == nil || installed.CompletionShell == nil || *installed.CompletionShell != "fish" {
+		t.Fatalf("installed completion selection = %#v, want fish", installed)
+	}
+
+	update := newInstallCmd()
+	update.cmd.SetArgs([]string{"https://example.test/acme/tool"})
+	if err := update.cmd.Execute(); err != nil {
+		t.Fatalf("install without --completions: %v", err)
+	}
+	if installed := config.Get().Bins[installedPath]; installed == nil || installed.CompletionShell == nil || *installed.CompletionShell != "fish" {
+		t.Fatalf("omitted completion selection was not preserved: %#v", installed)
+	}
+
+	disable := newInstallCmd()
+	disable.cmd.SetArgs([]string{"--completions=off", "https://example.test/acme/tool"})
+	if err := disable.cmd.Execute(); err != nil {
+		t.Fatalf("install with --completions=off: %v", err)
+	}
+	if installed := config.Get().Bins[installedPath]; installed == nil || installed.CompletionShell != nil {
+		t.Fatalf("completion selection was not disabled: %#v", installed)
+	}
+
+	fresh := newInstallCmd()
+	fresh.cmd.SetArgs([]string{"https://example.test/acme/fresh", "fresh-tool"})
+	if err := fresh.cmd.Execute(); err != nil {
+		t.Fatalf("fresh install without --completions: %v", err)
+	}
+	if installed := config.Get().Bins[filepath.Join(installDir, "fresh-tool")]; installed == nil || installed.CompletionShell != nil {
+		t.Fatalf("fresh install unexpectedly selected completions: %#v", installed)
+	}
+
+	invalid := newInstallCmd()
+	invalid.cmd.SetArgs([]string{"--completions=powershell", "https://example.test/acme/tool"})
+	if err := invalid.cmd.Execute(); err == nil || !strings.Contains(err.Error(), `unsupported --completions "powershell"`) {
+		t.Fatalf("invalid completion shell error = %v", err)
+	}
+}
+
 func TestResolveFetchRequestPreservesExplicitBareReleaseLane(t *testing.T) {
 	resolved, err := resolveFetchRequest("github.com/acme/tool/releases/tag/1.2.3", "", providers.FetchOpts{})
 	if err != nil {

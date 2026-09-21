@@ -259,16 +259,18 @@ func TestBinarySelectionIntentLoadsClonesAndPersists(t *testing.T) {
 func TestCompletionOwnershipClonesAndSurvivesOrdinaryUpdates(t *testing.T) {
 	configPath, binDir := setupTransactionConfig(t)
 	path := filepath.Join(binDir, "tool")
+	shell := "bash"
 	ownership := map[string]*CompletionOwnershipRecord{
 		"bash": {Path: filepath.Join(filepath.Dir(configPath), "completions", "bash", "tool"), SHA256: "bash-hash"},
 		"zsh":  {Path: filepath.Join(filepath.Dir(configPath), "completions", "zsh", "_tool"), SHA256: "zsh-hash"},
 	}
-	initial := &Binary{Path: path, Version: "1.0.0", CompletionOwnership: ownership}
+	initial := &Binary{Path: path, Version: "1.0.0", CompletionShell: &shell, CompletionOwnership: ownership}
 	clone := CloneBinary(initial)
+	*clone.CompletionShell = "fish"
 	clone.CompletionOwnership["bash"].SHA256 = "changed"
 	delete(clone.CompletionOwnership, "zsh")
-	if initial.CompletionOwnership["bash"].SHA256 != "bash-hash" || initial.CompletionOwnership["zsh"] == nil {
-		t.Fatalf("clone mutated source completion ownership: %#v", initial.CompletionOwnership)
+	if *initial.CompletionShell != "bash" || initial.CompletionOwnership["bash"].SHA256 != "bash-hash" || initial.CompletionOwnership["zsh"] == nil {
+		t.Fatalf("clone mutated source completion settings: %#v", initial)
 	}
 	if err := UpsertBinary(initial); err != nil {
 		t.Fatalf("seed binary: %v", err)
@@ -277,8 +279,8 @@ func TestCompletionOwnershipClonesAndSurvivesOrdinaryUpdates(t *testing.T) {
 	if err := UpsertBinary(&Binary{Path: path, Version: "2.0.0"}); err != nil {
 		t.Fatalf("update binary: %v", err)
 	}
-	if got := cfg.Bins[path]; got == nil || got.Version != "2.0.0" || got.CompletionOwnership["bash"].SHA256 != "bash-hash" || got.CompletionOwnership["zsh"].SHA256 != "zsh-hash" {
-		t.Fatalf("upsert discarded local completion ownership: %#v", got)
+	if got := cfg.Bins[path]; got == nil || got.Version != "2.0.0" || got.CompletionShell == nil || *got.CompletionShell != "bash" || got.CompletionOwnership["bash"].SHA256 != "bash-hash" || got.CompletionOwnership["zsh"].SHA256 != "zsh-hash" {
+		t.Fatalf("upsert discarded local completion settings: %#v", got)
 	}
 
 	if err := CommitBinaryTransaction(BinaryTransaction{
@@ -288,16 +290,24 @@ func TestCompletionOwnershipClonesAndSurvivesOrdinaryUpdates(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("transaction update: %v", err)
 	}
-	if got := cfg.Bins[path]; got == nil || got.Version != "3.0.0" || got.CompletionOwnership["bash"].SHA256 != "bash-hash" || got.CompletionOwnership["zsh"].SHA256 != "zsh-hash" {
-		t.Fatalf("transaction discarded local completion ownership: %#v", got)
+	if got := cfg.Bins[path]; got == nil || got.Version != "3.0.0" || got.CompletionShell == nil || *got.CompletionShell != "bash" || got.CompletionOwnership["bash"].SHA256 != "bash-hash" || got.CompletionOwnership["zsh"].SHA256 != "zsh-hash" {
+		t.Fatalf("transaction discarded local completion settings: %#v", got)
+	}
+
+	off := ""
+	if err := UpsertBinary(&Binary{Path: path, Version: "4.0.0", CompletionShell: &off}); err != nil {
+		t.Fatalf("disable automatic completions: %v", err)
+	}
+	if got := cfg.Bins[path]; got == nil || got.CompletionShell != nil {
+		t.Fatalf("explicit off did not clear local completion shell: %#v", got)
 	}
 
 	cfg = config{}
 	if err := CheckAndLoad(); err != nil {
 		t.Fatalf("reload config: %v", err)
 	}
-	if got := cfg.Bins[path]; got == nil || got.CompletionOwnership["bash"].Path != ownership["bash"].Path || got.CompletionOwnership["zsh"].SHA256 != "zsh-hash" {
-		t.Fatalf("completion ownership did not persist: %#v", got)
+	if got := cfg.Bins[path]; got == nil || got.CompletionShell != nil || got.CompletionOwnership["bash"].Path != ownership["bash"].Path || got.CompletionOwnership["zsh"].SHA256 != "zsh-hash" {
+		t.Fatalf("local completion settings did not persist: %#v", got)
 	}
 }
 

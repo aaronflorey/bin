@@ -12,9 +12,13 @@ import (
 
 	"github.com/aaronflorey/bin/pkg/assets"
 	"github.com/aaronflorey/bin/pkg/config"
+	"github.com/caarlos0/log"
 )
 
-var mutateLockedBinary = config.MutateBinaryLocked
+var (
+	mutateLockedBinary          = config.MutateBinaryLocked
+	removeManagedCompletionFile = os.Remove
+)
 
 // syncNativeCompletion generates and publishes one completion file for an
 // unchanged direct managed binary. It deliberately does not discover bundled
@@ -246,6 +250,53 @@ func completionClaimedByAnotherBinary(others []*config.Binary, destination strin
 		}
 	}
 	return false
+}
+
+// cleanupManagedCompletions removes only completion files whose recorded
+// ownership still proves they are safe to delete. It runs while the config
+// record remains locked and is deliberately best-effort so binary removal is
+// never blocked by completion cleanup.
+func cleanupManagedCompletions(configPath string, binary *config.Binary, others []*config.Binary) {
+	if effectiveInstallMode(binary.InstallMode) != installModeBinary {
+		return
+	}
+
+	for shell, ownership := range binary.CompletionOwnership {
+		if ownership == nil {
+			continue
+		}
+
+		destination, err := canonicalCompletionOwnershipPath(configPath, binary, shell, ownership)
+		if err != nil {
+			log.Warnf("Leaving completion %s: %v", ownership.Path, err)
+			continue
+		}
+		owned, err := completionDestinationIsReplaceable(binary, others, shell, destination)
+		if err != nil {
+			log.Warnf("Leaving completion %s: %v", ownership.Path, err)
+			continue
+		}
+		if !owned {
+			continue
+		}
+		if err := removeManagedCompletionFile(destination); err != nil && !os.IsNotExist(err) {
+			log.Warnf("Leaving completion %s: %v", ownership.Path, err)
+		}
+	}
+}
+
+// canonicalCompletionOwnershipPath ensures cleanup only removes the same
+// destination that publication could have owned for this binary and shell.
+func canonicalCompletionOwnershipPath(configPath string, binary *config.Binary, shell string, ownership *config.CompletionOwnershipRecord) (string, error) {
+	command := filepath.Base(expandTrackedBinaryPath(binary.Path))
+	destination, err := completionDestination(configPath, shell, command)
+	if err != nil {
+		return "", err
+	}
+	if ownership.Path != destination {
+		return "", fmt.Errorf("completion ownership path is not the canonical managed destination %s", destination)
+	}
+	return destination, nil
 }
 
 func ensureCompletionDirectory(shellDirectory string) error {

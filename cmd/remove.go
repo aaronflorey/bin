@@ -106,7 +106,7 @@ func newRemoveCmd() *removeCmd {
 					return fmt.Errorf("error removing path %s: %v", target.deletePath, err)
 				}
 
-				if err := config.RemoveBinaries([]string{target.configPath}); err != nil {
+				if err := config.RemoveBinariesLocked([]string{target.configPath}, cleanupManagedCompletions); err != nil {
 					return err
 				}
 			}
