@@ -1,6 +1,6 @@
 # 14: Prefer exact bundled completion files
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 **Blocked by:** 13 / Sync completions for one managed binary.
 
@@ -16,12 +16,20 @@ Keep the selected script available until the ordinary caller can publish it, wit
 
 ## Acceptance
 
-- [ ] Synthetic TAR/ZIP fixtures select an exact Bash, Zsh, or Fish script belonging to the selected executable's archive scope; a bundled success does not invoke the generator.
-- [ ] Duplicate matching scripts, other commands, renamed commands without exact matches, malformed text, and oversized scripts are skipped without changing executable selection.
-- [ ] An absent bundled candidate falls back to the native generator; explicit argv skips discovery; effectful providers are not re-executed for sync.
-- [ ] Sync preserves stored release/member/variant choices, checks fetched bytes against the current installed executable, and closes every fetched result on success and failure.
-- [ ] Default artifact operations and inspect do not request completion work. Existing containment, integrity, budgets, and cleanup behavior remain intact.
+- [x] Synthetic TAR/ZIP fixtures select an exact Bash, Zsh, or Fish script belonging to the selected executable's archive scope; a bundled success does not invoke the generator.
+- [x] Duplicate matching scripts, other commands, renamed commands without exact matches, malformed text, and oversized scripts are skipped without changing executable selection.
+- [x] An absent bundled candidate falls back to the native generator; explicit argv skips discovery; effectful providers are not re-executed for sync.
+- [x] Sync preserves stored release/member/variant choices, checks fetched bytes against the current installed executable, and closes every fetched result on success and failure.
+- [x] Default artifact operations and inspect do not request completion work. Existing containment, integrity, budgets, and cleanup behavior remain intact.
 
 ## Verification
 
 Extend existing asset/provider fixtures and the sync command test from 13. Test observable selection and fallback, not a new internal discovery schema. Run focused asset/provider/command checks followed by the applicable repository checks in the spec.
+
+## Implementation progress
+
+- [x] Select and carry one exact bounded bundled completion from artifact processing.
+- [x] Integrate bundled discovery and native fallback into explicit completion sync.
+- [x] Run final repository verification and address failures.
+- [x] Re-verify code-review corrections.
+- [x] Complete independent code review.
