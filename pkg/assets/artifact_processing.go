@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/aaronflorey/bin/pkg/config"
+	"github.com/caarlos0/log"
 	"github.com/krolaw/zipstream"
 	"github.com/xi2/xz"
 )
@@ -28,6 +29,8 @@ var (
 var artifactProcessingBudgets = defaultArtifactBudgets()
 
 const bundledCompletionMaxBytes = 1 << 20
+
+var errInvalidBundledCompletion = errors.New("invalid bundled completion")
 
 var (
 	removeArtifactDownload = os.Remove
@@ -440,20 +443,27 @@ func (f *Filter) processReleaseArtifact(downloadPath, downloadSHA string) (*arti
 }
 
 func (f *Filter) selectBundledCompletion(inventory *artifactInventory, executable *artifactInventoryEntry) ([]byte, string) {
-	entry := f.bundledCompletionEntry(inventory, executable)
+	entry, ambiguous := f.bundledCompletionEntry(inventory, executable)
+	if ambiguous {
+		log.Warnf("Skipping ambiguous bundled %s completion for %q", f.opts.BundledCompletionShell, f.opts.BundledCompletionCommand)
+		return nil, ""
+	}
 	if entry == nil {
 		return nil, ""
 	}
 	content, err := readBundledCompletion(entry.stagedPath)
 	if err != nil {
+		if errors.Is(err, errInvalidBundledCompletion) {
+			log.Warnf("Skipping bundled completion %q: %v", entry.identity, err)
+		}
 		return nil, ""
 	}
 	return content, entry.identity
 }
 
-func (f *Filter) bundledCompletionEntry(inventory *artifactInventory, executable *artifactInventoryEntry) *artifactInventoryEntry {
+func (f *Filter) bundledCompletionEntry(inventory *artifactInventory, executable *artifactInventoryEntry) (*artifactInventoryEntry, bool) {
 	if f.opts == nil || f.opts.BundledCompletionShell == "" || f.opts.BundledCompletionCommand == "" || executable == nil {
-		return nil
+		return nil, false
 	}
 
 	scope, _ := artifactEntryScope(executable.identity)
@@ -464,11 +474,11 @@ func (f *Filter) bundledCompletionEntry(inventory *artifactInventory, executable
 			continue
 		}
 		if match != nil {
-			return nil
+			return nil, true
 		}
 		match = entry
 	}
-	return match
+	return match, false
 }
 
 func artifactEntryScope(identity string) (string, string) {
@@ -532,7 +542,7 @@ func readBundledCompletion(stagedPath string) ([]byte, error) {
 		return nil, err
 	}
 	if len(content) == 0 || len(content) > bundledCompletionMaxBytes || !utf8.Valid(content) || bytes.IndexByte(content, 0) >= 0 {
-		return nil, fmt.Errorf("invalid bundled completion")
+		return nil, fmt.Errorf("%w: empty, oversized, or malformed text", errInvalidBundledCompletion)
 	}
 	return content, nil
 }
