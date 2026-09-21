@@ -357,6 +357,19 @@ func TestCompletionSyncBypassesBundledFetchForExplicitAndEffectfulSources(t *tes
 			}
 			return path
 		},
+		"go-install source": func(t *testing.T) string {
+			path := setupCompletionSyncBinary(t, "tool", "tool", `printf '%s|%s' "$1" "$2"`, installModeBinary)
+			binary, err := config.GetBinary(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			binary.URL = "goinstall://example.test/acme/tool@v1.2.3"
+			binary.Provider = "goinstall"
+			if err := config.UpsertBinary(binary); err != nil {
+				t.Fatal(err)
+			}
+			return path
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			setup(t)
