@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/aaronflorey/bin/pkg/config"
+	"github.com/aaronflorey/bin/pkg/providers"
 )
 
 func TestCompletionSyncGeneratesDefaultAndExplicitCompletions(t *testing.T) {
@@ -241,6 +243,205 @@ func TestCompletionSyncRejectsOwnershipConflictAndAllowsExplicitRenamedCommand(t
 	})
 }
 
+func TestCompletionSyncPrefersMatchingBundledCompletion(t *testing.T) {
+	requirePOSIXShellFixture(t)
+
+	originalElevated := completionProcessElevated
+	completionProcessElevated = func() bool { return false }
+	t.Cleanup(func() { completionProcessElevated = originalElevated })
+
+	binaryPath := setupCompletionSyncBinary(t, "tool", "tool", "exit 42", installModeBinary)
+	binary := configureCompletionSyncSource(t, binaryPath)
+	installed, err := os.ReadFile(binaryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream := &trackingReadCloser{reader: bytes.NewReader(installed)}
+
+	originalFactory := completionProviderFactory
+	completionProviderFactory = func(url, provider string) (providers.Provider, error) {
+		if url != binary.URL || provider != binary.Provider {
+			t.Fatalf("provider construction = (%q, %q), want (%q, %q)", url, provider, binary.URL, binary.Provider)
+		}
+		return fetchBinaryTestProvider{id: "github", fetchFn: func(opts *providers.FetchOpts) (*providers.File, error) {
+			if opts.Version != binary.Version || opts.PackageName != binary.RemoteName || opts.PackagePath != binary.PackagePath || opts.ReleaseTagPrefix != binary.ReleaseTagPrefix {
+				t.Fatalf("stored fetch options = %#v", opts)
+			}
+			if opts.BundledCompletionShell != "bash" || opts.BundledCompletionCommand != "tool" {
+				t.Fatalf("bundled completion request = (%q, %q)", opts.BundledCompletionShell, opts.BundledCompletionCommand)
+			}
+			if opts.SelectionIntent == nil || opts.SelectionIntent.LogicalProduct != "tool" || opts.SelectionIntent.ArchiveMember != "bin/tool" || opts.SelectionIntent.Target == nil || opts.SelectionIntent.Target.CPUVariant != "avx2" {
+				t.Fatalf("selection intent = %#v", opts.SelectionIntent)
+			}
+			return &providers.File{Data: stream, BundledCompletion: []byte("bundled completion")}, nil
+		}}, nil
+	}
+	t.Cleanup(func() { completionProviderFactory = originalFactory })
+
+	if _, err := runCompletionSync(t, "tool", "bash"); err != nil {
+		t.Fatalf("sync bundled completion: %v", err)
+	}
+	assertCompletionContent(t, "bash", "tool", "bundled completion")
+	if stream.closeCount != 1 {
+		t.Fatalf("fetched stream close count = %d, want 1", stream.closeCount)
+	}
+}
+
+func TestCompletionSyncFallsBackWhenBundledCompletionIsAbsentOrMismatched(t *testing.T) {
+	requirePOSIXShellFixture(t)
+
+	originalElevated := completionProcessElevated
+	completionProcessElevated = func() bool { return false }
+	t.Cleanup(func() { completionProcessElevated = originalElevated })
+
+	for name, fetched := range map[string]func([]byte) *providers.File{
+		"absent": func(installed []byte) *providers.File {
+			return &providers.File{Data: &trackingReadCloser{reader: bytes.NewReader(installed)}}
+		},
+		"mismatched executable": func(_ []byte) *providers.File {
+			return &providers.File{Data: &trackingReadCloser{reader: strings.NewReader("different executable")}, BundledCompletion: []byte("stale bundled completion")}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			binaryPath := setupCompletionSyncBinary(t, "tool", "tool", `printf native`, installModeBinary)
+			configureCompletionSyncSource(t, binaryPath)
+			installed, err := os.ReadFile(binaryPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			file := fetched(installed)
+			stream := file.Data.(*trackingReadCloser)
+
+			originalFactory := completionProviderFactory
+			completionProviderFactory = func(string, string) (providers.Provider, error) {
+				return fetchBinaryTestProvider{id: "github", fetchFn: func(*providers.FetchOpts) (*providers.File, error) {
+					return file, nil
+				}}, nil
+			}
+			t.Cleanup(func() { completionProviderFactory = originalFactory })
+
+			if _, err := runCompletionSync(t, "tool", "bash"); err != nil {
+				t.Fatalf("sync fallback completion: %v", err)
+			}
+			assertCompletionContent(t, "bash", "tool", "native")
+			if stream.closeCount != 1 {
+				t.Fatalf("fetched stream close count = %d, want 1", stream.closeCount)
+			}
+		})
+	}
+}
+
+func TestCompletionSyncBypassesBundledFetchForExplicitAndEffectfulSources(t *testing.T) {
+	requirePOSIXShellFixture(t)
+
+	originalElevated := completionProcessElevated
+	completionProcessElevated = func() bool { return false }
+	t.Cleanup(func() { completionProcessElevated = originalElevated })
+
+	for name, setup := range map[string]func(*testing.T) string{
+		"explicit argv": func(t *testing.T) string {
+			path := setupCompletionSyncBinary(t, "tool", "tool", `printf '%s|%s' "$1" "$2"`, installModeBinary)
+			configureCompletionSyncSource(t, path)
+			return path
+		},
+		"docker source": func(t *testing.T) string {
+			path := setupCompletionSyncBinary(t, "tool", "tool", `printf '%s|%s' "$1" "$2"`, installModeBinary)
+			binary, err := config.GetBinary(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			binary.URL = "docker://example/tool:1.2.3"
+			binary.Provider = "docker"
+			if err := config.UpsertBinary(binary); err != nil {
+				t.Fatal(err)
+			}
+			return path
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			setup(t)
+			originalFactory := completionProviderFactory
+			completionProviderFactory = func(string, string) (providers.Provider, error) {
+				t.Fatal("bundled provider construction was not bypassed")
+				return nil, nil
+			}
+			t.Cleanup(func() { completionProviderFactory = originalFactory })
+
+			args := []string{"tool", "bash"}
+			want := "completion|bash"
+			if name == "explicit argv" {
+				args = append(args, "--", "custom", "argv")
+				want = "custom|argv"
+			}
+			if _, err := runCompletionSync(t, args...); err != nil {
+				t.Fatalf("sync completion: %v", err)
+			}
+			assertCompletionContent(t, "bash", "tool", want)
+		})
+	}
+}
+
+func TestCompletionSyncFetchFailureClosesResultAndDoesNotFallback(t *testing.T) {
+	requirePOSIXShellFixture(t)
+
+	originalElevated := completionProcessElevated
+	completionProcessElevated = func() bool { return false }
+	t.Cleanup(func() { completionProcessElevated = originalElevated })
+
+	binaryPath := setupCompletionSyncBinary(t, "tool", "tool", `printf native`, installModeBinary)
+	configureCompletionSyncSource(t, binaryPath)
+	_, destination := publishExistingCompletion(t, "tool", "bash", "tool", "existing")
+	stream := &trackingReadCloser{reader: strings.NewReader("failed fetch result")}
+
+	originalFactory := completionProviderFactory
+	completionProviderFactory = func(string, string) (providers.Provider, error) {
+		return fetchBinaryTestProvider{id: "github", fetchFn: func(*providers.FetchOpts) (*providers.File, error) {
+			return &providers.File{Data: stream}, errors.New("fetch failed")
+		}}, nil
+	}
+	t.Cleanup(func() { completionProviderFactory = originalFactory })
+
+	if _, err := runCompletionSync(t, "tool", "bash"); err == nil || !strings.Contains(err.Error(), "fetch failed") {
+		t.Fatalf("sync fetch error = %v, want fetch failure", err)
+	}
+	assertFileContent(t, destination, "existing")
+	if stream.closeCount != 1 {
+		t.Fatalf("fetched stream close count = %d, want 1", stream.closeCount)
+	}
+}
+
+func TestCompletionSyncRejectsMissingOrChangedBinaryBeforeBundledFetch(t *testing.T) {
+	for name, invalidate := range map[string]func(*testing.T, string){
+		"missing": func(t *testing.T, path string) {
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"changed": func(t *testing.T, path string) {
+			if err := os.WriteFile(path, []byte("#!/bin/sh\nprintf changed\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			binaryPath := setupCompletionSyncBinary(t, "tool", "tool", `printf native`, installModeBinary)
+			configureCompletionSyncSource(t, binaryPath)
+			invalidate(t, binaryPath)
+
+			originalFactory := completionProviderFactory
+			completionProviderFactory = func(string, string) (providers.Provider, error) {
+				t.Fatal("bundled provider construction occurred for invalid binary")
+				return nil, nil
+			}
+			t.Cleanup(func() { completionProviderFactory = originalFactory })
+
+			if _, err := runCompletionSync(t, "tool", "bash"); err == nil {
+				t.Fatal("sync accepted invalid binary")
+			}
+		})
+	}
+}
+
 func TestCompletionsCommandCoexistsWithCobraCompletion(t *testing.T) {
 	root := newRootCmd("test", func(int) {})
 	plural, _, err := root.cmd.Find([]string{"completions", "sync"})
@@ -267,6 +468,28 @@ func setupCompletionSyncBinary(t *testing.T, name, remoteName, body, installMode
 		t.Fatal(err)
 	}
 	return path
+}
+
+func configureCompletionSyncSource(t *testing.T, binaryPath string) *config.Binary {
+	t.Helper()
+	binary, err := config.GetBinary(binaryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binary.URL = "https://example.test/acme/tool"
+	binary.Provider = "github"
+	binary.Version = "v1.2.3"
+	binary.PackagePath = "bin/tool"
+	binary.ReleaseTagPrefix = "nightly-"
+	binary.SelectionIntent = &config.SelectionDescriptor{
+		LogicalProduct: "tool",
+		ArchiveMember:  "bin/tool",
+		Target:         &config.SelectionTarget{OS: "linux", Architecture: "amd64", CPUVariant: "avx2"},
+	}
+	if err := config.UpsertBinary(binary); err != nil {
+		t.Fatal(err)
+	}
+	return binary
 }
 
 func publishExistingCompletion(t *testing.T, binary, shell, command, content string) (string, string) {
