@@ -74,6 +74,35 @@ records. Each records an algorithm, expected and observed digest, source,
 scope, and result. `hash` remains the SHA-256 of the installed bytes; older
 configuration files without integrity records remain valid.
 
+### Local managed-completion state
+
+Each direct-binary record can also contain local-only `completion_shell` and
+`completion_ownership` fields. `completion_shell` is the optional automatic
+refresh choice (`bash`, `zsh`, or `fish`); missing means off. A fresh install is
+off by default, an install without `--completions` preserves an existing local
+choice, and `bin install --completions=off <source>` clears it. The choice is
+not changed by `bin completions sync`.
+
+`completion_ownership` records the path and SHA-256 for a file that `bin`
+published. It lets `bin` refresh or remove only an unchanged file it owns. Both
+completion fields are machine-local: export omits them, and import preserves
+the local values already associated with an existing binary record.
+
+Completion destinations are fixed beside the active config file. For an active
+config at `/home/me/.config/bin/config.json` and command `tool`, `bin` owns
+only these paths:
+
+```text
+/home/me/.config/bin/completions/bash/tool
+/home/me/.config/bin/completions/zsh/_tool
+/home/me/.config/bin/completions/fish/tool.fish
+```
+
+There is no configurable destination or shell-directory discovery. `BIN_CONFIG`
+therefore also selects the completion root: if it names `/tmp/bin/config.json`,
+the owned root is `/tmp/bin/completions`. Use the actual path printed by `bin
+completions sync` when configuring a shell or cleaning up a reported leftover.
+
 ## Environment variables
 
 ### Core runtime variables

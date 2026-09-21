@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -56,6 +57,75 @@ func TestCompletionSyncGeneratesDefaultAndExplicitCompletions(t *testing.T) {
 		}
 		assertCompletionContent(t, "bash", "tool", "custom|--|literal")
 	})
+}
+
+func TestCompletionSyncLoadsOwnedCompletionInSupportedShells(t *testing.T) {
+	tests := []struct {
+		shell     string
+		generator string
+		shellArgs func(string) []string
+	}{
+		{
+			shell:     "bash",
+			generator: `printf '%s\n' "complete -W 'alpha beta' tool"`,
+			shellArgs: func(destination string) []string {
+				return []string{"--noprofile", "--norc", "-c", `source "$1"; [[ $(complete -p tool) == *"alpha beta"* ]]`, "bash", destination}
+			},
+		},
+		{
+			shell: "zsh",
+			// compinit reads #compdef only when it is the first line of the completion file.
+			generator: `printf '%s\n' '#compdef tool' 'compadd alpha beta'`,
+			shellArgs: func(destination string) []string {
+				return []string{"-f", "-c", `fpath=("$1" $fpath); autoload -Uz compinit; compinit -D; [[ ${_comps[tool]} == _tool ]]`, "zsh", filepath.Dir(destination)}
+			},
+		},
+		{
+			shell:     "fish",
+			generator: `printf '%s\n' "complete -c tool -a 'alpha beta'"`,
+			shellArgs: func(destination string) []string {
+				return []string{"--no-config", "-c", `set -gx fish_complete_path $argv[1] $fish_complete_path; complete -C 'tool a' | string match -q alpha`, filepath.Dir(destination)}
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.shell, func(t *testing.T) {
+			shellPath, err := exec.LookPath(test.shell)
+			if err != nil {
+				t.Skipf("%s completion loading smoke coverage unavailable: executable not found", test.shell)
+			}
+			if runtime.GOOS == "windows" {
+				t.Skipf("%s completion loading smoke coverage unavailable: requires a POSIX local helper", test.shell)
+			}
+
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			binaryPath := setupCompletionSyncBinary(t, "tool", "tool", test.generator, installModeBinary)
+			if _, err := runCompletionSync(t, "tool", test.shell); err != nil {
+				t.Fatalf("sync %s completion: %v", test.shell, err)
+			}
+			destination, err := completionDestination(os.Getenv("BIN_CONFIG"), test.shell, "tool")
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			command := exec.Command(shellPath, test.shellArgs(destination)...)
+			command.Env = []string{
+				"BIN_CONFIG=" + os.Getenv("BIN_CONFIG"),
+				"HOME=" + home,
+				"PATH=" + filepath.Dir(binaryPath) + ":" + filepath.Dir(shellPath) + ":/usr/bin:/bin",
+				"TMPDIR=" + home,
+				"ZDOTDIR=" + home,
+				"XDG_CACHE_HOME=" + filepath.Join(home, ".cache"),
+				"XDG_CONFIG_HOME=" + filepath.Join(home, ".config"),
+				"XDG_DATA_HOME=" + filepath.Join(home, ".local", "share"),
+			}
+			if output, err := command.CombinedOutput(); err != nil {
+				t.Fatalf("load %s completion: %v\n%s", test.shell, err, output)
+			}
+		})
+	}
 }
 
 func TestCompletionSyncRejectsUnsafeTargetsWithoutReplacingCompletion(t *testing.T) {
