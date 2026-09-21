@@ -1,10 +1,13 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/aaronflorey/bin/pkg/config"
+	"github.com/aaronflorey/bin/pkg/providers"
 	"github.com/spf13/cobra"
 )
 
@@ -15,6 +18,8 @@ type completionsCmd struct {
 type completionSyncCmd struct {
 	cmd *cobra.Command
 }
+
+var completionProviderFactory = newProviderWithPolicy
 
 func newCompletionsCmd() *completionsCmd {
 	root := &completionsCmd{}
@@ -65,14 +70,107 @@ func (root *completionSyncCmd) run(cmd *cobra.Command, args []string) error {
 	if err := validateDirectManagedBinary(binary); err != nil {
 		return err
 	}
+	if err := verifyManagedBinaryHash(binary, binary.Hash); err != nil {
+		return err
+	}
 
 	command := filepath.Base(expandTrackedBinaryPath(binary.Path))
+	if generatorArgs != nil || !bundledCompletionFetchEligible(binary) {
+		destination, err := syncNativeCompletion(binaryPath, shell, command, generatorArgs)
+		if err != nil {
+			return err
+		}
+		writeCompletionSetupGuidance(cmd, shell, destination)
+		return nil
+	}
+
+	bundled, found, err := fetchBundledCompletion(binary, shell, command)
+	if err != nil {
+		return err
+	}
+	if found {
+		destination, err := publishManagedCompletion(binary.Path, binary.Hash, shell, command, bundled)
+		if err != nil {
+			return err
+		}
+		writeCompletionSetupGuidance(cmd, shell, destination)
+		return nil
+	}
 	destination, err := syncNativeCompletion(binaryPath, shell, command, generatorArgs)
 	if err != nil {
 		return err
 	}
 	writeCompletionSetupGuidance(cmd, shell, destination)
 	return nil
+}
+
+// bundledCompletionFetchEligible keeps sync from repeating providers whose
+// fetch operation pulls an image or runs a local build. Other managed sources
+// use their ordinary provider construction and fetch path.
+func bundledCompletionFetchEligible(binary *config.Binary) bool {
+	source := strings.ToLower(strings.TrimSpace(binary.URL))
+	if source == "" {
+		return false
+	}
+	if strings.HasPrefix(source, "docker://") || strings.HasPrefix(source, "goinstall://") {
+		return false
+	}
+
+	switch strings.ToLower(strings.TrimSpace(binary.Provider)) {
+	case "docker", "goinstall":
+		return false
+	default:
+		return true
+	}
+}
+
+// fetchBundledCompletion refetches an HTTP-managed artifact using the same
+// stored selection that lifecycle operations use. The artifact stream is
+// always closed before its bounded completion bytes are returned.
+func fetchBundledCompletion(binary *config.Binary, shell, command string) ([]byte, bool, error) {
+	fetchOpts := providers.FetchOpts{
+		Version:                  binary.Version,
+		BundledCompletionShell:   shell,
+		BundledCompletionCommand: command,
+	}
+	if err := lifecycleForMode(installModeBinary).applyStoredFetch(binary, &fetchOpts); err != nil {
+		return nil, false, err
+	}
+
+	provider, err := completionProviderFactory(binary.URL, binary.Provider)
+	if err != nil {
+		return nil, false, err
+	}
+	file, fetchErr := provider.Fetch(&fetchOpts)
+	if fetchErr != nil {
+		return nil, false, closeFetchedCompletionFile(file, fetchErr)
+	}
+	if file == nil {
+		return nil, false, errors.New("provider returned no fetched binary")
+	}
+	if len(file.BundledCompletion) == 0 {
+		return nil, false, closeFetchedCompletionFile(file, nil)
+	}
+	if file.Data == nil {
+		return nil, false, closeFetchedCompletionFile(file, errors.New("provider returned bundled completion without executable bytes"))
+	}
+
+	fetchedHash, hashErr := file.Hash()
+	if err := closeFetchedCompletionFile(file, hashErr); err != nil {
+		return nil, false, err
+	}
+	if !strings.EqualFold(fmt.Sprintf("%x", fetchedHash), binary.Hash) {
+		return nil, false, nil
+	}
+
+	return append([]byte(nil), file.BundledCompletion...), true, nil
+}
+
+func closeFetchedCompletionFile(file *providers.File, resultErr error) error {
+	if file == nil {
+		return resultErr
+	}
+	return errors.Join(resultErr, closeFetchedFile(file))
 }
 
 func parseCompletionSyncArgs(args []string, argsLenAtDash int) (string, string, []string, error) {
