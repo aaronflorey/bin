@@ -178,7 +178,7 @@ func explicitInstallDestination(target installTarget) (string, bool, error) {
 		return "", false, nil
 	}
 	path := target.path
-	if !strings.Contains(path, "/") {
+	if !isExplicitInstallDestination(path) {
 		path = filepath.Join(config.Get().DefaultPath, path)
 	}
 	resolved, err := absExpandedPath(path)
@@ -239,7 +239,7 @@ func (root *installCmd) installTarget(cmd *cobra.Command, target installTarget) 
 		resolvedPath = ""
 	} else if resolvedPath == "" {
 		resolvedPath = defaultPath
-	} else if !strings.Contains(resolvedPath, "/") {
+	} else if !isExplicitInstallDestination(resolvedPath) {
 		resolvedPath = filepath.Join(defaultPath, resolvedPath)
 	}
 	log.Debugf("Install target %q resolved to path %q (system-package=%t)", resolved.url, resolvedPath, root.opts.systemPackage)

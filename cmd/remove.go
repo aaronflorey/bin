@@ -153,21 +153,23 @@ func (root *removeCmd) resolveTargets(cmd *cobra.Command, bins map[string]*confi
 			var err error
 			bp, err = getBinPath(p)
 
-			if errors.Is(err, exec.ErrNotFound) || errors.Is(err, os.ErrNotExist) {
-				if aliasPath := findManagedBinByAlias(bins, p); aliasPath != "" {
-					bp = aliasPath
-					err = nil
-				} else {
-					fmt.Fprintf(cmd.ErrOrStderr(), "binary %s not found in PATH, skipping\n", p)
-					continue
+			notFound := errors.Is(err, exec.ErrNotFound) || errors.Is(err, os.ErrNotExist)
+			notManaged := err != nil && strings.Contains(err.Error(), "not managed by bin")
+			if notFound || notManaged {
+				aliasPath, aliasErr := findManagedBinByAlias(bins, p)
+				if aliasErr != nil {
+					return nil, aliasErr
 				}
-			}
-			if err != nil && strings.Contains(err.Error(), "not managed by bin") {
-				if aliasPath := findManagedBinByAlias(bins, p); aliasPath != "" {
+				if aliasPath != "" {
 					bp = aliasPath
 					err = nil
-				} else {
-					fmt.Fprintf(cmd.ErrOrStderr(), "binary %s is not managed by bin, skipping\n", p)
+				}
+				if err != nil {
+					if notFound {
+						fmt.Fprintf(cmd.ErrOrStderr(), "binary %s not found in PATH, skipping\n", p)
+					} else {
+						fmt.Fprintf(cmd.ErrOrStderr(), "binary %s is not managed by bin, skipping\n", p)
+					}
 					continue
 				}
 			}

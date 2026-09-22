@@ -22,6 +22,14 @@ func (p testFetchProvider) GetLatestVersion() (*providers.ReleaseInfo, error)   
 func (p testFetchProvider) Cleanup(*providers.CleanupOpts) error                { return nil }
 func (p testFetchProvider) GetID() string                                       { return "github" }
 
+func TestSystemPackagePathLooksExplicitForEitherSeparator(t *testing.T) {
+	for _, path := range []string{"bin/tool", `bin\tool`} {
+		if !systemPackagePathLooksExplicit(path) {
+			t.Errorf("systemPackagePathLooksExplicit(%q) = false, want true", path)
+		}
+	}
+}
+
 func TestResolveAppBundleExecutablePrefersBundleName(t *testing.T) {
 	appPath := filepath.Join(t.TempDir(), "Paseo.app")
 	execDir := filepath.Join(appPath, "Contents", "MacOS")
@@ -301,7 +309,10 @@ func TestFindManagedBinByAliasMatchesAppBundleName(t *testing.T) {
 		},
 	}
 
-	resolved := findManagedBinByAlias(bins, "Paseo")
+	resolved, err := findManagedBinByAlias(bins, "Paseo")
+	if err != nil {
+		t.Fatalf("alias lookup error: %v", err)
+	}
 	if resolved != "/Applications/Paseo.app/Contents/MacOS/Paseo" {
 		t.Fatalf("alias lookup = %q, want persisted executable path", resolved)
 	}

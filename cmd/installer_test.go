@@ -1142,6 +1142,20 @@ func TestFindManagedDuplicateByHash(t *testing.T) {
 	}
 }
 
+func TestFindManagedBinByAliasRejectsAmbiguousMatches(t *testing.T) {
+	paths := []string{"/tmp/tool-a", "/tmp/tool-b"}
+	_, err := findManagedBinByAlias(map[string]*config.Binary{
+		paths[1]: {Path: paths[1], AppBundle: "Tool.app"},
+		paths[0]: {Path: paths[0], RemoteName: "tool"},
+	}, "tool")
+	if err == nil {
+		t.Fatal("expected ambiguous alias error")
+	}
+	if !strings.Contains(err.Error(), "ambiguous") || !strings.Contains(err.Error(), paths[0]) || !strings.Contains(err.Error(), paths[1]) {
+		t.Fatalf("unexpected ambiguity error: %v", err)
+	}
+}
+
 func TestResolveManagedBinSuggestionNonInteractive(t *testing.T) {
 	previousInteractive := isPromptInteractive
 	previousConfirm := confirmPrompt

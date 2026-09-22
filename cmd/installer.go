@@ -798,7 +798,10 @@ func resolveBinsToProcess(allBins map[string]*config.Binary, args []string) (map
 		}
 		binCfg, ok := allBins[bin]
 		if !ok {
-			bin = findManagedBinByAlias(allBins, a)
+			bin, err = findManagedBinByAlias(allBins, a)
+			if err != nil {
+				return nil, err
+			}
 			if bin != "" {
 				binCfg, ok = allBins[bin]
 			}
@@ -811,29 +814,26 @@ func resolveBinsToProcess(allBins map[string]*config.Binary, args []string) (map
 	return bins, nil
 }
 
-func findManagedBinByAlias(allBins map[string]*config.Binary, input string) string {
+func findManagedBinByAlias(allBins map[string]*config.Binary, input string) (string, error) {
+	if isExplicitTargetPath(input) {
+		return "", nil
+	}
+
 	target := strings.ToLower(strings.TrimSpace(input))
 	if target == "" {
-		return ""
+		return "", nil
 	}
 
-	for path, bin := range allBins {
-		if bin == nil {
-			continue
+	return selectManagedBinPath(allBins, input, func(path string, bin *config.Binary) (string, bool) {
+		if strings.EqualFold(bin.RemoteName, target) || strings.EqualFold(strings.TrimSuffix(bin.AppBundle, ".app"), target) {
+			return path, true
 		}
-		if strings.EqualFold(bin.RemoteName, input) {
-			return path
-		}
-		if strings.EqualFold(strings.TrimSuffix(bin.AppBundle, ".app"), input) {
-			return path
-		}
-	}
-
-	return ""
+		return "", false
+	})
 }
 
 func resolveManagedBinSuggestion(allBins map[string]*config.Binary, input string) (string, error) {
-	if strings.Contains(input, "/") {
+	if isExplicitTargetPath(input) {
 		return "", nil
 	}
 
