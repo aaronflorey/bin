@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -22,8 +23,9 @@ type goinstall struct {
 }
 
 var (
-	goInstallCommand = exec.Command
-	goInstallTempDir = os.MkdirTemp
+	goInstallCommand    = exec.Command
+	goInstallTempDir    = os.MkdirTemp
+	goInstallModulePath = baseModulePath
 )
 
 type goInstallVersionInfo struct {
@@ -31,15 +33,15 @@ type goInstallVersionInfo struct {
 	Time    time.Time `json:"Time"`
 }
 
-func parseRepo(path string) (string, string, string) {
-	repo := path
+func parseRepo(repoPath string) (string, string, string) {
+	repo := repoPath
 	tag := "latest"
-	if i := strings.LastIndex(path, "@"); i > -1 {
-		repo = filepath.Clean(path[:i])
-		tag = path[i+1:]
+	if i := strings.LastIndex(repoPath, "@"); i > -1 {
+		repo = path.Clean(repoPath[:i])
+		tag = repoPath[i+1:]
 	}
 
-	name := path
+	name := repoPath
 	if i := strings.LastIndex(repo, "/"); i > -1 {
 		name = repo[i+1:]
 	}
@@ -61,7 +63,7 @@ func newGoInstall(repo string) (Provider, error) {
 // base module path and sub-path. This is deferred to Fetch time to avoid
 // shelling out to "go list -m" during provider construction.
 func (g *goinstall) resolveSubPath() {
-	g.resolveSubPathWith(baseModulePath)
+	g.resolveSubPathWith(goInstallModulePath)
 }
 
 // resolveSubPathWith is the testable variant of resolveSubPath.
