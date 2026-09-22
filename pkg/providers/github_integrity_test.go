@@ -16,7 +16,8 @@ import (
 )
 
 func TestGitHubFetchDigestSourcePriorityAndFailures(t *testing.T) {
-	payload := []byte("#!/bin/sh\nexit 0\n")
+	assetName := "tool" + genericScriptExtension()
+	payload := genericRunnablePayload(t)
 	payloadDigest := sha256.Sum256(payload)
 	correctDigest := "sha256:" + fmtDigest(payloadDigest)
 	manifestDigest := strings.Repeat("a", 64)
@@ -44,9 +45,9 @@ func TestGitHubFetchDigestSourcePriorityAndFailures(t *testing.T) {
 			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
 				case "/repos/acme/tool/releases/latest":
-					assets := []map[string]string{{"name": "tool", "url": server.URL + "/asset", "digest": tt.digest}}
+					assets := []map[string]string{{"name": assetName, "url": server.URL + "/asset", "digest": tt.digest}}
 					if tt.includeSidecar {
-						assets = append(assets, map[string]string{"name": "tool.sha256", "url": server.URL + "/sidecar"})
+						assets = append(assets, map[string]string{"name": assetName + ".sha256", "url": server.URL + "/sidecar"})
 					}
 					_ = json.NewEncoder(w).Encode(map[string]any{"tag_name": "v1.2.3", "assets": assets})
 				case "/asset":
@@ -60,7 +61,7 @@ func TestGitHubFetchDigestSourcePriorityAndFailures(t *testing.T) {
 			}))
 			defer server.Close()
 
-			file, err := newTestGitHubProvider(t, server.URL, "acme", "tool", "").Fetch(&FetchOpts{AutoSelect: "tool"})
+			file, err := newTestGitHubProvider(t, server.URL, "acme", "tool", "").Fetch(&FetchOpts{AutoSelect: assetName})
 			if tt.wantFailureReason == "" {
 				if err != nil {
 					t.Fatalf("Fetch returned error: %v", err)
@@ -94,7 +95,9 @@ func TestGitHubFetchDigestSourcePriorityAndFailures(t *testing.T) {
 }
 
 func TestGitHubFetchArchiveDoesNotInheritDownloadIntegrity(t *testing.T) {
-	archive := buildProviderZip(t, "tool", "#!/bin/sh\nexit 0\n")
+	filename := platformFixtureName("tool-linux-amd64.zip", "tool-windows-amd64.zip")
+	fixture := "tool" + genericScriptExtension()
+	archive := buildProviderZip(t, fixture, string(genericRunnablePayload(t)))
 	sum := sha256.Sum256(archive)
 
 	var server *httptest.Server
@@ -102,8 +105,8 @@ func TestGitHubFetchArchiveDoesNotInheritDownloadIntegrity(t *testing.T) {
 		switch r.URL.Path {
 		case "/repos/acme/tool/releases/latest":
 			_ = json.NewEncoder(w).Encode(map[string]any{"tag_name": "v1.2.3", "assets": []map[string]string{
-				{"name": "tool-linux-amd64.zip", "url": server.URL + "/asset"},
-				{"name": "tool-linux-amd64.zip.sha256", "url": server.URL + "/sidecar"},
+				{"name": filename, "url": server.URL + "/asset"},
+				{"name": filename + ".sha256", "url": server.URL + "/sidecar"},
 			}})
 		case "/asset":
 			_, _ = w.Write(archive)
@@ -116,7 +119,7 @@ func TestGitHubFetchArchiveDoesNotInheritDownloadIntegrity(t *testing.T) {
 	defer server.Close()
 
 	resetGitHubReleaseCache(t)
-	file, err := newTestGitHubProvider(t, server.URL, "acme", "tool", "").Fetch(&FetchOpts{AutoSelect: "tool-linux-amd64.zip"})
+	file, err := newTestGitHubProvider(t, server.URL, "acme", "tool", "").Fetch(&FetchOpts{AutoSelect: filename})
 	if err != nil {
 		t.Fatalf("Fetch returned error: %v", err)
 	}
@@ -125,7 +128,7 @@ func TestGitHubFetchArchiveDoesNotInheritDownloadIntegrity(t *testing.T) {
 			_ = closer.Close()
 		}
 	}()
-	if file.DownloadIntegrity == nil || file.DownloadIntegrity.Expected != fmtDigest(sum) || file.DownloadIntegrity.Source != "tool-linux-amd64.zip.sha256" {
+	if file.DownloadIntegrity == nil || file.DownloadIntegrity.Expected != fmtDigest(sum) || file.DownloadIntegrity.Source != filename+".sha256" {
 		t.Fatalf("unexpected download integrity record: %#v", file.DownloadIntegrity)
 	}
 	if file.InstalledIntegrity != nil || file.ExpectedSHA != "" || file.ProcessingUnchanged {
@@ -157,7 +160,8 @@ func TestGitHubFetchExplicitSelectionValidatesFinalPayload(t *testing.T) {
 }
 
 func TestGitHubFetchApplicableAndUnrelatedSidecarFailures(t *testing.T) {
-	payload := []byte("#!/bin/sh\nexit 0\n")
+	assetName := "tool" + genericScriptExtension()
+	payload := genericRunnablePayload(t)
 
 	tests := []struct {
 		name              string
@@ -170,21 +174,21 @@ func TestGitHubFetchApplicableAndUnrelatedSidecarFailures(t *testing.T) {
 		{
 			name: "applicable sidecar HTTP failure",
 			assets: func(serverURL string) []map[string]string {
-				return []map[string]string{{"name": "tool", "url": serverURL + "/asset"}, {"name": "tool.sha256", "url": serverURL + "/sidecar"}}
+				return []map[string]string{{"name": assetName, "url": serverURL + "/asset"}, {"name": assetName + ".sha256", "url": serverURL + "/sidecar"}}
 			},
 			sidecarStatus: http.StatusServiceUnavailable, wantFailureReason: checksumRetrievalFailure,
 		},
 		{
 			name: "applicable sidecar parse failure",
 			assets: func(serverURL string) []map[string]string {
-				return []map[string]string{{"name": "tool", "url": serverURL + "/asset"}, {"name": "tool.sha256", "url": serverURL + "/sidecar"}}
+				return []map[string]string{{"name": assetName, "url": serverURL + "/asset"}, {"name": assetName + ".sha256", "url": serverURL + "/sidecar"}}
 			},
 			sidecarContents: "not a checksum", wantFailureReason: checksumParsingFailure,
 		},
 		{
 			name: "unrelated failing sidecar is ignored",
 			assets: func(serverURL string) []map[string]string {
-				return []map[string]string{{"name": "tool", "url": serverURL + "/asset"}, {"name": "other.sha256", "url": serverURL + "/sidecar"}}
+				return []map[string]string{{"name": assetName, "url": serverURL + "/asset"}, {"name": "other.sha256", "url": serverURL + "/sidecar"}}
 			},
 			sidecarStatus: http.StatusServiceUnavailable, wantFile: true,
 		},
@@ -212,7 +216,7 @@ func TestGitHubFetchApplicableAndUnrelatedSidecarFailures(t *testing.T) {
 			}))
 			defer server.Close()
 
-			file, err := newTestGitHubProvider(t, server.URL, "acme", "tool", "").Fetch(&FetchOpts{AutoSelect: "tool"})
+			file, err := newTestGitHubProvider(t, server.URL, "acme", "tool", "").Fetch(&FetchOpts{AutoSelect: assetName})
 			if tt.wantFile {
 				if err != nil || file == nil {
 					t.Fatalf("Fetch = %#v, %v; want file without checksum evidence", file, err)

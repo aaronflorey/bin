@@ -1,16 +1,17 @@
 # Local Issue State
 
-Generated: 2026-09-22T00:12:03Z
+Generated: 2026-09-22T00:55:24Z
 
 NOTE: This file is auto-generated. Do not edit manually.
 
-Tickets: 1 active, 18 resolved
+Tickets: 0 active, 19 resolved
 
 ## Active Tickets
 
 | Effort | Ticket | Type | Mode | Status | Blocked by |
 | --- | --- | --- | --- | --- | --- |
-| [windows-compatibility](windows-compatibility/spec.md) | [03-enforce-windows-go-tests](windows-compatibility/issues/03-enforce-windows-go-tests.md) | — | — | ready-for-agent | 01 / Resolve managed Windows names and destinations; 02 / Preserve Go import-path separators on Windows. |
+
+_No active tickets._
 
 ## Resolved Tickets
 
@@ -34,3 +35,4 @@ Tickets: 1 active, 18 resolved
 | [reliability-managed-completions](reliability-managed-completions/spec.md) | [18-document-and-verify](reliability-managed-completions/issues/18-document-and-verify.md) | — | — | resolved | 17 / Refresh opted-in completions and clean up owned files. |
 | [windows-compatibility](windows-compatibility/spec.md) | [01-resolve-managed-windows-targets](windows-compatibility/issues/01-resolve-managed-windows-targets.md) | — | — | resolved | None (can start immediately). |
 | [windows-compatibility](windows-compatibility/spec.md) | [02-preserve-go-import-paths](windows-compatibility/issues/02-preserve-go-import-paths.md) | — | — | resolved | None (can start immediately). |
+| [windows-compatibility](windows-compatibility/spec.md) | [03-enforce-windows-go-tests](windows-compatibility/issues/03-enforce-windows-go-tests.md) | — | — | resolved | 01 / Resolve managed Windows names and destinations; 02 / Preserve Go import-path separators on Windows. |

@@ -119,11 +119,12 @@ func TestArtifactProcessingResultOwnsCleanup(t *testing.T) {
 }
 
 func TestArtifactProcessingResultReportsAllCleanupErrorsOnce(t *testing.T) {
+	fixture := testRunnableFixture("tool")
 	download, err := os.CreateTemp(t.TempDir(), "download-*")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := io.WriteString(download, "#!/bin/sh\nexit 0\n"); err != nil {
+	if _, err := io.WriteString(download, fixture.contents); err != nil {
 		t.Fatal(err)
 	}
 	if err := download.Close(); err != nil {
@@ -153,7 +154,7 @@ func TestArtifactProcessingResultReportsAllCleanupErrorsOnce(t *testing.T) {
 	})
 
 	f := NewFilter(&FilterOpts{NonInteractive: true})
-	f.repoName, f.name = "tool", "tool"
+	f.repoName, f.name = "tool", fixture.name
 	result, err := f.processReleaseArtifact(download.Name(), "download")
 	if err != nil {
 		t.Fatal(err)
@@ -251,7 +252,8 @@ func TestProcessURLBoundsStreamingDownloadWithoutContentLength(t *testing.T) {
 }
 
 func TestProcessReaderProcessesPlainAndArchiveArtifacts(t *testing.T) {
-	archive := buildTestZipArchive(t, map[string]string{"tool": "#!/bin/sh\nexit 0\n"})
+	fixture := testRunnableFixture("tool")
+	archive := buildTestZipArchive(t, map[string]string{fixture.name: fixture.contents})
 
 	for _, test := range []struct {
 		name          string
@@ -259,7 +261,7 @@ func TestProcessReaderProcessesPlainAndArchiveArtifacts(t *testing.T) {
 		payload       []byte
 		wantUnchanged bool
 	}{
-		{name: "plain", artifactName: "tool", payload: []byte("#!/bin/sh\nexit 0\n"), wantUnchanged: true},
+		{name: "plain", artifactName: fixture.name, payload: []byte(fixture.contents), wantUnchanged: true},
 		{name: "archive", artifactName: "tool.zip", payload: archive, wantUnchanged: false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -276,10 +278,10 @@ func TestProcessReaderProcessesPlainAndArchiveArtifacts(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if string(contents) != "#!/bin/sh\nexit 0\n" {
+			if string(contents) != fixture.contents {
 				t.Fatalf("processed contents = %q", contents)
 			}
-			if result.Name != "tool" || result.UnchangedBytes != test.wantUnchanged {
+			if result.Name != fixture.name || result.UnchangedBytes != test.wantUnchanged {
 				t.Fatalf("result = name:%q unchanged:%v", result.Name, result.UnchangedBytes)
 			}
 			if result.DownloadSHA256 != fmt.Sprintf("%x", expected) || result.InstalledSHA256 == "" {
@@ -303,6 +305,7 @@ func TestProcessReaderBoundsStreamingDownload(t *testing.T) {
 }
 
 func TestProcessURLDelegatesAfterSingleRequest(t *testing.T) {
+	fixture := testRunnableFixture("tool")
 	originalClient := httpClient
 	requests := 0
 	httpClient = &http.Client{Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
@@ -312,8 +315,8 @@ func TestProcessURLDelegatesAfterSingleRequest(t *testing.T) {
 		}
 		return &http.Response{
 			StatusCode:    http.StatusOK,
-			ContentLength: int64(len("#!/bin/sh\nexit 0\n")),
-			Body:          io.NopCloser(strings.NewReader("#!/bin/sh\nexit 0\n")),
+			ContentLength: int64(len(fixture.contents)),
+			Body:          io.NopCloser(strings.NewReader(fixture.contents)),
 			Request:       req,
 		}, nil
 	})}
@@ -321,7 +324,7 @@ func TestProcessURLDelegatesAfterSingleRequest(t *testing.T) {
 
 	f := NewFilter(&FilterOpts{NonInteractive: true})
 	f.repoName = "tool"
-	result, err := f.ProcessURL(&FilteredAsset{Name: "tool", URL: "https://example.test/tool", ExtraHeaders: map[string]string{"Accept": "application/octet-stream"}}, "", false)
+	result, err := f.ProcessURL(&FilteredAsset{Name: fixture.name, URL: "https://example.test/tool", ExtraHeaders: map[string]string{"Accept": "application/octet-stream"}}, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -349,12 +352,13 @@ func TestProcessURLBoundsPlainArtifactExpandedBytes(t *testing.T) {
 }
 
 func TestProcessURLWithNilOptionsProcessesPlainArtifact(t *testing.T) {
+	fixture := testRunnableFixture("tool")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = io.WriteString(w, "#!/bin/sh\nexit 0\n")
+		_, _ = io.WriteString(w, fixture.contents)
 	}))
 	defer server.Close()
 
-	result, err := NewFilter(nil).ProcessURL(&FilteredAsset{Name: "tool", URL: server.URL}, "", false)
+	result, err := NewFilter(nil).ProcessURL(&FilteredAsset{Name: fixture.name, URL: server.URL}, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -397,17 +401,17 @@ func TestProcessURLBoundsDecodedPayloadEntryBytes(t *testing.T) {
 }
 
 func TestProcessURLCountsDecodedPlainPayloadOnce(t *testing.T) {
-	script := "#!/bin/sh\nexit 0\n"
-	payload := gzipPayload(t, script)
+	fixture := testRunnableFixture("tool")
+	payload := gzipPayload(t, fixture.contents)
 	original := artifactProcessingBudgets
-	artifactProcessingBudgets = artifactBudgets{maxDownloadBytes: 64, maxArchiveEntries: 10, maxEntryBytes: int64(len(script)), maxExpandedBytes: int64(len(script)), maxNesting: 2}
+	artifactProcessingBudgets = artifactBudgets{maxDownloadBytes: 64, maxArchiveEntries: 10, maxEntryBytes: int64(len(fixture.contents)), maxExpandedBytes: int64(len(fixture.contents)), maxNesting: 2}
 	t.Cleanup(func() { artifactProcessingBudgets = original })
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(payload) }))
 	defer server.Close()
 
 	f := NewFilter(&FilterOpts{NonInteractive: true})
 	f.repoName = "tool"
-	result, err := f.ProcessURL(&FilteredAsset{Name: "tool.gz", URL: server.URL}, "", false)
+	result, err := f.ProcessURL(&FilteredAsset{Name: fixture.name + ".gz", URL: server.URL}, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -417,19 +421,20 @@ func TestProcessURLCountsDecodedPlainPayloadOnce(t *testing.T) {
 }
 
 func TestProcessURLUsesEmbeddedGzipMemberIdentity(t *testing.T) {
-	payload := gzipPayloadNamed(t, "tool", "#!/bin/sh\nexit 0\n")
+	fixture := testRunnableFixture("tool")
+	payload := gzipPayloadNamed(t, fixture.name, fixture.contents)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(payload) }))
 	defer server.Close()
 
 	f := NewFilter(&FilterOpts{NonInteractive: true})
 	f.repoName = "tool"
-	result, err := f.ProcessURL(&FilteredAsset{Name: "tool.gz", URL: server.URL}, "", false)
+	result, err := f.ProcessURL(&FilteredAsset{Name: fixture.name + ".gz", URL: server.URL}, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer result.Source.(io.Closer).Close()
-	if result.Name != "tool" || result.PackagePath != "tool" {
-		t.Fatalf("gzip result = name:%q package:%q, want tool", result.Name, result.PackagePath)
+	if result.Name != fixture.name || result.PackagePath != fixture.name {
+		t.Fatalf("gzip result = name:%q package:%q, want %q", result.Name, result.PackagePath, fixture.name)
 	}
 }
 
@@ -562,8 +567,9 @@ func TestProcessURLClosesInterruptedDownload(t *testing.T) {
 }
 
 func TestReleaseArtifactInventoryStagesCompletionsAndCleansUp(t *testing.T) {
+	fixture := testRunnableFixture("tool")
 	archive := buildTestZipArchive(t, map[string]string{
-		"tool":                   "#!/bin/sh\nexit 0\n",
+		fixture.name:             fixture.contents,
 		"docs/readme.txt":        "ignored",
 		"share/completions/tool": "complete -c tool\n",
 	})
@@ -913,20 +919,22 @@ func TestProcessURLRejectsCompressedMetadataSidecarBeforePayloadSelection(t *tes
 }
 
 func TestProcessURLOpaquePayloadUsesRunnableGate(t *testing.T) {
+	fixture := testRunnableFixture("tool")
 	for _, test := range []struct {
-		name string
-		body string
-		want error
+		name      string
+		assetName string
+		body      string
+		want      error
 	}{
-		{name: "runnable", body: "#!/bin/sh\nexit 0\n"},
-		{name: "opaque data", body: "not executable", want: ErrNoCompatibleFiles},
+		{name: "runnable", assetName: fixture.name, body: fixture.contents},
+		{name: "opaque data", assetName: "tool", body: "not executable", want: ErrNoCompatibleFiles},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, test.body) }))
 			defer server.Close()
 			f := NewFilter(&FilterOpts{NonInteractive: true})
 			f.repoName = "tool"
-			result, err := f.ProcessURL(&FilteredAsset{Name: "tool", URL: server.URL}, "", false)
+			result, err := f.ProcessURL(&FilteredAsset{Name: test.assetName, URL: server.URL}, "", false)
 			if !errors.Is(err, test.want) {
 				t.Fatalf("ProcessURL() error = %v, want %v", err, test.want)
 			}
@@ -940,20 +948,25 @@ func TestProcessURLOpaquePayloadUsesRunnableGate(t *testing.T) {
 }
 
 func TestProcessURLOpaqueArchiveNamedPayloadUsesRunnableGate(t *testing.T) {
+	fixture := testRunnableFixture("tool")
 	for _, test := range []struct {
-		name string
-		body string
-		want error
+		name      string
+		assetName string
+		body      string
+		want      error
 	}{
-		{name: "runnable zip name", body: "#!/bin/sh\nexit 0\n"},
-		{name: "runnable tar name", body: "#!/bin/sh\nexit 0\n"},
+		{name: "runnable zip name", assetName: fixture.name, body: fixture.contents},
+		{name: "runnable tar name", assetName: fixture.name, body: fixture.contents},
 		{name: "invalid zip name", body: "not executable", want: ErrNoCompatibleFiles},
 		{name: "invalid tar name", body: "not executable", want: ErrNoCompatibleFiles},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			assetName := "tool.zip"
-			if strings.Contains(test.name, "tar") {
-				assetName = "tool.tar"
+			assetName := test.assetName
+			if assetName == "" {
+				assetName = "tool.zip"
+				if strings.Contains(test.name, "tar") {
+					assetName = "tool.tar"
+				}
 			}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, test.body) }))
 			defer server.Close()
@@ -974,11 +987,12 @@ func TestProcessURLOpaqueArchiveNamedPayloadUsesRunnableGate(t *testing.T) {
 }
 
 func TestArchiveObservesDirectoriesAndNestedMembersWithoutIdentityCollisions(t *testing.T) {
+	fixture := testRunnableFixture("tool")
 	original := artifactProcessingBudgets
 	artifactProcessingBudgets = artifactBudgets{maxDownloadBytes: 1 << 20, maxArchiveEntries: 1, maxEntryBytes: 1 << 20, maxExpandedBytes: 1 << 20, maxNesting: 4}
 	t.Cleanup(func() { artifactProcessingBudgets = original })
 
-	archive := buildTestZipArchive(t, map[string]string{"dir/": "", "tool": "#!/bin/sh\nexit 0\n"})
+	archive := buildTestZipArchive(t, map[string]string{"dir/": "", fixture.name: fixture.contents})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(archive) }))
 	defer server.Close()
 	f := NewFilter(&FilterOpts{NonInteractive: true})
@@ -989,7 +1003,7 @@ func TestArchiveObservesDirectoriesAndNestedMembersWithoutIdentityCollisions(t *
 	}
 
 	artifactProcessingBudgets.maxArchiveEntries = 10
-	inner := buildTestZipArchive(t, map[string]string{"tool": "#!/bin/sh\nexit 0\n"})
+	inner := buildTestZipArchive(t, map[string]string{fixture.name: fixture.contents})
 	outer := buildTestZipArchive(t, map[string]string{"nested.zip": string(inner)})
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(outer) }))
 	defer server.Close()
@@ -998,7 +1012,7 @@ func TestArchiveObservesDirectoriesAndNestedMembersWithoutIdentityCollisions(t *
 		t.Fatal(err)
 	}
 	defer result.Source.(io.Closer).Close()
-	if result.PackagePath != "nested.zip!/tool" {
+	if result.PackagePath != "nested.zip!/"+fixture.name {
 		t.Fatalf("PackagePath = %q, want scoped nested identity", result.PackagePath)
 	}
 }
@@ -1178,8 +1192,9 @@ func TestIgnoredCompressedArchiveMemberBoundsNesting(t *testing.T) {
 }
 
 func TestIgnoredCompressedArchiveMemberIsNotStaged(t *testing.T) {
+	fixture := testRunnableFixture("tool")
 	archive := buildTestZipArchive(t, map[string]string{
-		"tool":                      "#!/bin/sh\nexit 0\n",
+		fixture.name:                fixture.contents,
 		"tool.notarization.json.gz": string(gzipPayload(t, "decoded ignored sidecar")),
 	})
 	download, err := os.CreateTemp(t.TempDir(), "artifact-download-*")
