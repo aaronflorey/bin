@@ -108,6 +108,83 @@ func TestGoInstallFetchCleansIsolatedOutputWhenStreamCloses(t *testing.T) {
 	}
 }
 
+func TestGoInstallFetchUsesBaseModuleMetadataAndCommandTarget(t *testing.T) {
+	previousCommand := goInstallCommand
+	previousModulePath := goInstallModulePath
+	t.Cleanup(func() {
+		goInstallCommand = previousCommand
+		goInstallModulePath = previousModulePath
+	})
+
+	for _, test := range []struct {
+		name            string
+		target          string
+		baseModule      string
+		metadataPath    string
+		commandArgument string
+	}{
+		{
+			name:            "module root latest",
+			target:          "goinstall://example.test/acme/tool",
+			baseModule:      "example.test/acme/tool",
+			metadataPath:    "/example.test/acme/tool/@latest",
+			commandArgument: "example.test/acme/tool@v1.2.3",
+		},
+		{
+			name:            "nested command version",
+			target:          "goinstall://example.test/acme/tool/cmd/tool@v1.2.3",
+			baseModule:      "example.test/acme/tool",
+			metadataPath:    "/example.test/acme/tool/@v/v1.2.3.info",
+			commandArgument: "example.test/acme/tool/cmd/tool@v1.2.3",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			goInstallModulePath = func(module string) (string, bool) {
+				if module == "example.test/acme/tool/cmd/tool" {
+					return test.baseModule, true
+				}
+				return module, false
+			}
+
+			var commandArgs []string
+			goInstallCommand = func(_ string, args ...string) *exec.Cmd {
+				commandArgs = append([]string(nil), args...)
+				return goInstallHelperCommand("write")
+			}
+
+			var metadataPath string
+			p, err := newGoInstall(test.target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			g := p.(*goinstall)
+			g.httpClient = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				metadataPath = request.URL.Path
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     make(http.Header),
+					Body:       io.NopCloser(strings.NewReader(`{"Version":"v1.2.3","Time":"2024-01-01T00:00:00Z"}`)),
+				}, nil
+			})}
+
+			file, err := g.Fetch(&FetchOpts{})
+			if err != nil {
+				t.Fatalf("Fetch: %v", err)
+			}
+			if err := file.Data.(io.Closer).Close(); err != nil {
+				t.Fatalf("close fetched file: %v", err)
+			}
+
+			if metadataPath != test.metadataPath {
+				t.Errorf("metadata request path = %q, want %q", metadataPath, test.metadataPath)
+			}
+			if got := strings.Join(commandArgs, " "); got != "install "+test.commandArgument {
+				t.Errorf("go command arguments = %q, want %q", got, "install "+test.commandArgument)
+			}
+		})
+	}
+}
+
 func goInstallHelperCommand(mode string) *exec.Cmd {
 	command := exec.Command(os.Args[0], "-test.run=TestGoInstallHelperProcess", "--", mode)
 	command.Env = append(os.Environ(), "GO_WANT_GO_INSTALL_HELPER=1")
@@ -247,9 +324,17 @@ func TestNewGoInstallSubPath(t *testing.T) {
 			wantName:    "tool",
 		},
 		{
-			name:        "simple module with version, no sub-path",
+			name:        "versioned module root preserves import path separators",
 			url:         "goinstall://github.com/example/tool@v1.2.3",
 			wantRepo:    "github.com/example/tool",
+			wantSubPath: "",
+			wantTag:     "v1.2.3",
+			wantName:    "tool",
+		},
+		{
+			name:        "versioned nested command preserves import path separators",
+			url:         "goinstall://github.com/example/tool/cmd/tool@v1.2.3",
+			wantRepo:    "github.com/example/tool/cmd/tool",
 			wantSubPath: "",
 			wantTag:     "v1.2.3",
 			wantName:    "tool",
