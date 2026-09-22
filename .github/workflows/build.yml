@@ -45,6 +45,19 @@ jobs:
         check-latest: true
     - name: Test
       run: go test ./...
+  windows-test:
+    name: Windows Go tests
+    runs-on: windows-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: 'go.mod'
+        check-latest: true
+    - name: Test
+      run: go test ./...
   action-node-tests:
     name: action node tests
     runs-on: ubuntu-latest

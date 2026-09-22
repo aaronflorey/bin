@@ -47,7 +47,8 @@ func TestGitLabFetchPreservesApplicableSidecarFailure(t *testing.T) {
 }
 
 func TestCodebergFetchRetainsScopedIntegrityRecords(t *testing.T) {
-	payload := []byte("#!/bin/sh\nexit 0\n")
+	assetName := "tool" + genericScriptExtension()
+	payload := genericRunnablePayload(t)
 	digest := sha256.Sum256(payload)
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -56,8 +57,8 @@ func TestCodebergFetchRetainsScopedIntegrityRecords(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]string{"version": "1.20.0"})
 		case strings.Contains(r.URL.Path, "/releases/tags/v1"):
 			_ = json.NewEncoder(w).Encode(map[string]any{"tag_name": "v1", "assets": []map[string]string{
-				{"name": "tool", "browser_download_url": server.URL + "/asset"},
-				{"name": "tool.sha256", "browser_download_url": server.URL + "/sidecar"},
+				{"name": assetName, "browser_download_url": server.URL + "/asset"},
+				{"name": assetName + ".sha256", "browser_download_url": server.URL + "/sidecar"},
 			}})
 		case r.URL.Path == "/asset":
 			_, _ = w.Write(payload)
@@ -73,7 +74,7 @@ func TestCodebergFetchRetainsScopedIntegrityRecords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	file, err := (&codeberg{client: client, owner: "acme", repo: "tool", tag: "v1"}).Fetch(&FetchOpts{AutoSelect: "tool"})
+	file, err := (&codeberg{client: client, owner: "acme", repo: "tool", tag: "v1"}).Fetch(&FetchOpts{AutoSelect: assetName})
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -84,13 +85,14 @@ func TestCodebergFetchRetainsScopedIntegrityRecords(t *testing.T) {
 }
 
 func TestHashiCorpFetchPreservesApplicableSidecarParseFailure(t *testing.T) {
+	filename := platformFixtureName("tool_linux_amd64", "tool_windows_amd64")
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/tool/1.0/index.json":
 			_ = json.NewEncoder(w).Encode(map[string]any{"name": "tool", "version": "1.0", "builds": []map[string]string{
-				{"filename": "tool_linux_amd64", "url": server.URL + "/asset"},
-				{"filename": "tool_linux_amd64.sha256", "url": server.URL + "/sidecar"},
+				{"filename": filename, "url": server.URL + "/asset"},
+				{"filename": filename + ".sha256", "url": server.URL + "/sidecar"},
 			}})
 		case "/sidecar":
 			_, _ = fmt.Fprint(w, "not a checksum")
@@ -105,7 +107,7 @@ func TestHashiCorpFetchPreservesApplicableSidecarParseFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = (&hashiCorp{client: server.Client(), repo: "tool", tag: "1.0", baseURL: baseURL}).Fetch(&FetchOpts{AutoSelect: "tool_linux_amd64"})
+	_, err = (&hashiCorp{client: server.Client(), repo: "tool", tag: "1.0", baseURL: baseURL}).Fetch(&FetchOpts{AutoSelect: filename})
 	assertChecksumFailure(t, err, checksumParsingFailure)
 }
 

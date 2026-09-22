@@ -51,12 +51,12 @@ is that Bash can source the owned Bash file, Zsh has the owned Zsh directory in
 <command>`, and Fish has the owned Fish directory in `fish_complete_path`. Do
 not rely on a developer's shell initialization or completion directories.
 
-The workflow runs the Go suite on `ubuntu-latest` and `macos-latest`; its race
-and coverage suites run on `ubuntu-latest`. This provides native Linux and
-macOS Go-suite evidence. The isolated shell-loading subtests skip and report
-unavailable shells as untested; unavailable platforms are likewise untested.
-Windows compatibility coverage is owned by its separate platform work rather
-than a second completion matrix.
+The workflow runs the Go suite on `ubuntu-latest`, `macos-latest`, and
+`windows-latest`; its race and coverage suites remain on `ubuntu-latest`. This
+provides native Linux, macOS, and Windows Go-suite evidence; the Windows job
+covers runtime-path, executable, and process behavior without live installs.
+The isolated shell-loading subtests skip and report unavailable shells as
+untested; unavailable platforms are likewise untested.
 
 ## CI smoke coverage
 

@@ -574,6 +574,13 @@ func genericScriptExtension() string {
 	return ""
 }
 
+func platformFixtureName(unixName, windowsName string) string {
+	if runtime.GOOS == "windows" {
+		return windowsName
+	}
+	return unixName
+}
+
 func genericRunnablePayload(t *testing.T) []byte {
 	t.Helper()
 	if runtime.GOOS == "windows" {

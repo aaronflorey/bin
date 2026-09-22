@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -24,6 +25,18 @@ type mockOSResolver struct {
 	Arch                 []string
 	LibC                 []string
 	OSSpecificExtensions []string
+}
+
+type runnableTestFixture struct {
+	name     string
+	contents string
+}
+
+func testRunnableFixture(name string) runnableTestFixture {
+	if runtime.GOOS == "windows" {
+		return runnableTestFixture{name: name + ".cmd", contents: "@echo off\r\nexit /b 0\r\n"}
+	}
+	return runnableTestFixture{name: name, contents: "#!/bin/sh\nexit 0\n"}
 }
 
 func (m *mockOSResolver) GetOS() []string {
@@ -112,7 +125,13 @@ func TestArchiveMemberLeaf(t *testing.T) {
 }
 
 func TestProcessURLValidatesArchiveChecksum(t *testing.T) {
-	archiveData := buildTestZipArchive(t, map[string]string{"tool": "#!/bin/sh\nhello from archive"})
+	assetName := "tool-linux-amd64.zip"
+	memberName, payload := "tool", "#!/bin/sh\nhello from archive"
+	if runtime.GOOS == "windows" {
+		assetName = "tool-windows-amd64.zip"
+		memberName, payload = "tool.cmd", "@echo off\r\necho hello from archive\r\n"
+	}
+	archiveData := buildTestZipArchive(t, map[string]string{memberName: payload})
 	expectedHash := sha256.Sum256(archiveData)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -123,7 +142,7 @@ func TestProcessURLValidatesArchiveChecksum(t *testing.T) {
 	f := NewFilter(&FilterOpts{NonInteractive: true})
 	f.repoName = "tool"
 
-	result, err := f.ProcessURL(&FilteredAsset{Name: "tool-linux-amd64.zip", URL: server.URL}, fmt.Sprintf("%x", expectedHash[:]), true)
+	result, err := f.ProcessURL(&FilteredAsset{Name: assetName, URL: server.URL}, fmt.Sprintf("%x", expectedHash[:]), true)
 	if err != nil {
 		t.Fatalf("ProcessURL returned error: %v", err)
 	}
@@ -138,10 +157,10 @@ func TestProcessURLValidatesArchiveChecksum(t *testing.T) {
 		}
 	}
 
-	if string(data) != "#!/bin/sh\nhello from archive" {
+	if string(data) != payload {
 		t.Fatalf("unexpected archive contents: %q", string(data))
 	}
-	if result.Name != "tool" {
+	if result.Name != memberName {
 		t.Fatalf("unexpected extracted file name: %s", result.Name)
 	}
 }
@@ -170,8 +189,15 @@ func TestProcessURLRejectsArchiveChecksumMismatch(t *testing.T) {
 }
 
 func TestProcessURLReportsByteTransformationEvidence(t *testing.T) {
-	plain := []byte("#!/bin/sh\nexit 0\n")
-	archive := buildTestZipArchive(t, map[string]string{"tool": "#!/bin/sh\nexit 0\n"})
+	plainName, renamedName, archiveAssetName := "tool-linux-amd64", "tool-renamed-linux-amd64", "tool-linux-amd64.zip"
+	if runtime.GOOS == "windows" {
+		plainName, renamedName, archiveAssetName = "tool-windows-amd64", "tool-renamed-windows-amd64", "tool-windows-amd64.zip"
+	}
+	plainFixture := testRunnableFixture(plainName)
+	renamedFixture := testRunnableFixture(renamedName)
+	archiveFixture := testRunnableFixture("tool")
+	plain := []byte(plainFixture.contents)
+	archive := buildTestZipArchive(t, map[string]string{archiveFixture.name: archiveFixture.contents})
 
 	tests := []struct {
 		name          string
@@ -179,10 +205,10 @@ func TestProcessURLReportsByteTransformationEvidence(t *testing.T) {
 		payload       []byte
 		wantUnchanged bool
 	}{
-		{name: "unchanged plain payload", assetName: "tool-linux-amd64", payload: plain, wantUnchanged: true},
-		{name: "renamed unchanged plain payload", assetName: "tool-renamed-linux-amd64", payload: plain, wantUnchanged: true},
-		{name: "archive payload", assetName: "tool-linux-amd64.zip", payload: archive, wantUnchanged: false},
-		{name: "same-name transformed payload", assetName: "tool", payload: archive, wantUnchanged: false},
+		{name: "unchanged plain payload", assetName: plainFixture.name, payload: plain, wantUnchanged: true},
+		{name: "renamed unchanged plain payload", assetName: renamedFixture.name, payload: []byte(renamedFixture.contents), wantUnchanged: true},
+		{name: "archive payload", assetName: archiveAssetName, payload: archive, wantUnchanged: false},
+		{name: "same-name transformed payload", assetName: archiveFixture.name, payload: archive, wantUnchanged: false},
 	}
 
 	for _, tt := range tests {
@@ -286,8 +312,9 @@ func TestProcessZipLogsEntriesRejectedByPackagePath(t *testing.T) {
 }
 
 func TestProcessZipAllowsNonPortableAncillaryMember(t *testing.T) {
+	fixture := testRunnableFixture("tool")
 	archiveData := buildTestZipArchive(t, map[string]string{
-		"tool":         "#!/bin/sh\nexit 0\n",
+		fixture.name:   fixture.contents,
 		"docs/aux.txt": "documentation",
 	})
 
@@ -301,8 +328,8 @@ func TestProcessZipAllowsNonPortableAncillaryMember(t *testing.T) {
 			_ = closer.Close()
 		}
 	}()
-	if result.Name != "tool" {
-		t.Fatalf("unexpected executable name: got %q, want tool", result.Name)
+	if result.Name != fixture.name {
+		t.Fatalf("unexpected executable name: got %q, want %q", result.Name, fixture.name)
 	}
 }
 
@@ -1820,6 +1847,7 @@ func TestProcessTarMatchesByBasename(t *testing.T) {
 }
 
 func TestProcessTarIgnoresCompressedManpages(t *testing.T) {
+	fixture := testRunnableFixture("infisical")
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
 	files := map[string]string{
@@ -1829,7 +1857,7 @@ func TestProcessTarIgnoresCompressedManpages(t *testing.T) {
 		"completions/infisical.fish": "completion",
 		"completions/infisical.zsh":  "completion",
 		"manpages/infisical.1.gz":    "manpage",
-		"infisical":                  "#!/bin/sh\nexit 0\n",
+		fixture.name:                 fixture.contents,
 	}
 	for name, content := range files {
 		hdr := &tar.Header{Name: name, Mode: 0755, Size: int64(len(content))}
@@ -1849,19 +1877,20 @@ func TestProcessTarIgnoresCompressedManpages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.Name != "infisical" {
-		t.Fatalf("expected file name 'infisical', got %q", result.Name)
+	if result.Name != fixture.name {
+		t.Fatalf("expected file name %q, got %q", fixture.name, result.Name)
 	}
-	if result.PackagePath != "infisical" {
-		t.Fatalf("expected package path 'infisical', got %q", result.PackagePath)
+	if result.PackagePath != fixture.name {
+		t.Fatalf("expected package path %q, got %q", fixture.name, result.PackagePath)
 	}
 }
 
 func TestProcessTarPrefersExecutableWhenRepoNameDiffers(t *testing.T) {
+	fixture := testRunnableFixture("infisical")
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
 	files := map[string]string{
-		"infisical":  "#!/bin/sh\nexit 0\n",
+		fixture.name: fixture.contents,
 		"install.sh": "#!/bin/sh\nexit 0\n",
 	}
 	for name, content := range files {
@@ -1882,11 +1911,11 @@ func TestProcessTarPrefersExecutableWhenRepoNameDiffers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.Name != "infisical" {
-		t.Fatalf("expected file name 'infisical', got %q", result.Name)
+	if result.Name != fixture.name {
+		t.Fatalf("expected file name %q, got %q", fixture.name, result.Name)
 	}
-	if result.PackagePath != "infisical" {
-		t.Fatalf("expected package path 'infisical', got %q", result.PackagePath)
+	if result.PackagePath != fixture.name {
+		t.Fatalf("expected package path %q, got %q", fixture.name, result.PackagePath)
 	}
 }
 

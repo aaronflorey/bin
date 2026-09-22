@@ -42,6 +42,7 @@ func TestDeltaArtifactsNeverBecomeCandidates(t *testing.T) {
 
 func TestValidateRunnablePayload(t *testing.T) {
 	dir := t.TempDir()
+	fixture := testRunnableFixture("unusual.payload")
 	write := func(name, contents string) string {
 		path := filepath.Join(dir, name)
 		if err := os.WriteFile(path, []byte(contents), 0o755); err != nil {
@@ -50,8 +51,8 @@ func TestValidateRunnablePayload(t *testing.T) {
 		return path
 	}
 
-	if err := ValidateRunnablePayload(write("unusual.payload", "#!/bin/sh\nexit 0\n"), "unusual.payload"); err != nil {
-		t.Fatalf("shebang script rejected: %v", err)
+	if err := ValidateRunnablePayload(write(fixture.name, fixture.contents), fixture.name); err != nil {
+		t.Fatalf("runnable script rejected: %v", err)
 	}
 	for _, tc := range []struct{ name, bytes string }{
 		{"plain", "just executable text"},
