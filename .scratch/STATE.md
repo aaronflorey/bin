@@ -1,16 +1,15 @@
 # Local Issue State
 
-Generated: 2026-09-21T23:06:21Z
+Generated: 2026-09-21T23:59:40Z
 
 NOTE: This file is auto-generated. Do not edit manually.
 
-Tickets: 3 active, 16 resolved
+Tickets: 2 active, 17 resolved
 
 ## Active Tickets
 
 | Effort | Ticket | Type | Mode | Status | Blocked by |
 | --- | --- | --- | --- | --- | --- |
-| [windows-compatibility](windows-compatibility/spec.md) | [01-resolve-managed-windows-targets](windows-compatibility/issues/01-resolve-managed-windows-targets.md) | — | — | ready-for-agent | None (can start immediately). |
 | [windows-compatibility](windows-compatibility/spec.md) | [02-preserve-go-import-paths](windows-compatibility/issues/02-preserve-go-import-paths.md) | — | — | ready-for-agent | None (can start immediately). |
 | [windows-compatibility](windows-compatibility/spec.md) | [03-enforce-windows-go-tests](windows-compatibility/issues/03-enforce-windows-go-tests.md) | — | — | ready-for-agent | 01 / Resolve managed Windows names and destinations; 02 / Preserve Go import-path separators on Windows. |
 
@@ -34,3 +33,4 @@ Tickets: 3 active, 16 resolved
 | [reliability-managed-completions](reliability-managed-completions/spec.md) | [14-use-bundled-completions](reliability-managed-completions/issues/14-use-bundled-completions.md) | — | — | resolved | 13 / Sync completions for one managed binary. |
 | [reliability-managed-completions](reliability-managed-completions/spec.md) | [17-integrate-completion-lifecycle](reliability-managed-completions/issues/17-integrate-completion-lifecycle.md) | — | — | resolved | 14 / Prefer exact bundled completion files. |
 | [reliability-managed-completions](reliability-managed-completions/spec.md) | [18-document-and-verify](reliability-managed-completions/issues/18-document-and-verify.md) | — | — | resolved | 17 / Refresh opted-in completions and clean up owned files. |
+| [windows-compatibility](windows-compatibility/spec.md) | [01-resolve-managed-windows-targets](windows-compatibility/issues/01-resolve-managed-windows-targets.md) | — | — | resolved | None (can start immediately). |

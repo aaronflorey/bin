@@ -8,9 +8,45 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/aaronflorey/bin/pkg/config"
 	"github.com/caarlos0/log"
 	"github.com/spf13/cobra"
 )
+
+func TestGetBinPathFindsManagedBareNameOutsidePATH(t *testing.T) {
+	installDir := setupTestConfig(t)
+	path := filepath.Join(installDir, "rg")
+	if err := config.UpsertBinary(&config.Binary{Path: path}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", t.TempDir())
+
+	resolved, err := getBinPath("rg")
+	if err != nil {
+		t.Fatalf("getBinPath() error = %v", err)
+	}
+	if resolved != path {
+		t.Fatalf("getBinPath() = %q, want %q", resolved, path)
+	}
+}
+
+func TestResolveManagedBinPathRejectsAmbiguousNames(t *testing.T) {
+	paths := []string{filepath.Join(t.TempDir(), "rg"), filepath.Join(t.TempDir(), "rg")}
+	bins := map[string]*config.Binary{
+		paths[0]: {Path: paths[0]},
+		paths[1]: {Path: paths[1]},
+	}
+
+	_, err := resolveManagedBinPath(bins, "rg", func(bin *config.Binary) bool {
+		return commandNameMatches(filepath.Base(bin.Path), "rg")
+	})
+	if err == nil {
+		t.Fatal("expected ambiguous managed-name error")
+	}
+	if !strings.Contains(err.Error(), "ambiguous") || !strings.Contains(err.Error(), paths[0]) || !strings.Contains(err.Error(), paths[1]) {
+		t.Fatalf("unexpected ambiguity error: %v", err)
+	}
+}
 
 func TestRootHasVerboseFlag(t *testing.T) {
 	root := newRootCmd("test", func(int) {})

@@ -63,6 +63,29 @@ func TestRemoveResolvesManagedAliasWhenPATHMatchIsUnmanaged(t *testing.T) {
 	}
 }
 
+func TestRemoveRejectsAmbiguousManagedAlias(t *testing.T) {
+	defaultPath := setupTestConfig(t)
+	paths := []string{filepath.Join(defaultPath, "tool-a"), filepath.Join(defaultPath, "tool-b")}
+	for _, binary := range []*config.Binary{
+		{Path: paths[0], RemoteName: "tool"},
+		{Path: paths[1], AppBundle: "Tool.app"},
+	} {
+		if err := config.UpsertBinary(binary); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", t.TempDir())
+
+	root := newRemoveCmd()
+	_, err := root.resolveTargets(root.cmd, config.Get().Bins, []string{"tool"})
+	if err == nil {
+		t.Fatal("expected ambiguous alias error")
+	}
+	if !strings.Contains(err.Error(), "ambiguous") || !strings.Contains(err.Error(), paths[0]) || !strings.Contains(err.Error(), paths[1]) {
+		t.Fatalf("unexpected ambiguity error: %v", err)
+	}
+}
+
 func TestResolveTargetsKeepsTrackedFilenameLiteral(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)

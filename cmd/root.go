@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/aaronflorey/bin/pkg/config"
@@ -291,21 +292,62 @@ func getBinPath(name string) (string, error) {
 	cfg := config.Get()
 	if err != nil {
 		log.Log.Debugf("binary %s not found in PATH %v", name, err)
-		if !strings.ContainsAny(name, `/\\`) {
-			for _, b := range cfg.Bins {
-				if b != nil && commandNameMatches(filepath.Base(b.Path), name) {
-					return b.Path, nil
-				}
+		if !isExplicitTargetPath(name) {
+			managedPath, resolveErr := resolveManagedBinPath(cfg.Bins, name, func(b *config.Binary) bool {
+				return commandNameMatches(filepath.Base(b.Path), name)
+			})
+			if resolveErr != nil {
+				return "", resolveErr
+			}
+			if managedPath != "" {
+				return managedPath, nil
 			}
 		}
 		return "", err
 	}
 
-	for _, bin := range cfg.Bins {
-		if expandTrackedBinaryPath(bin.Path) == f {
-			return bin.Path, nil
-		}
+	managedPath, err := resolveManagedBinPath(cfg.Bins, f, func(b *config.Binary) bool {
+		return expandTrackedBinaryPath(b.Path) == f
+	})
+	if err != nil {
+		return "", err
+	}
+	if managedPath != "" {
+		return managedPath, nil
 	}
 
 	return "", fmt.Errorf("binary path %s is not managed by bin", f)
+}
+
+// resolveManagedBinPath returns one matching stored path. A configuration can
+// contain more than one entry with the same command name, so never depend on
+// map iteration order when resolving a target.
+func resolveManagedBinPath(bins map[string]*config.Binary, input string, matches func(*config.Binary) bool) (string, error) {
+	return selectManagedBinPath(bins, input, func(_ string, bin *config.Binary) (string, bool) {
+		return bin.Path, matches(bin)
+	})
+}
+
+// selectManagedBinPath selects one matching path without depending on map
+// iteration order. Callers retain their own matching predicate and path value.
+func selectManagedBinPath(bins map[string]*config.Binary, input string, matches func(string, *config.Binary) (string, bool)) (string, error) {
+	candidates := make([]string, 0, 1)
+	for path, bin := range bins {
+		if bin == nil {
+			continue
+		}
+		if candidate, ok := matches(path, bin); ok {
+			candidates = append(candidates, candidate)
+		}
+	}
+
+	switch len(candidates) {
+	case 0:
+		return "", nil
+	case 1:
+		return candidates[0], nil
+	}
+
+	sort.Strings(candidates)
+	return "", fmt.Errorf("binary %q is ambiguous; matching managed paths: %s", input, strings.Join(candidates, ", "))
 }

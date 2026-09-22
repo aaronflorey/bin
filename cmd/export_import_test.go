@@ -862,7 +862,11 @@ func TestExportImportRoundTripsLegacyDMGMetadata(t *testing.T) {
 	if binCfg.ReleaseTagPrefix != "pi-v" {
 		t.Fatalf("unexpected imported release tag prefix: %s", binCfg.ReleaseTagPrefix)
 	}
-	if resolved := findManagedBinByAlias(config.Get().Bins, "Fastpotify"); resolved != installedPath {
+	resolved, err := findManagedBinByAlias(config.Get().Bins, "Fastpotify")
+	if err != nil {
+		t.Fatalf("imported app bundle alias lookup: %v", err)
+	}
+	if resolved != installedPath {
 		t.Fatalf("imported app bundle alias resolved to %q, want persisted executable %q", resolved, installedPath)
 	}
 }

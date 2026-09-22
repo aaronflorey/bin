@@ -714,7 +714,7 @@ func systemPackagePathLooksExplicit(path string) bool {
 	if trimmed == "" {
 		return false
 	}
-	if strings.Contains(trimmed, "/") || strings.Contains(trimmed, `\\`) {
+	if isExplicitTargetPath(trimmed) {
 		return true
 	}
 	if strings.HasPrefix(trimmed, ".") || strings.HasPrefix(trimmed, "~") {
