@@ -290,6 +290,58 @@ func TestProcessURLPreservesNameForTarGzArchives(t *testing.T) {
 	}
 }
 
+func TestProcessURLSkipsArchiveRootEntry(t *testing.T) {
+	originalResolver := resolver
+	defer func() { resolver = originalResolver }()
+	resolver = testLinuxAMDResolver
+
+	var buf bytes.Buffer
+	gzw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gzw)
+	// GNU tar emits a "./" directory entry when archiving a directory.
+	if err := tw.WriteHeader(&tar.Header{Name: "./", Typeflag: tar.TypeDir, Mode: 0o755}); err != nil {
+		t.Fatal(err)
+	}
+	contents := "#!/bin/sh\nexit 0\n"
+	if err := tw.WriteHeader(&tar.Header{Name: "./goose", Mode: 0o755, Size: int64(len(contents))}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write([]byte(contents)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gzw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(buf.Bytes())
+	}))
+	defer server.Close()
+
+	f := NewFilter(&FilterOpts{NonInteractive: true})
+	f.repoName = "goose"
+
+	result, err := f.ProcessURL(&FilteredAsset{Name: "goose-linux-amd64.tar.gz", URL: server.URL}, "", false)
+	if err != nil {
+		t.Fatalf("ProcessURL returned error: %v", err)
+	}
+	defer func() {
+		if closer, ok := result.Source.(io.Closer); ok {
+			_ = closer.Close()
+		}
+	}()
+
+	if result.Name != "goose" {
+		t.Fatalf("extracted name = %q, want goose", result.Name)
+	}
+	if result.PackagePath != "goose" {
+		t.Fatalf("package path = %q, want goose", result.PackagePath)
+	}
+}
+
 func TestProcessZipLogsEntriesRejectedByPackagePath(t *testing.T) {
 	archiveData := buildTestZipArchive(t, map[string]string{
 		"ast-grep": "binary",

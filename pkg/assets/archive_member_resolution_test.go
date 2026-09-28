@@ -149,6 +149,44 @@ func TestResolveArchiveMemberUsesRecordedEligibility(t *testing.T) {
 	}
 }
 
+func TestNormalizeArchiveMemberVersionWrapperRealWorldLayouts(t *testing.T) {
+	for _, test := range []struct {
+		identity string
+		want     string
+	}{
+		{"tool-v1/bin/tool", "bin/tool"},
+		{"gum_2.0.1_Darwin_arm64/gum", "gum"},
+		{"gum_2.0.2_Darwin_arm64/gum", "gum"},
+		{"jsonschema-16.10.0-darwin-arm64/bin/jsonschema", "bin/jsonschema"},
+		{"llmfit-v1.1.15-aarch64-apple-darwin/llmfit", "llmfit"},
+		{"mago-1.49.0-aarch64-apple-darwin/mago", "mago"},
+		{"mise-v2026.9.16-macos-arm64/bin/mise", "bin/mise"},
+		{"mise/bin/mise", "mise/bin/mise"},
+		{"initial/tool", "initial/tool"},
+		{"tool-helper/bin/tool", "tool-helper/bin/tool"},
+		{"release-v2.zip!/bin/tool", "release-v2.zip!/bin/tool"},
+	} {
+		if got := normalizeArchiveMemberVersionWrapper(test.identity); got != test.want {
+			t.Errorf("normalizeArchiveMemberVersionWrapper(%q) = %q, want %q", test.identity, got, test.want)
+		}
+	}
+}
+
+func TestNormalizeArtifactMemberIdentityDropsArchiveRoot(t *testing.T) {
+	identity, err := normalizeArtifactMemberIdentity("./goose")
+	if err != nil || identity != "goose" {
+		t.Fatalf("normalizeArtifactMemberIdentity(%q) = %q, %v", "./goose", identity, err)
+	}
+	for _, root := range []string{"./", ".\\"} {
+		if _, err := normalizeArtifactMemberIdentity(root); !errors.Is(err, errArchiveRootMember) {
+			t.Fatalf("normalizeArtifactMemberIdentity(%q) error = %v, want errArchiveRootMember", root, err)
+		}
+	}
+	if _, err := normalizeArtifactMemberIdentity("../tool"); err == nil || errors.Is(err, errArchiveRootMember) {
+		t.Fatalf("parent traversal error = %v, want invalid archive member", err)
+	}
+}
+
 func resolverInventory(t *testing.T, names ...string) *artifactInventory {
 	t.Helper()
 	inventory := newArtifactInventory()
