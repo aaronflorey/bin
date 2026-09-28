@@ -211,12 +211,28 @@ func normalizeArchiveMemberVersionWrapper(identity string) string {
 	return strings.Join(parts[1:], "/")
 }
 
+// isVersionArchiveWrapper reports whether component is a versioned top-level
+// wrapper for leaf, such as "tool-v1", "gum_2.0.1_Darwin_arm64", or
+// "mago-1.49.0-aarch64-apple-darwin". The wrapper must start with the leaf
+// followed by a separator and an immediately-versioned token; any OS, ABI, or
+// architecture suffix after the version is packaging, not portable identity.
 func isVersionArchiveWrapper(component, leaf string) bool {
-	separator := strings.LastIndexAny(component, "-_")
-	if separator <= 0 || component[:separator] != leaf {
+	if leaf == "" || len(component) <= len(leaf) || component[:len(leaf)] != leaf {
 		return false
 	}
-	version := strings.TrimPrefix(component[separator+1:], "v")
+	remainder := component[len(leaf):]
+	if remainder[0] != '-' && remainder[0] != '_' {
+		return false
+	}
+	remainder = remainder[1:]
+	if cut := strings.IndexAny(remainder, "-_"); cut >= 0 {
+		remainder = remainder[:cut]
+	}
+	return isVersionToken(remainder)
+}
+
+func isVersionToken(token string) bool {
+	version := strings.TrimPrefix(token, "v")
 	if version == "" {
 		return false
 	}

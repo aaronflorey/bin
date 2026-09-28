@@ -50,6 +50,15 @@ func ResolvePersistedSelection(candidates []ReleaseCandidate, request ReleaseCan
 			return nil, persistedSelectionError(PersistedSelectionProduct, descriptor.LogicalProduct)
 		}
 	}
+	if descriptor.ArchiveMember != "" {
+		// A persisted member identity asserts an archive layout. A standalone
+		// artifact can never satisfy it, so keep only archives before ranking;
+		// otherwise package preference could pick a raw binary and fail later.
+		candidates = archiveFormatCandidates(candidates)
+		if len(candidates) == 0 {
+			return nil, persistedSelectionError(PersistedSelectionMember, descriptor.ArchiveMember)
+		}
+	}
 	if descriptor.Target != nil {
 		constraints := selectionTarget(descriptor.Target)
 		candidates = candidatesWithPersistedTarget(candidates, constraints)
@@ -192,4 +201,26 @@ func persistedSelectionError(reason PersistedSelectionReason, selection string) 
 func isArchiveAsset(name string) bool {
 	format := releaseAssetFormat(normalizedAssetBasename(name))
 	return format != "" && format != "standalone"
+}
+
+// archiveFormatCandidates keeps only candidates that can contain an archive
+// member, so a persisted member assertion cannot be satisfied by a standalone
+// binary that happens to rank first.
+func archiveFormatCandidates(candidates []ReleaseCandidate) []ReleaseCandidate {
+	filtered := make([]ReleaseCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		if isArchiveReleaseFormat(candidate.Format) {
+			filtered = append(filtered, candidate)
+		}
+	}
+	return filtered
+}
+
+func isArchiveReleaseFormat(format ReleasePackageFormat) bool {
+	switch format {
+	case "tar.gz", "tar.xz", "tar.bz2", "tar.zst", "tar", "tgz", "zip", "gz", "xz", "bz2", "zst":
+		return true
+	default:
+		return false
+	}
 }

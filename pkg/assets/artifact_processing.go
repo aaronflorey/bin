@@ -26,6 +26,10 @@ var (
 	ErrDuplicateArtifactMember   = errors.New("duplicate artifact member")
 )
 
+// errArchiveRootMember marks the benign archive-root marker ("." / "./") that
+// some tar writers emit. It is skipped rather than treated as an unsafe path.
+var errArchiveRootMember = errors.New("archive root member")
+
 var artifactProcessingBudgets = defaultArtifactBudgets()
 
 const bundledCompletionMaxBytes = 1 << 20
@@ -289,6 +293,20 @@ func (i *artifactInventory) addScoped(scope, name string, class artifactEntryCla
 	return &i.entries[len(i.entries)-1], nil
 }
 
+// addArchiveMember records one archive entry. It reports skip=true for the
+// benign archive-root marker so callers can advance past it without treating
+// it as a missing or unsafe member.
+func (i *artifactInventory) addArchiveMember(scope, name string, class artifactEntryClass) (entry *artifactInventoryEntry, skip bool, err error) {
+	entry, err = i.addScoped(scope, name, class)
+	if errors.Is(err, errArchiveRootMember) {
+		return nil, true, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return entry, false, nil
+}
+
 func normalizeArtifactMemberIdentity(name string) (string, error) {
 	if name == "" || strings.HasPrefix(name, "/") || strings.HasPrefix(name, "\\") || hasWindowsDrivePrefix(name) {
 		return "", fmt.Errorf("invalid archive member %q", name)
@@ -302,15 +320,26 @@ func normalizeArtifactMemberIdentity(name string) (string, error) {
 	if len(components) == 0 || len(components) != strings.Count(name, "/")+strings.Count(name, "\\")+1 {
 		return "", fmt.Errorf("invalid archive member %q", name)
 	}
+	// "." is the archive root, not an identity-bearing component. It is benign
+	// and is dropped, which also normalizes entries spelled "./name".
+	cleaned := make([]string, 0, len(components))
 	for _, component := range components {
-		if component == "." || component == ".." || hasWindowsDrivePrefix(component) || strings.IndexByte(component, 0) >= 0 {
+		if component == "." {
+			continue
+		}
+		if component == ".." || hasWindowsDrivePrefix(component) || strings.IndexByte(component, 0) >= 0 {
 			return "", fmt.Errorf("invalid archive member %q", name)
 		}
+		cleaned = append(cleaned, component)
 	}
-	if _, err := archiveMemberLeaf(name); err != nil {
+	if len(cleaned) == 0 {
+		return "", errArchiveRootMember
+	}
+	identity := strings.Join(cleaned, "/")
+	if _, err := archiveMemberLeaf(identity); err != nil {
 		return "", err
 	}
-	return strings.Join(components, "/"), nil
+	return identity, nil
 }
 
 func classifyArtifactEntry(name string) artifactEntryClass {
@@ -792,9 +821,15 @@ func (f *Filter) collectTar(r io.Reader, scope, root string, tracker *artifactBu
 		if h.FileInfo().IsDir() {
 			class = artifactEntryIgnored
 		}
-		entry, err := inventory.addScoped(scope, h.Name, class)
+		entry, skip, err := inventory.addArchiveMember(scope, h.Name, class)
 		if err != nil {
 			return err
+		}
+		if skip {
+			if err := discardEntry(tr, tracker); err != nil {
+				return err
+			}
+			continue
 		}
 		if !h.FileInfo().Mode().IsRegular() {
 			if err := discardEntry(tr, tracker); err != nil {
@@ -847,9 +882,15 @@ func (f *Filter) collectZip(r io.Reader, scope, root string, tracker *artifactBu
 		if h.Mode().IsDir() {
 			class = artifactEntryIgnored
 		}
-		entry, err := inventory.addScoped(scope, h.Name, class)
+		entry, skip, err := inventory.addArchiveMember(scope, h.Name, class)
 		if err != nil {
 			return err
+		}
+		if skip {
+			if err := discardEntry(zr, tracker); err != nil {
+				return err
+			}
+			continue
 		}
 		if !h.Mode().IsRegular() {
 			if err := discardEntry(zr, tracker); err != nil {
@@ -1062,9 +1103,15 @@ func collectIgnoredTar(r io.Reader, scope string, tracker *artifactBudgetTracker
 		if err := tracker.visitArchiveEntry(); err != nil {
 			return err
 		}
-		entry, err := inventory.addScoped(scope, h.Name, artifactEntryIgnored)
+		entry, skip, err := inventory.addArchiveMember(scope, h.Name, artifactEntryIgnored)
 		if err != nil {
 			return err
+		}
+		if skip {
+			if err := discardEntry(tr, tracker); err != nil {
+				return err
+			}
+			continue
 		}
 		if err := discardIgnoredArtifact(&entryBudgetReader{reader: tr, tracker: tracker}, h.Name, entry.identity, tracker, inventory); err != nil {
 			return err
@@ -1089,9 +1136,15 @@ func collectIgnoredZip(r io.Reader, scope string, tracker *artifactBudgetTracker
 		if err := tracker.visitArchiveEntry(); err != nil {
 			return err
 		}
-		entry, err := inventory.addScoped(scope, h.Name, artifactEntryIgnored)
+		entry, skip, err := inventory.addArchiveMember(scope, h.Name, artifactEntryIgnored)
 		if err != nil {
 			return err
+		}
+		if skip {
+			if err := discardEntry(zr, tracker); err != nil {
+				return err
+			}
+			continue
 		}
 		if err := discardIgnoredArtifact(&entryBudgetReader{reader: zr, tracker: tracker}, h.Name, entry.identity, tracker, inventory); err != nil {
 			return err

@@ -75,6 +75,52 @@ func TestDeriveSelectionDescriptorUsesOnlySupportedFacts(t *testing.T) {
 	}
 }
 
+func TestResolveReleaseArchiveMemberMatchesRealWorldVersionedWrapper(t *testing.T) {
+	for _, test := range []struct {
+		persisted string
+		entry     string
+	}{
+		{"gum_2.0.1_Darwin_arm64/gum", "gum_2.0.2_Darwin_arm64/gum"},
+		{"gum", "gum_2.0.2_Darwin_arm64/gum"},
+		{"jsonschema-16.10.0-darwin-arm64/bin/jsonschema", "jsonschema-17.0.0-darwin-arm64/bin/jsonschema"},
+		{"bin/jsonschema", "jsonschema-17.0.0-darwin-arm64/bin/jsonschema"},
+		{"llmfit-v1.1.15-aarch64-apple-darwin/llmfit", "llmfit-v1.1.16-aarch64-apple-darwin/llmfit"},
+		{"mago-1.49.0-aarch64-apple-darwin/mago", "mago-1.50.0-aarch64-apple-darwin/mago"},
+	} {
+		f := NewFilter(&FilterOpts{SelectionIntent: &config.SelectionDescriptor{ArchiveMember: test.persisted}})
+		entry, err := f.resolveReleaseArchiveMember(resolverInventory(t, test.entry))
+		if err != nil || entry.identity != test.entry {
+			t.Fatalf("resolve persisted %q against %q = %v, %v", test.persisted, test.entry, entry, err)
+		}
+	}
+}
+
+func TestResolvePersistedSelectionPrefersArchiveForPersistedMember(t *testing.T) {
+	descriptor := &config.SelectionDescriptor{
+		LogicalProduct: "mise",
+		Target:         &config.SelectionTarget{OS: "darwin", Architecture: "arm64"},
+		ArchiveMember:  "mise/bin/mise",
+	}
+	request := ReleaseCandidateResolutionRequest{Target: ReleaseTarget{OS: []string{"darwin"}, Architecture: []string{"arm64"}}}
+
+	candidates := []ReleaseCandidate{
+		describeReleaseCandidate(&Asset{Name: "mise-v2026.9.16-macos-arm64"}, "mise"),
+		describeReleaseCandidate(&Asset{Name: "mise-v2026.9.16-macos-arm64.tar.gz"}, "mise"),
+	}
+	resolved, err := ResolvePersistedSelection(candidates, request, descriptor)
+	if err != nil {
+		t.Fatalf("ResolvePersistedSelection = %v", err)
+	}
+	if resolved.Candidate.ID != "mise-v2026.9.16-macos-arm64.tar.gz" {
+		t.Fatalf("selected %q, want the tar.gz archive", resolved.Candidate.ID)
+	}
+
+	_, err = ResolvePersistedSelection([]ReleaseCandidate{
+		describeReleaseCandidate(&Asset{Name: "mise-v2026.9.16-macos-arm64"}, "mise"),
+	}, request, descriptor)
+	assertPersistedSelectionReason(t, err, PersistedSelectionMember)
+}
+
 func assertPersistedSelectionReason(t *testing.T, err error, want PersistedSelectionReason) {
 	t.Helper()
 	if !errors.Is(err, ErrUnavailablePersistedSelection) {
