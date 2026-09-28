@@ -160,11 +160,11 @@ When a release publishes multiple installable tools, `bin install` now selects b
 
 When installing multiple repos in one command, custom paths are not supported. Use either `bin install <repo> [path]` for a single repo or `bin install <repo>...` for many repos.
 
-`bin export` writes JSON to stdout by default and can write to a file when `[file]` is provided.  
-`bin import` reads JSON from stdin by default and can read from a file when `[file]` is provided.  
-`bin remove` with no arguments opens an interactive multi-select picker of configured binaries.  
-By default it runs `ensure` for imported/updated entries after writing config; use `--skip-ensure` to skip that step.  
-`bin outdated` supports `--format=text` (default) and `--format=json`.  
+`bin export` writes JSON to stdout by default and can write to a file when `[file]` is provided.
+`bin import` reads JSON from stdin by default and can read from a file when `[file]` is provided.
+`bin remove` with no arguments opens an interactive multi-select picker of configured binaries.
+By default it runs `ensure` for imported/updated entries after writing config; use `--skip-ensure` to skip that step.
+`bin outdated` supports `--format=text` (default) and `--format=json`.
 `bin update` with no arguments opens an interactive multi-select list of outdated binaries; confirm to update the selected entries. By default, it keeps going when one binary update fails, then exits with code `4` if any selected update failed; use `--continue-on-error=false` to stop on the first per-binary failure instead. Pre/post update hooks still run as global blockers.
 Imported binaries are mapped to your local default path using the exported binary `name`.
 
@@ -427,7 +427,7 @@ Ensure this directory is in your `$PATH`.
 
 ## 🤝 Contributing
 
-There are some bugs, and the code has not been tested due to a lack of time, but contributions are welcome, and I’ll be happy to discuss and review them.
+There are some bugs, and the code has not been tested due to a lack of time, but contributions are welcome, and I'll be happy to discuss and review them.
 
 - Report bugs or request features via [GitHub Issues](https://github.com/aaronflorey/bin/issues)
 - Submit pull requests for improvements

@@ -1,39 +1,36 @@
 [tools]
+"aqua:anordal/shellharden" = "latest"
+betterleaks = "latest"
 go = "1.24"
+golangci-lint = "latest"
 hk = "latest"
+"npm:ls-lint" = "latest"
+pinact = "latest"
+pkl = "latest"
+shellcheck = "latest"
+shfmt = "latest"
+tombi = "latest"
+zizmor = "latest"
 
 [tasks.build]
 description = "Build the bin CLI"
-run = "go build ."
-
-[tasks.clean]
-description = "Remove build artifacts"
-run = "rm -rf bin coverage.out"
-
-[tasks.download]
-description = "Download Go module dependencies"
-run = "go mod download"
-
-[tasks.tidy]
-description = "Tidy Go module metadata"
-run = "go mod tidy"
+run = "go build -o bin/bin ."
 
 [tasks.fmt]
-description = "Format Go source files"
-run = "gofmt -w -s ./."
+description = "Format staged files"
+run = "hk fix --no-fast-fail"
 
-[tasks.fmt-check]
-description = "Check Go source formatting without writing"
-run = "files=$(gofmt -l -s ./.); if [ -n \"$files\" ]; then printf '%s\\n' \"$files\"; exit 1; fi"
-
-[tasks.mod-check]
-description = "Verify go.mod/go.sum are tidy"
-run = "go mod tidy -diff"
+[tasks.fmt-all]
+description = "Format all files"
+run = "hk fix --all --no-fail-fast"
 
 [tasks.lint]
-description = "Run go vet and formatting check"
-depends = ["fmt-check"]
-run = "go vet ./..."
+description = "Lint staged files"
+run = "hk check --no-fail-fast"
+
+[tasks.lint-all]
+description = "Lint all files"
+run = "hk check --all --no-fail-fast"
 
 [tasks.test]
 description = "Run Go tests"
@@ -46,20 +43,3 @@ run = "go test -race ./..."
 [tasks.coverage]
 description = "Run tests with coverage profile"
 run = "go test -coverprofile=coverage.out ./..."
-
-[tasks.verify]
-description = "Run full verification (deps, format, modules, golangci-lint)"
-depends = ["download", "fmt-check", "mod-check"]
-run = "golangci-lint run"
-
-[tasks.check]
-description = "Run all checks (format, vet, tests)"
-depends = ["fmt-check", "lint", "test"]
-
-[tasks.fix]
-description = "Auto-format and tidy the source"
-depends = ["fmt", "tidy"]
-
-[tasks.hooks]
-description = "Install Git hooks via hk"
-run = "hk install --mise"
