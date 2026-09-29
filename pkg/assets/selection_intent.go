@@ -38,8 +38,8 @@ func (e *PersistedSelectionError) Error() string {
 func (e *PersistedSelectionError) Unwrap() error { return ErrUnavailablePersistedSelection }
 
 // ResolvePersistedSelection applies descriptor constraints before ordinary
-// release resolution. Unlike platform compatibility preferences, a stored
-// target fact must be stated by a candidate; an omitted fact cannot satisfy it.
+// release resolution, using the same target compatibility rules as installation.
+// CPU and build variants remain deliberate choices and must be present.
 func ResolvePersistedSelection(candidates []ReleaseCandidate, request ReleaseCandidateResolutionRequest, descriptor *config.SelectionDescriptor) (*ReleaseCandidateResolution, error) {
 	if descriptor == nil {
 		return ResolveReleaseCandidate(candidates, request)
@@ -65,6 +65,18 @@ func ResolvePersistedSelection(candidates []ReleaseCandidate, request ReleaseCan
 			}
 			return nil, persistedSelectionError(reason, descriptorTargetSelection(descriptor.Target))
 		}
+	}
+	if descriptor.Variant != nil {
+		matched := make([]ReleaseCandidate, 0, len(candidates))
+		for _, candidate := range candidates {
+			if candidate.Variant == *descriptor.Variant {
+				matched = append(matched, candidate)
+			}
+		}
+		if len(matched) == 0 {
+			return nil, persistedSelectionError(PersistedSelectionVariant, *descriptor.Variant)
+		}
+		candidates = matched
 	}
 	resolution, err := ResolveReleaseCandidate(candidates, request)
 	if err != nil && (errors.Is(err, ErrNoEligibleReleaseCandidate) || errors.Is(err, ErrIncompatibleReleaseTarget)) {
@@ -94,7 +106,7 @@ func DeriveSelectionDescriptor(binary *config.Binary) *config.SelectionDescripto
 			if descriptor == nil {
 				descriptor = &config.SelectionDescriptor{}
 			}
-			descriptor.ArchiveMember = normalizeArchiveMemberVersionWrapper(member)
+			descriptor.ArchiveMember = normalizeArchiveMemberForProduct(member, descriptor.LogicalProduct)
 		}
 	}
 	return descriptor
@@ -108,6 +120,10 @@ func StoredSelectionDescriptor(binary *config.Binary) *config.SelectionDescripto
 		return DeriveSelectionDescriptor(binary)
 	}
 	descriptor := config.CloneSelectionDescriptor(binary.SelectionIntent)
+	if descriptor.Variant == nil && binary.SourceAsset != "" {
+		variant := describeReleaseCandidate(&Asset{Name: binary.SourceAsset}, "").Variant
+		descriptor.Variant = &variant
+	}
 	if (binary.InstallMode == "" || binary.InstallMode == "binary") && binary.PackagePath == "" && !isArchiveAsset(binary.SourceAsset) {
 		if source, err := normalizeArtifactMemberIdentity(binary.SourceAsset); err == nil && descriptor.ArchiveMember == normalizeArchiveMemberVersionWrapper(source) {
 			descriptor.ArchiveMember = ""
@@ -126,6 +142,7 @@ func selectionDescriptorForCandidate(candidate ReleaseCandidate) *config.Selecti
 	if descriptor.LogicalProduct == "" && descriptor.Target == nil {
 		return nil
 	}
+	descriptor.Variant = &candidate.Variant
 	return descriptor
 }
 
@@ -168,9 +185,9 @@ func candidatesWithPersistedTarget(candidates []ReleaseCandidate, target Release
 }
 
 func persistedTargetMatches(actual, required ReleaseTarget) bool {
-	return persistedTargetFieldMatches(actual.OS, required.OS, canonicalOS) &&
-		persistedTargetFieldMatches(actual.Architecture, required.Architecture, canonicalArchitecture) &&
-		persistedTargetFieldMatches(actual.ABI, required.ABI, canonicalABI) &&
+	return targetFieldMatches(actual.OS, required.OS, canonicalOS) &&
+		targetFieldMatches(actual.Architecture, required.Architecture, canonicalArchitecture) &&
+		abiMatches(actual.ABI, required.ABI) &&
 		persistedTargetFieldMatches(actual.CPUVariant, required.CPUVariant, canonicalCPUVariant)
 }
 

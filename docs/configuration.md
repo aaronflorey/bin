@@ -61,13 +61,20 @@ records the raw outer release asset selected during the last successful install;
 configuration files without `source_asset` remain valid.
 
 `selection_intent`, when present, records the portable logical product, target
-(including ABI/CPU variant), and archive-member choice used for managed
+(including ABI/CPU variant), build variant, and archive-member choice used for managed
 updates. It is a selector rather than provenance: `source_asset` and
 `package_path` still describe the bytes most recently installed. A versioned
 top-level archive wrapper such as `tool-v1/bin/tool` is stored as `bin/tool`,
 while meaningful internal directories remain part of the member identity.
 Older records without `selection_intent` remain valid; `bin` derives it only
 from unambiguous persisted artifact facts when reusing the record.
+
+The optional `variant` field preserves choices such as `static` or an older
+glibc build across updates; an empty string explicitly selects the default
+build. Missing OS, architecture, or ABI labels use the same compatibility rules
+as a fresh install. Conflicting targets, missing variants, and product renames
+still fail. Recognized release versions and platform wrappers can change around
+the stored member, including when the executable name differs from the product.
 
 `download_integrity` and `installed_integrity` are optional integrity evidence
 records. Each records an algorithm, expected and observed digest, source,

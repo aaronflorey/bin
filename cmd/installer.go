@@ -410,6 +410,9 @@ func shouldFallbackProviderFetch(err error) bool {
 }
 
 func isCompatibilityError(err error) bool {
+	if errors.Is(err, assets.ErrUnavailablePersistedSelection) || errors.Is(err, assets.ErrNoEligibleArchiveMember) {
+		return false
+	}
 	return err != nil && (errors.Is(err, assets.ErrNoCompatibleFiles) || errors.Is(err, systempackage.ErrIncompatible))
 }
 

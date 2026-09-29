@@ -287,6 +287,19 @@ func defaultCommand(cmd *cobra.Command, args []string) bool {
 }
 
 func getBinPath(name string) (string, error) {
+	if isExplicitTargetPath(name) {
+		absolute, err := filepath.Abs(expandTrackedBinaryPath(name))
+		if err != nil {
+			return "", err
+		}
+		managed, err := selectManagedBinPath(config.Get().Bins, name, func(key string, binary *config.Binary) (string, bool) {
+			tracked, pathErr := filepath.Abs(expandTrackedBinaryPath(binary.Path))
+			return key, pathErr == nil && tracked == absolute
+		})
+		if managed != "" || err != nil {
+			return managed, err
+		}
+	}
 	var f string
 	f, err := exec.LookPath(name)
 	cfg := config.Get()

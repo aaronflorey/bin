@@ -95,7 +95,11 @@ func resolveArchiveMember(inventory *artifactInventory, request archiveMemberRes
 	if len(candidates) == 1 && request.packagePath == "" {
 		return candidates[0], nil
 	}
-	return resolveArchiveMemberBasename(candidates, request.logicalName)
+	entry, err := resolveArchiveMemberBasename(candidates, request.logicalName)
+	if errors.Is(err, ErrNoEligibleArchiveMember) && request.packagePath == "" {
+		return nil, archiveMemberResolutionErrorWithCandidates(ArchiveMemberAmbiguous, request.logicalName, candidates)
+	}
+	return entry, err
 }
 
 func resolveExplicitArchiveMember(inventory *artifactInventory, explicit string) (*artifactInventoryEntry, error) {
@@ -170,7 +174,7 @@ func resolveArchiveMemberIdentity(candidates []*artifactInventoryEntry, requeste
 
 func resolveArchiveMemberBasename(candidates []*artifactInventoryEntry, requested string) (*artifactInventoryEntry, error) {
 	if requested == "" {
-		return nil, archiveMemberResolutionError(ArchiveMemberAmbiguous, "")
+		return nil, archiveMemberResolutionErrorWithCandidates(ArchiveMemberAmbiguous, "", candidates)
 	}
 	requestedLeaf, err := archiveMemberLeaf(requested)
 	if err != nil {
@@ -194,21 +198,27 @@ func resolveArchiveMemberBasename(candidates []*artifactInventoryEntry, requeste
 }
 
 func normalizeArchiveMemberVersionWrapper(identity string) string {
+	leaf, _ := archiveMemberLeaf(identity)
+	return normalizeArchiveMemberForProduct(identity, leaf)
+}
+
+func normalizeArchiveMemberForProduct(identity, product string) string {
 	if scopeEnd := strings.LastIndex(identity, "!/"); scopeEnd >= 0 {
-		return identity[:scopeEnd+2] + normalizeArchiveMemberVersionWrapper(identity[scopeEnd+2:])
+		return identity[:scopeEnd+2] + normalizeArchiveMemberForProduct(identity[scopeEnd+2:], product)
 	}
 	parts := strings.Split(identity, "/")
 	if len(parts) < 2 {
 		return identity
 	}
 	leaf := parts[len(parts)-1]
-	if len(parts) >= 3 && parts[0] == leaf && isVersionToken(parts[1]) {
+	if len(parts) >= 3 && (parts[0] == leaf || parts[0] == product) && isVersionToken(parts[1]) {
 		return strings.Join(parts[2:], "/")
 	}
-	if !isVersionArchiveWrapper(parts[0], leaf) {
-		return identity
+	if isVersionArchiveWrapper(parts[0], leaf) || isVersionArchiveWrapper(parts[0], product) ||
+		(strings.HasPrefix(parts[0], product) && product != "" && parts[0] != product && isReleaseTargetSuffix(strings.TrimPrefix(parts[0], product))) {
+		return strings.Join(parts[1:], "/")
 	}
-	return strings.Join(parts[1:], "/")
+	return identity
 }
 
 // isVersionArchiveWrapper reports whether component is a versioned top-level
@@ -224,28 +234,30 @@ func isVersionArchiveWrapper(component, leaf string) bool {
 		return false
 	}
 	remainder = remainder[1:]
-	separator := strings.IndexAny(remainder, "-_")
-	if separator < 0 {
-		return isVersionToken(remainder)
+	if isVersionToken(remainder) {
+		return true
 	}
-	if !isVersionToken(remainder[:separator]) {
-		return false
+	for separator := len(remainder) - 1; separator > 0; separator-- {
+		if strings.ContainsRune("-_.", rune(remainder[separator])) && isVersionToken(remainder[:separator]) && isReleaseTargetSuffix(remainder[separator:]) {
+			return true
+		}
 	}
-	return isReleaseTargetSuffix(remainder[separator:])
+	return false
 }
 
 func isReleaseTargetSuffix(suffix string) bool {
 	for suffix != "" {
-		if suffix[0] != '-' && suffix[0] != '_' {
+		if suffix[0] != '-' && suffix[0] != '_' && suffix[0] != '.' {
 			return false
 		}
 		suffix = suffix[1:]
 		matched := 0
 		for end := len(suffix); end > 0; end-- {
-			if end < len(suffix) && suffix[end] != '-' && suffix[end] != '_' {
+			if end < len(suffix) && suffix[end] != '-' && suffix[end] != '_' && suffix[end] != '.' {
 				continue
 			}
-			if isReleaseTargetToken(strings.ToLower(suffix[:end])) {
+			token := strings.ToLower(suffix[:end])
+			if isReleaseTargetToken(token) || token == "unknown" || token == "pc" || token == "msvc" {
 				matched = end
 				break
 			}

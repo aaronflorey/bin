@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -450,4 +451,36 @@ func setupOwnedCompletionRemoval(t *testing.T, installDir string, contents []byt
 		t.Fatal(err)
 	}
 	return binaryPath, destination
+}
+
+func TestRemoveMissingExplicitPathCleansConfig(t *testing.T) {
+	for _, relative := range []bool{false, true} {
+		t.Run(fmt.Sprint(relative), func(t *testing.T) {
+			directory := setupTestConfig(t)
+			path := filepath.Join(directory, "already-deleted")
+			if err := config.UpsertBinary(&config.Binary{Path: path, RemoteName: "tool", URL: "https://example.test/tool", Provider: "generic"}); err != nil {
+				t.Fatal(err)
+			}
+			argument := path
+			if relative {
+				cwd, err := os.Getwd()
+				if err != nil {
+					t.Fatal(err)
+				}
+				argument, err = filepath.Rel(cwd, path)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			root := newRemoveCmd()
+			root.newProvider = func(string, string) (providers.Provider, error) { return removeTestProvider{}, nil }
+			root.cmd.SetArgs([]string{argument})
+			if err := root.cmd.Execute(); err != nil {
+				t.Fatal(err)
+			}
+			if len(config.Get().Bins) != 0 {
+				t.Fatalf("stale configuration: %#v", config.Get().Bins)
+			}
+		})
+	}
 }

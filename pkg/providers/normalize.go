@@ -27,7 +27,7 @@ func NormalizeGitHubURL(rawURL, provider string) (normalizedURL, version string,
 		return "", "", false, err
 	}
 
-	segments := strings.Split(strings.Trim(u.EscapedPath(), "/"), "/")
+	segments := providerPathSegments(u)
 	if len(segments) < 2 {
 		return rawURL, "", false, nil
 	}
@@ -35,14 +35,8 @@ func NormalizeGitHubURL(rawURL, provider string) (normalizedURL, version string,
 	owner, repo := segments[0], segments[1]
 	normalized := fmt.Sprintf("github.com/%s/%s", owner, repo)
 
-	if len(segments) >= 5 && segments[2] == "releases" {
-		switch segments[3] {
-		case "tag", "download":
-			version = segments[4]
-			if version != "" {
-				return normalized, version, true, nil
-			}
-		}
+	if version = releaseTagFromSegments(segments); version != "" {
+		return normalized, version, true, nil
 	}
 
 	return normalized, "", false, nil

@@ -26,7 +26,7 @@ var bsdChecksumPattern = regexp.MustCompile(`^([[:alnum:]-]+) \((.*)\) = ([[:xdi
 var checksumMetadataSuffixes = []string{
 	".sigstore.json", ".intoto.jsonl", ".sbom.json", ".spdx.json", ".cyclonedx.json",
 	".provenance.json", ".attestation.json", ".attest.json", ".sig", ".minisig", ".pem",
-	".crt", ".cer", ".asc", ".blockmap",
+	".crt", ".cer", ".asc", ".blockmap", ".proof", ".gpgsig", ".b3", ".sbom",
 }
 
 type checksumAsset struct {
@@ -166,7 +166,7 @@ func checksumAssetApplicability(checksumName, target string) (applicable, unsupp
 }
 
 func isNamedSHA256Manifest(name string) bool {
-	return strings.Contains(name, "sha256sums") || strings.Contains(name, "checksums.sha256")
+	return strings.Contains(name, "sha256sum") || strings.Contains(name, "checksums.sha256")
 }
 
 func hasChecksumSidecarSuffix(name string) bool {

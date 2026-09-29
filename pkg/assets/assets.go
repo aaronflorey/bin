@@ -43,7 +43,7 @@ var (
 		".sigstore.json", ".intoto.jsonl",
 		".sbom.json", ".spdx.json", ".cyclonedx.json",
 		".provenance.json", ".attestation.json", ".attest.json",
-		".sig", ".minisig", ".pem", ".crt", ".cer", ".asc",
+		".sig", ".minisig", ".pem", ".crt", ".cer", ".asc", ".proof", ".gpgsig", ".b3", ".sbom",
 		".blockmap",
 		".bundle",
 		// A release JSON document is metadata, even when it does not carry one
@@ -590,9 +590,10 @@ var knownLibCTokens = []string{"gnu", "glibc", "musl"}
 var knownArchTokens = []string{
 	"amd64", "x86_64", "x64", "64bit",
 	"arm64", "aarch64",
-	"386", "i386", "x86", "32bit",
-	"armv7", "armv6", "arm",
-	"ppc64le", "s390x", "riscv64", "mips64", "mips64le",
+	"386", "i386", "i586", "i686", "x86", "32bit",
+	"armv7", "armv7l", "armv6", "armv6l", "arm", "armhf", "armel",
+	"ppc64", "ppc64le", "powerpc", "powerpc64", "powerpc64le", "s390x",
+	"riscv64", "riscv64gc", "mips", "mipsel", "mips64", "mips64el", "mips64le", "loongarch64", "loong64",
 }
 
 func preferredArchTokens() []string {

@@ -221,16 +221,22 @@ func TestBinarySelectionIntentLoadsClonesAndPersists(t *testing.T) {
 		t.Fatalf("old config selection intent = %#v, want nil", got)
 	}
 
+	variant := "static"
 	bin := &Binary{
 		Path: "/tmp/new",
 		SelectionIntent: &SelectionDescriptor{
 			LogicalProduct: "tool",
 			Target:         &SelectionTarget{OS: "linux", Architecture: "amd64", ABI: "gnu", CPUVariant: "avx2"},
 			ArchiveMember:  "tool/bin/tool",
+			Variant:        &variant,
 		},
 	}
 	clone := CloneBinary(bin)
 	clone.SelectionIntent.Target.CPUVariant = "baseline"
+	*clone.SelectionIntent.Variant = "other"
+	if *bin.SelectionIntent.Variant != "static" {
+		t.Fatal("clone mutated source build variant")
+	}
 	if bin.SelectionIntent.Target.CPUVariant != "avx2" {
 		t.Fatalf("clone mutated source selection intent: %#v", bin.SelectionIntent)
 	}
@@ -251,6 +257,7 @@ func TestBinarySelectionIntentLoadsClonesAndPersists(t *testing.T) {
 		stored.SelectionIntent.Target == nil || stored.SelectionIntent.Target.OS != "linux" ||
 		stored.SelectionIntent.Target.Architecture != "amd64" || stored.SelectionIntent.Target.ABI != "gnu" ||
 		stored.SelectionIntent.Target.CPUVariant != "avx2" ||
+		stored.SelectionIntent.Variant == nil || *stored.SelectionIntent.Variant != "static" ||
 		stored.SelectionIntent.ArchiveMember != "tool/bin/tool" {
 		t.Fatalf("selection intent did not round trip: %#v", stored)
 	}

@@ -55,8 +55,15 @@ func releaseTagFromSegments(segments []string) string {
 		if segments[i] != "releases" {
 			continue
 		}
-		if segments[i+1] == "tag" || segments[i+1] == "download" {
-			return segments[i+2]
+		if segments[i+1] == "tag" {
+			return strings.Join(segments[i+2:], "/")
+		}
+		if segments[i+1] == "download" {
+			end := len(segments)
+			if end > i+3 {
+				end-- // The last segment names the release asset.
+			}
+			return strings.Join(segments[i+2:end], "/")
 		}
 	}
 	return ""

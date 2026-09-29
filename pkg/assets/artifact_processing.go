@@ -414,7 +414,7 @@ func (f *Filter) processReleaseArtifact(downloadPath, downloadSHA string) (*arti
 	}
 	if len(result.inventory.entries) == 0 {
 		_ = result.Close()
-		return nil, fmt.Errorf("%w: no executable files found", ErrNoCompatibleFiles)
+		return nil, fmt.Errorf("%w: %w", ErrNoCompatibleFiles, archiveMemberResolutionError(ArchiveMemberNoEligible, ""))
 	}
 	if bundleName, ok := inventoryAppBundle(result.inventory); ok {
 		_ = result.Close()
@@ -439,7 +439,7 @@ func (f *Filter) processReleaseArtifact(downloadPath, downloadSHA string) (*arti
 	// archive members. Only tar/ZIP traversal establishes portable member intent.
 	f.selectionIntent.ArchiveMember = ""
 	if selectedEntry.archiveMember {
-		f.selectionIntent.ArchiveMember = normalizeArchiveMemberVersionWrapper(selectedEntry.identity)
+		f.selectionIntent.ArchiveMember = normalizeArchiveMemberForProduct(selectedEntry.identity, f.selectionIntent.LogicalProduct)
 	}
 	bundledCompletion, bundledCompletionName := f.selectBundledCompletion(result.inventory, selectedEntry)
 	file, err := os.Open(selectedEntry.stagedPath)
@@ -613,7 +613,7 @@ func (f *Filter) resolveReleaseArchiveMember(inventory *artifactInventory) (*art
 		persistedMember = f.opts.SelectionIntent.ArchiveMember
 	}
 	if persistedMember != "" {
-		entry, err := resolvePersistedArchiveMember(inventory, persistedMember)
+		entry, err := resolvePersistedArchiveMember(inventory, persistedMember, f.opts.SelectionIntent.LogicalProduct)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", persistedSelectionError(PersistedSelectionMember, persistedMember), err)
 		}
@@ -642,7 +642,7 @@ func (f *Filter) resolveReleaseArchiveMember(inventory *artifactInventory) (*art
 
 // resolvePersistedArchiveMember preserves an archive-member assertion while
 // ignoring only the established versioned top-level wrapper convention.
-func resolvePersistedArchiveMember(inventory *artifactInventory, member string) (*artifactInventoryEntry, error) {
+func resolvePersistedArchiveMember(inventory *artifactInventory, member, product string) (*artifactInventoryEntry, error) {
 	identity, err := normalizeArtifactMemberIdentity(member)
 	if err != nil {
 		return nil, err
@@ -651,8 +651,18 @@ func resolvePersistedArchiveMember(inventory *artifactInventory, member string) 
 	if entry, err := resolveArchiveMemberIdentity(candidates, identity, false); entry != nil || err != nil {
 		return entry, err
 	}
-	if entry, err := resolveArchiveMemberIdentity(candidates, identity, true); entry != nil || err != nil {
-		return entry, err
+	identity = normalizeArchiveMemberForProduct(identity, product)
+	var matches []*artifactInventoryEntry
+	for _, entry := range candidates {
+		if normalizeArchiveMemberForProduct(entry.identity, product) == identity {
+			matches = append(matches, entry)
+		}
+	}
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+	if len(matches) > 1 {
+		return nil, archiveMemberResolutionErrorWithCandidates(ArchiveMemberAmbiguous, member, matches)
 	}
 	return nil, archiveMemberResolutionError(ArchiveMemberNoEligible, member)
 }
@@ -753,6 +763,9 @@ func (f *Filter) collectArtifact(inputPath, name, scope, root string, tracker *a
 		defer tracker.leaveArchive()
 		var decoded io.Reader = input
 		decodedName := name
+		if isCompressedArchiveSuffix(strings.ToLower(filepath.Ext(name))) {
+			decodedName = strings.TrimSuffix(name, filepath.Ext(name))
+		}
 		decodedClass := classifyArtifactEntry(decodedName)
 		var gzipInput *bufio.Reader
 		var concatenated *concatenatedGzipReader
