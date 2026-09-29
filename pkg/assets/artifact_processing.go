@@ -147,7 +147,7 @@ func defaultArtifactBudgets() artifactBudgets {
 	return artifactBudgets{
 		maxDownloadBytes:  1 << 30,
 		maxArchiveEntries: 10000,
-		maxEntryBytes:     256 << 20,
+		maxEntryBytes:     384 << 20,
 		maxExpandedBytes:  1 << 30,
 		maxNesting:        8,
 	}
@@ -252,6 +252,7 @@ type artifactInventoryEntry struct {
 	stagedPath       string
 	targetCompatible bool
 	runnable         bool
+	archiveMember    bool
 }
 
 type artifactInventory struct {
@@ -289,7 +290,7 @@ func (i *artifactInventory) addScoped(scope, name string, class artifactEntryCla
 		return nil, fmt.Errorf("%w: %q", ErrDuplicateArtifactMember, identity)
 	}
 	i.identities[identity] = struct{}{}
-	i.entries = append(i.entries, artifactInventoryEntry{identity: identity, class: class})
+	i.entries = append(i.entries, artifactInventoryEntry{identity: identity, class: class, archiveMember: scope != ""})
 	return &i.entries[len(i.entries)-1], nil
 }
 
@@ -304,6 +305,7 @@ func (i *artifactInventory) addArchiveMember(scope, name string, class artifactE
 	if err != nil {
 		return nil, false, err
 	}
+	entry.archiveMember = true
 	return entry, false, nil
 }
 
@@ -433,9 +435,12 @@ func (f *Filter) processReleaseArtifact(downloadPath, downloadSHA string) (*arti
 		f.selectionIntent = &config.SelectionDescriptor{}
 	}
 	f.setArchiveSelection(selectedEntry.identity)
-	// Versioned top-level wrappers are packaging details, not part of the
-	// portable member intent. Keep all other directories identity-bearing.
-	f.selectionIntent.ArchiveMember = normalizeArchiveMemberVersionWrapper(selectedEntry.identity)
+	// Raw and single-file compressed payload names are outer identities, not
+	// archive members. Only tar/ZIP traversal establishes portable member intent.
+	f.selectionIntent.ArchiveMember = ""
+	if selectedEntry.archiveMember {
+		f.selectionIntent.ArchiveMember = normalizeArchiveMemberVersionWrapper(selectedEntry.identity)
+	}
 	bundledCompletion, bundledCompletionName := f.selectBundledCompletion(result.inventory, selectedEntry)
 	file, err := os.Open(selectedEntry.stagedPath)
 	if err != nil {
@@ -610,7 +615,16 @@ func (f *Filter) resolveReleaseArchiveMember(inventory *artifactInventory) (*art
 	if persistedMember != "" {
 		entry, err := resolvePersistedArchiveMember(inventory, persistedMember)
 		if err != nil {
-			return nil, persistedSelectionError(PersistedSelectionMember, persistedMember)
+			return nil, fmt.Errorf("%w: %w", persistedSelectionError(PersistedSelectionMember, persistedMember), err)
+		}
+		if request.explicitSelection || request.explicit != "" {
+			explicit, explicitErr := resolveExplicitArchiveMember(inventory, request.explicit)
+			if explicitErr != nil {
+				return nil, explicitErr
+			}
+			if explicit.identity != entry.identity {
+				return nil, fmt.Errorf("explicit archive member conflicts with persisted member %q: %w", persistedMember, archiveMemberResolutionError(ArchiveMemberInvalidSelection, request.explicit))
+			}
 		}
 		return entry, nil
 	}
@@ -633,14 +647,25 @@ func resolvePersistedArchiveMember(inventory *artifactInventory, member string) 
 	if err != nil {
 		return nil, err
 	}
-	candidates := eligibleArchiveMembers(inventory)
-	if entry := resolveArchiveMemberIdentity(candidates, identity, false); entry != nil {
-		return entry, nil
+	candidates := eligiblePersistedArchiveMembers(inventory)
+	if entry, err := resolveArchiveMemberIdentity(candidates, identity, false); entry != nil || err != nil {
+		return entry, err
 	}
-	if entry := resolveArchiveMemberIdentity(candidates, identity, true); entry != nil {
-		return entry, nil
+	if entry, err := resolveArchiveMemberIdentity(candidates, identity, true); entry != nil || err != nil {
+		return entry, err
 	}
 	return nil, archiveMemberResolutionError(ArchiveMemberNoEligible, member)
+}
+
+func eligiblePersistedArchiveMembers(inventory *artifactInventory) []*artifactInventoryEntry {
+	candidates := eligibleArchiveMembers(inventory)
+	members := candidates[:0]
+	for _, entry := range candidates {
+		if entry.archiveMember {
+			members = append(members, entry)
+		}
+	}
+	return members
 }
 
 func (f *Filter) promptForArchiveMember(inventory *artifactInventory, resolutionErr *ArchiveMemberResolutionError) (*artifactInventoryEntry, error) {
@@ -730,6 +755,7 @@ func (f *Filter) collectArtifact(inputPath, name, scope, root string, tracker *a
 		decodedName := name
 		decodedClass := classifyArtifactEntry(decodedName)
 		var gzipInput *bufio.Reader
+		var concatenated *concatenatedGzipReader
 		switch format {
 		case artifactFormatGzip:
 			gzipInput = bufio.NewReader(input)
@@ -754,6 +780,10 @@ func (f *Filter) collectArtifact(inputPath, name, scope, root string, tracker *a
 		if err != nil {
 			return err
 		}
+		if format == artifactFormatGzip && decodedClass == artifactEntryExecutable {
+			concatenated = newConcatenatedGzipReader(gzipInput, decoded.(*gzip.Reader), decodedName)
+			decoded = concatenated
+		}
 		if decodedClass == artifactEntryIgnored {
 			entry, err := inventory.addScoped(scope, decodedName, artifactEntryIgnored)
 			if err != nil {
@@ -776,7 +806,15 @@ func (f *Filter) collectArtifact(inputPath, name, scope, root string, tracker *a
 			entry.stagedPath = decodedPath
 			return validateAdditionalGzipMembers(gzipInput, decodedName, tracker)
 		}
-		if err := validateAdditionalGzipMembers(gzipInput, decodedName, tracker); err != nil {
+		if concatenated != nil && concatenated.additional {
+			nested, nestedErr := isRecognizedArtifact(decodedPath, decodedName)
+			if nestedErr != nil {
+				return nestedErr
+			}
+			if !nested || concatenated.namedAdditional {
+				return concatenated.validationError()
+			}
+		} else if err := validateAdditionalGzipMembers(gzipInput, decodedName, tracker); err != nil {
 			return err
 		}
 		return f.collectArtifact(decodedPath, decodedName, scope, root, tracker, inventory, transformed, true)
@@ -974,6 +1012,73 @@ func (r *payloadBudgetReader) Read(p []byte) (int, error) {
 		}
 	}
 	return n, err
+}
+
+// concatenatedGzipReader joins unnamed gzip members so pigz-style chunked
+// tarballs are decoded as one bounded payload. Named later members remain
+// identity-bearing and are rejected after their headers have been validated.
+type concatenatedGzipReader struct {
+	reader                  *bufio.Reader
+	current                 *gzip.Reader
+	seen                    map[string]struct{}
+	additional              bool
+	namedAdditional         bool
+	additionalIdentityError error
+}
+
+func newConcatenatedGzipReader(reader *bufio.Reader, current *gzip.Reader, identity string) *concatenatedGzipReader {
+	return &concatenatedGzipReader{reader: reader, current: current, seen: map[string]struct{}{identity: {}}}
+}
+
+func (r *concatenatedGzipReader) Read(p []byte) (int, error) {
+	for r.current != nil {
+		n, err := r.current.Read(p)
+		if err != io.EOF {
+			return n, err
+		}
+		if closeErr := r.current.Close(); closeErr != nil {
+			return n, closeErr
+		}
+		r.current = nil
+		if _, err := r.reader.Peek(1); err == io.EOF {
+			if n > 0 {
+				return n, nil
+			}
+			return 0, io.EOF
+		} else if err != nil {
+			return n, err
+		}
+		next, err := gzip.NewReader(r.reader)
+		if err != nil {
+			return n, err
+		}
+		next.Multistream(false)
+		r.additional = true
+		if next.Name != "" {
+			r.namedAdditional = true
+			identity, err := normalizeArtifactMemberIdentity(next.Name)
+			if err != nil {
+				_ = next.Close()
+				return n, err
+			}
+			if _, exists := r.seen[identity]; exists && r.additionalIdentityError == nil {
+				r.additionalIdentityError = fmt.Errorf("%w: %q", ErrDuplicateArtifactMember, identity)
+			}
+			r.seen[identity] = struct{}{}
+		}
+		r.current = next
+		if n > 0 {
+			return n, nil
+		}
+	}
+	return 0, io.EOF
+}
+
+func (r *concatenatedGzipReader) validationError() error {
+	if r.additionalIdentityError != nil {
+		return r.additionalIdentityError
+	}
+	return fmt.Errorf("%w: concatenated gzip members", ErrUnsupportedArtifactFormat)
 }
 
 func validateAdditionalGzipMembers(reader *bufio.Reader, firstIdentity string, tracker *artifactBudgetTracker) error {

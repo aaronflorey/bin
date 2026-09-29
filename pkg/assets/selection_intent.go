@@ -51,13 +51,9 @@ func ResolvePersistedSelection(candidates []ReleaseCandidate, request ReleaseCan
 		}
 	}
 	if descriptor.ArchiveMember != "" {
-		// A persisted member identity asserts an archive layout. A standalone
-		// artifact can never satisfy it, so keep only archives before ranking;
-		// otherwise package preference could pick a raw binary and fail later.
-		candidates = archiveFormatCandidates(candidates)
-		if len(candidates) == 0 {
-			return nil, persistedSelectionError(PersistedSelectionMember, descriptor.ArchiveMember)
-		}
+		// Prefer recognizable tar/ZIP candidates, but retain opaque names because
+		// payload bytes, not filename extensions, establish member traversal.
+		request.PackagePreferences = append(memberArchiveFormats(candidates), request.PackagePreferences...)
 	}
 	if descriptor.Target != nil {
 		constraints := selectionTarget(descriptor.Target)
@@ -93,12 +89,28 @@ func DeriveSelectionDescriptor(binary *config.Binary) *config.SelectionDescripto
 		return nil
 	}
 	descriptor := selectionDescriptorForCandidate(describeReleaseCandidate(&Asset{Name: binary.SourceAsset}, ""))
-	if isArchiveAsset(binary.SourceAsset) && binary.PackagePath != "" {
+	if isMemberArchiveAsset(binary.SourceAsset) && binary.PackagePath != "" {
 		if member, err := normalizeArtifactMemberIdentity(binary.PackagePath); err == nil {
 			if descriptor == nil {
 				descriptor = &config.SelectionDescriptor{}
 			}
 			descriptor.ArchiveMember = normalizeArchiveMemberVersionWrapper(member)
+		}
+	}
+	return descriptor
+}
+
+// StoredSelectionDescriptor returns a cloned recorded descriptor or derives
+// one for a legacy record. It repairs only the old raw-payload descriptor shape
+// where the outer asset name was mistakenly persisted as an archive member.
+func StoredSelectionDescriptor(binary *config.Binary) *config.SelectionDescriptor {
+	if binary == nil || binary.SelectionIntent == nil {
+		return DeriveSelectionDescriptor(binary)
+	}
+	descriptor := config.CloneSelectionDescriptor(binary.SelectionIntent)
+	if (binary.InstallMode == "" || binary.InstallMode == "binary") && binary.PackagePath == "" && !isArchiveAsset(binary.SourceAsset) {
+		if source, err := normalizeArtifactMemberIdentity(binary.SourceAsset); err == nil && descriptor.ArchiveMember == normalizeArchiveMemberVersionWrapper(source) {
+			descriptor.ArchiveMember = ""
 		}
 	}
 	return descriptor
@@ -203,24 +215,31 @@ func isArchiveAsset(name string) bool {
 	return format != "" && format != "standalone"
 }
 
-// archiveFormatCandidates keeps only candidates that can contain an archive
-// member, so a persisted member assertion cannot be satisfied by a standalone
-// binary that happens to rank first.
-func archiveFormatCandidates(candidates []ReleaseCandidate) []ReleaseCandidate {
-	filtered := make([]ReleaseCandidate, 0, len(candidates))
+func memberArchiveFormats(candidates []ReleaseCandidate) []ReleasePackageFormat {
+	available := make(map[ReleasePackageFormat]struct{}, len(candidates))
 	for _, candidate := range candidates {
-		if isArchiveReleaseFormat(candidate.Format) {
-			filtered = append(filtered, candidate)
+		if isMemberArchiveFormat(candidate.Format) {
+			available[candidate.Format] = struct{}{}
 		}
 	}
-	return filtered
+	formats := make([]ReleasePackageFormat, 0, len(available))
+	for _, format := range []ReleasePackageFormat{"tar.gz", "tar.xz", "tar.bz2", "tar", "tgz", "zip"} {
+		if _, ok := available[format]; ok {
+			formats = append(formats, format)
+		}
+	}
+	return formats
 }
 
-func isArchiveReleaseFormat(format ReleasePackageFormat) bool {
+func isMemberArchiveFormat(format ReleasePackageFormat) bool {
 	switch format {
-	case "tar.gz", "tar.xz", "tar.bz2", "tar.zst", "tar", "tgz", "zip", "gz", "xz", "bz2", "zst":
+	case "tar.gz", "tar.xz", "tar.bz2", "tar", "tgz", "zip":
 		return true
 	default:
 		return false
 	}
+}
+
+func isMemberArchiveAsset(name string) bool {
+	return isMemberArchiveFormat(ReleasePackageFormat(releaseAssetFormat(normalizedAssetBasename(name))))
 }

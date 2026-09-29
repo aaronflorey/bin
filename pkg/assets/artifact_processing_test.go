@@ -97,6 +97,22 @@ func TestArtifactBudgetsAreFiniteAndTracked(t *testing.T) {
 	}
 }
 
+func TestDefaultArtifactBudgetAllowsGooseSizedEntryButRemainsBounded(t *testing.T) {
+	tracker, err := newArtifactBudgetTracker(defaultArtifactBudgets())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.visitArchiveEntry(); err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.addEntryBytes(300841352); err != nil {
+		t.Fatalf("Goose-sized entry rejected: %v", err)
+	}
+	if err := tracker.addEntryBytes(defaultArtifactBudgets().maxEntryBytes); !errors.Is(err, ErrArtifactLimitExceeded) {
+		t.Fatalf("oversized entry error = %v, want bounded rejection", err)
+	}
+}
+
 func TestArtifactProcessingResultOwnsCleanup(t *testing.T) {
 	closed := 0
 	cleaned := 0
@@ -516,6 +532,46 @@ func TestProcessURLRejectsConcatenatedGzipMembers(t *testing.T) {
 	}
 }
 
+func TestProcessReaderAcceptsUnnamedConcatenatedGzipTar(t *testing.T) {
+	fixture := testRunnableFixture("tool")
+	tarArchive := tarPayload(t, map[string]string{fixture.name: fixture.contents})
+	cut := len(tarArchive) / 2
+	payload := concatGzipPayloads(
+		gzipPayload(t, string(tarArchive[:cut])),
+		gzipPayload(t, string(tarArchive[cut:])),
+	)
+
+	f := NewFilter(&FilterOpts{NonInteractive: true})
+	f.repoName = "tool"
+	result, err := f.ProcessReader("tool.tar.gz", int64(len(payload)), bytes.NewReader(payload), "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer result.Source.(io.Closer).Close()
+	if result.Name != fixture.name || result.PackagePath != fixture.name {
+		t.Fatalf("result = name:%q package:%q, want %q", result.Name, result.PackagePath, fixture.name)
+	}
+}
+
+func TestProcessReaderBoundsUnnamedConcatenatedGzipTarCumulatively(t *testing.T) {
+	tarArchive := tarPayload(t, map[string]string{"tool": "#!/bin/sh\nexit 0\n"})
+	cut := len(tarArchive) / 2
+	payload := concatGzipPayloads(
+		gzipPayload(t, string(tarArchive[:cut])),
+		gzipPayload(t, string(tarArchive[cut:])),
+	)
+	original := artifactProcessingBudgets
+	artifactProcessingBudgets = artifactBudgets{maxDownloadBytes: int64(len(payload)), maxArchiveEntries: 10, maxEntryBytes: int64(len(tarArchive) - 1), maxExpandedBytes: int64(len(tarArchive) * 2), maxNesting: 4}
+	t.Cleanup(func() { artifactProcessingBudgets = original })
+
+	f := NewFilter(&FilterOpts{NonInteractive: true})
+	f.repoName = "tool"
+	_, err := f.ProcessReader("tool.tar.gz", int64(len(payload)), bytes.NewReader(payload), "", false)
+	if !errors.Is(err, ErrArtifactLimitExceeded) {
+		t.Fatalf("ProcessReader() error = %v, want cumulative entry limit", err)
+	}
+}
+
 func TestProcessURLRejectsUnsafeLaterGzipMemberIdentity(t *testing.T) {
 	payload := concatGzipPayloads(
 		gzipPayloadNamed(t, "tool", "#!/bin/sh\nexit 0\n"),
@@ -867,6 +923,85 @@ func TestProcessReleaseArtifactResolvesArchiveMembersSafely(t *testing.T) {
 	})
 }
 
+func TestProcessReleaseArtifactPersistsOnlyRealArchiveMembers(t *testing.T) {
+	originalResolver := resolver
+	resolver = testLinuxAMDResolver
+	t.Cleanup(func() { resolver = originalResolver })
+	fixture := testRunnableFixture("tool")
+
+	process := func(t *testing.T, name string, payload []byte, intent *config.SelectionDescriptor) (*Filter, *artifactProcessingResult, error) {
+		t.Helper()
+		download, err := os.CreateTemp(t.TempDir(), "artifact-download-*")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := download.Write(payload); err != nil {
+			t.Fatal(err)
+		}
+		if err := download.Close(); err != nil {
+			t.Fatal(err)
+		}
+		filter := NewFilter(&FilterOpts{NonInteractive: true, SelectionIntent: intent})
+		filter.repoName, filter.name = "tool", name
+		result, err := filter.processReleaseArtifact(download.Name(), "download")
+		return filter, result, err
+	}
+
+	t.Run("raw payload records no member and remains selectable", func(t *testing.T) {
+		filter, result, err := process(t, fixture.name, []byte(fixture.contents), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer result.Close()
+		intent := filter.SelectionIntent()
+		if intent == nil || intent.ArchiveMember != "" || result.final.PackagePath != "" {
+			t.Fatalf("raw selection = intent:%#v package:%q", intent, result.final.PackagePath)
+		}
+		candidate := describeReleaseCandidate(&Asset{Name: fixture.name}, "tool")
+		if _, err := ResolvePersistedSelection([]ReleaseCandidate{candidate}, ReleaseCandidateResolutionRequest{}, intent); err != nil {
+			t.Fatalf("next raw release selection failed: %v", err)
+		}
+		_, next, err := process(t, fixture.name, []byte(fixture.contents), intent)
+		if err != nil {
+			t.Fatalf("next raw release processing failed: %v", err)
+		}
+		defer next.Close()
+	})
+
+	t.Run("extensionless zip resolves persisted member", func(t *testing.T) {
+		intent := &config.SelectionDescriptor{ArchiveMember: fixture.name}
+		filter, result, err := process(t, fixture.name, buildTestZipArchive(t, map[string]string{fixture.name: fixture.contents}), intent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer result.Close()
+		if got := filter.SelectionIntent(); got == nil || got.ArchiveMember != fixture.name || result.final.PackagePath != fixture.name {
+			t.Fatalf("extensionless archive selection = intent:%#v package:%q", got, result.final.PackagePath)
+		}
+	})
+
+	t.Run("same-name raw payload cannot satisfy member assertion", func(t *testing.T) {
+		_, result, err := process(t, fixture.name, []byte(fixture.contents), &config.SelectionDescriptor{ArchiveMember: fixture.name})
+		if result != nil {
+			_ = result.Close()
+		}
+		if !errors.Is(err, ErrUnavailablePersistedSelection) || !errors.Is(err, ErrNoEligibleArchiveMember) {
+			t.Fatalf("raw member assertion error = %v", err)
+		}
+	})
+
+	t.Run("single-file compression is transformed but not member-bearing", func(t *testing.T) {
+		filter, result, err := process(t, fixture.name+".gz", gzipPayloadNamed(t, fixture.name, fixture.contents), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer result.Close()
+		if !result.transformed || filter.SelectionIntent().ArchiveMember != "" {
+			t.Fatalf("gzip selection = transformed:%t intent:%#v", result.transformed, filter.SelectionIntent())
+		}
+	})
+}
+
 type archiveTestFile struct {
 	name string
 	body string
@@ -1041,6 +1176,111 @@ func TestTarCountsAndValidatesNonRegularEntries(t *testing.T) {
 	err = f.collectTar(bytes.NewReader(archive.Bytes()), "", t.TempDir(), tracker, newArtifactInventory(), new(bool))
 	if !errors.Is(err, ErrArtifactLimitExceeded) {
 		t.Fatalf("collectTar() error = %v, want non-regular entry to consume count budget", err)
+	}
+}
+
+func TestArchiveRootMarkersRemainBoundedAndDoNotHideDuplicates(t *testing.T) {
+	t.Run("zip root and normalized duplicate", func(t *testing.T) {
+		var archive bytes.Buffer
+		writer := zip.NewWriter(&archive)
+		for _, name := range []string{"./", "./tool", "tool"} {
+			entry, err := writer.Create(name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if name != "./" {
+				_, _ = io.WriteString(entry, "#!/bin/sh\nexit 0\n")
+			}
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatal(err)
+		}
+		tracker, _ := newArtifactBudgetTracker(defaultArtifactBudgets())
+		err := new(Filter).collectZip(bytes.NewReader(archive.Bytes()), "", t.TempDir(), tracker, newArtifactInventory(), new(bool))
+		if !errors.Is(err, ErrDuplicateArtifactMember) {
+			t.Fatalf("collectZip() error = %v, want duplicate normalized member", err)
+		}
+	})
+
+	t.Run("repeated roots consume entry budget", func(t *testing.T) {
+		var archive bytes.Buffer
+		writer := tar.NewWriter(&archive)
+		for range 2 {
+			if err := writer.WriteHeader(&tar.Header{Name: "./", Typeflag: tar.TypeDir, Mode: 0o755}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatal(err)
+		}
+		tracker, _ := newArtifactBudgetTracker(artifactBudgets{maxDownloadBytes: 1, maxArchiveEntries: 1, maxEntryBytes: 1, maxExpandedBytes: 1, maxNesting: 2})
+		err := new(Filter).collectTar(bytes.NewReader(archive.Bytes()), "", t.TempDir(), tracker, newArtifactInventory(), new(bool))
+		if !errors.Is(err, ErrArtifactLimitExceeded) {
+			t.Fatalf("collectTar() error = %v, want entry limit", err)
+		}
+	})
+
+	t.Run("root-named regular bytes consume byte budget", func(t *testing.T) {
+		var archive bytes.Buffer
+		writer := tar.NewWriter(&archive)
+		if err := writer.WriteHeader(&tar.Header{Name: ".", Mode: 0o644, Size: 4}); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = io.WriteString(writer, "data")
+		if err := writer.Close(); err != nil {
+			t.Fatal(err)
+		}
+		tracker, _ := newArtifactBudgetTracker(artifactBudgets{maxDownloadBytes: 1, maxArchiveEntries: 2, maxEntryBytes: 3, maxExpandedBytes: 10, maxNesting: 2})
+		err := new(Filter).collectTar(bytes.NewReader(archive.Bytes()), "", t.TempDir(), tracker, newArtifactInventory(), new(bool))
+		if !errors.Is(err, ErrArtifactLimitExceeded) {
+			t.Fatalf("collectTar() error = %v, want byte limit", err)
+		}
+	})
+}
+
+func TestIgnoredNestedArchiveRootMarkersAreBenign(t *testing.T) {
+	var tarArchive bytes.Buffer
+	tarWriter := tar.NewWriter(&tarArchive)
+	if err := tarWriter.WriteHeader(&tar.Header{Name: "./", Typeflag: tar.TypeDir, Mode: 0o755}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tarWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	var zipArchive bytes.Buffer
+	zipWriter := zip.NewWriter(&zipArchive)
+	if _, err := zipWriter.Create("./"); err != nil {
+		t.Fatal(err)
+	}
+	if err := zipWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, test := range []struct {
+		name    string
+		payload []byte
+	}{
+		{name: "metadata.tar", payload: tarArchive.Bytes()},
+		{name: "metadata.zip", payload: zipArchive.Bytes()},
+	} {
+		tracker, _ := newArtifactBudgetTracker(defaultArtifactBudgets())
+		if err := discardIgnoredArtifact(bytes.NewReader(test.payload), test.name, "ignored", tracker, newArtifactInventory()); err != nil {
+			t.Fatalf("discardIgnoredArtifact(%s) = %v", test.name, err)
+		}
+	}
+}
+
+func TestGzipRootNameIsNotASkippableArchiveEntry(t *testing.T) {
+	payload := gzipPayloadNamed(t, "./", "data")
+	download := filepath.Join(t.TempDir(), "tool.gz")
+	if err := os.WriteFile(download, payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tracker, _ := newArtifactBudgetTracker(defaultArtifactBudgets())
+	err := new(Filter).collectArtifact(download, "tool.gz", "", t.TempDir(), tracker, newArtifactInventory(), new(bool), false)
+	if !errors.Is(err, errArchiveRootMember) {
+		t.Fatalf("collectArtifact() error = %v, want root-name rejection", err)
 	}
 }
 

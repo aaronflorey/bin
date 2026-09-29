@@ -158,9 +158,21 @@ func TestNormalizeArchiveMemberVersionWrapperRealWorldLayouts(t *testing.T) {
 		{"gum_2.0.1_Darwin_arm64/gum", "gum"},
 		{"gum_2.0.2_Darwin_arm64/gum", "gum"},
 		{"jsonschema-16.10.0-darwin-arm64/bin/jsonschema", "bin/jsonschema"},
+		{"jsonschema-16.12.0-linux-x86_64/bin/jsonschema", "bin/jsonschema"},
 		{"llmfit-v1.1.15-aarch64-apple-darwin/llmfit", "llmfit"},
 		{"mago-1.49.0-aarch64-apple-darwin/mago", "mago"},
 		{"mise-v2026.9.16-macos-arm64/bin/mise", "bin/mise"},
+		{"druk/1.31.0/bin/druk", "bin/druk"},
+		{"druk/1.36.0/bin/druk", "bin/druk"},
+		{"tool-v2-helper/bin/tool", "tool-v2-helper/bin/tool"},
+		{"tool-v2-debug/bin/tool", "tool-v2-debug/bin/tool"},
+		{"tool-v2-enterprise/bin/tool", "tool-v2-enterprise/bin/tool"},
+		{"tool-v2-linux-helper/bin/tool", "tool-v2-linux-helper/bin/tool"},
+		{"tool-v/bin/tool", "tool-v/bin/tool"},
+		{"tool-v2./bin/tool", "tool-v2./bin/tool"},
+		{"other-v2-linux/bin/tool", "other-v2-linux/bin/tool"},
+		{"other/1.0.0/bin/tool", "other/1.0.0/bin/tool"},
+		{"tool/debug/bin/tool", "tool/debug/bin/tool"},
 		{"mise/bin/mise", "mise/bin/mise"},
 		{"initial/tool", "initial/tool"},
 		{"tool-helper/bin/tool", "tool-helper/bin/tool"},
@@ -201,6 +213,7 @@ func resolverInventory(t *testing.T, names ...string) *artifactInventory {
 		inventory.entries[len(inventory.entries)-1].stagedPath = stagedPath
 		inventory.entries[len(inventory.entries)-1].targetCompatible = true
 		inventory.entries[len(inventory.entries)-1].runnable = true
+		inventory.entries[len(inventory.entries)-1].archiveMember = true
 	}
 	return inventory
 }

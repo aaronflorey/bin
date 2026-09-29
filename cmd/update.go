@@ -32,6 +32,7 @@ type updateOpts struct {
 	yesToUpdate     bool
 	dryRun          bool
 	all             bool
+	autoSelect      string
 	parallelism     int
 	skipPathCheck   bool
 	continueOnError bool
@@ -58,6 +59,9 @@ func newUpdateCmd() *updateCmd {
 			binsToProcess, explicitVersion, hasExplicitVersion, err := resolveUpdateTargets(cfg.Bins, args)
 			if err != nil {
 				return err
+			}
+			if root.opts.autoSelect != "" && len(binsToProcess) != 1 {
+				return fmt.Errorf("--select requires exactly one update target")
 			}
 
 			var updates []availableUpdate
@@ -157,6 +161,7 @@ func newUpdateCmd() *updateCmd {
 				strategy := lifecycleForMode(b.InstallMode)
 				fetchOpts := providers.FetchOpts{
 					All:            root.opts.all,
+					AutoSelect:     root.opts.autoSelect,
 					SkipPatchCheck: root.opts.skipPathCheck,
 					Version:        ui.version,
 				}
@@ -221,6 +226,7 @@ func newUpdateCmd() *updateCmd {
 	root.cmd.Flags().BoolVarP(&root.opts.dryRun, "dry-run", "", false, "Only show status, don't prompt for update")
 	root.cmd.Flags().BoolVarP(&root.opts.yesToUpdate, "yes", "y", false, "Assume yes to update prompt")
 	root.cmd.Flags().BoolVarP(&root.opts.all, "all", "a", false, "Show all possible download options (skip scoring & filtering)")
+	root.cmd.Flags().StringVarP(&root.opts.autoSelect, "select", "s", "", "Select one release asset for a single update target")
 	root.cmd.Flags().IntVarP(&root.opts.parallelism, "parallelism", "p", defaultUpdateParallelism, "Maximum number of binaries to check for updates concurrently")
 	root.cmd.Flags().BoolVarP(&root.opts.skipPathCheck, "skip-path-check", "", false, "Skips path checking when looking into packages")
 	root.cmd.Flags().BoolVarP(&root.opts.continueOnError, "continue-on-error", "c", true, "Continues to update next package if an error is encountered")

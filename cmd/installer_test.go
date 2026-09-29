@@ -132,6 +132,42 @@ func TestInstallBinaryPreservesArchiveMemberResolutionOutcomes(t *testing.T) {
 			t.Fatalf("installBinary() resolution error = %#v", got)
 		}
 	})
+
+	t.Run("raw payload cannot satisfy persisted member or change state", func(t *testing.T) {
+		name, payload := "tool-linux-amd64", []byte("#!/bin/sh\nexit 0\n")
+		if runtime.GOOS == "windows" {
+			name, payload = "tool.cmd", []byte("@echo off\r\nexit /b 0\r\n")
+		}
+		path := filepath.Join(installDir, name)
+		if err := os.WriteFile(path, payload, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		stored := &config.Binary{Path: path, RemoteName: "tool", Version: "1.0.0", URL: "https://example.test/tool", Provider: "test", SourceAsset: name, SelectionIntent: &config.SelectionDescriptor{LogicalProduct: "tool", ArchiveMember: name}}
+		if err := config.UpsertBinary(stored); err != nil {
+			t.Fatal(err)
+		}
+
+		installProviderFactory = func(string, string) (providers.Provider, error) {
+			return fetchBinaryTestProvider{id: "test", fetchFn: func(opts *providers.FetchOpts) (*providers.File, error) {
+				filter := assets.NewFilter(&assets.FilterOpts{NonInteractive: true, SelectionIntent: opts.SelectionIntent})
+				_, err := filter.ProcessReader(name, int64(len(payload)), bytes.NewReader(payload), "", false)
+				return nil, err
+			}}, nil
+		}
+
+		_, err := installBinary(InstallOpts{URL: stored.URL, Provider: stored.Provider, Path: path, ConfigPath: path, LogicalName: "tool", Force: true, FetchOpts: providers.FetchOpts{NonInteractive: true, SelectionIntent: config.CloneSelectionDescriptor(stored.SelectionIntent)}})
+		if !errors.Is(err, assets.ErrUnavailablePersistedSelection) || !errors.Is(err, assets.ErrNoEligibleArchiveMember) {
+			t.Fatalf("installBinary() error = %v", err)
+		}
+		contents, readErr := os.ReadFile(path)
+		if readErr != nil || !bytes.Equal(contents, payload) {
+			t.Fatalf("installed payload changed: %q, %v", contents, readErr)
+		}
+		got := config.Get().Bins[path]
+		if got.Version != stored.Version || got.SourceAsset != stored.SourceAsset || got.SelectionIntent == nil || got.SelectionIntent.ArchiveMember != name {
+			t.Fatalf("stored config changed: %#v", got)
+		}
+	})
 }
 
 func TestInstallBinaryPersistsResolvedSelectionIntent(t *testing.T) {

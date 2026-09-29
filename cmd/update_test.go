@@ -563,6 +563,9 @@ func TestUpdateAppliesPersistedSelectionIntent(t *testing.T) {
 	t.Cleanup(func() { installProviderFactory = previousFactory })
 	installProviderFactory = func(string, string) (providers.Provider, error) {
 		return fetchBinaryTestProvider{id: "github", fetchFn: func(opts *providers.FetchOpts) (*providers.File, error) {
+			if opts.AutoSelect != "tool-cli-v2.0.0-linux-amd64-musl.tar.gz" {
+				t.Fatalf("update fetch auto selection = %q", opts.AutoSelect)
+			}
 			if opts.SelectionIntent == nil || opts.SelectionIntent.LogicalProduct != "tool-cli" || opts.SelectionIntent.ArchiveMember != "bin/tool" {
 				t.Fatalf("update fetch selection intent = %#v", opts.SelectionIntent)
 			}
@@ -583,7 +586,7 @@ func TestUpdateAppliesPersistedSelectionIntent(t *testing.T) {
 	}
 
 	cmd := newUpdateCmd()
-	cmd.cmd.SetArgs([]string{"--yes", "github.com/acme/managed-intent-tool/releases/tag/v2.0.0"})
+	cmd.cmd.SetArgs([]string{"--yes", "--select", "tool-cli-v2.0.0-linux-amd64-musl.tar.gz", "github.com/acme/managed-intent-tool/releases/tag/v2.0.0"})
 	if err := cmd.cmd.Execute(); err != nil {
 		t.Fatalf("update error = %v", err)
 	}
@@ -595,6 +598,15 @@ func TestUpdateAppliesPersistedSelectionIntent(t *testing.T) {
 		t.Fatalf("update did not persist managed selection intent: %#v", updated.SelectionIntent)
 	}
 	assertCompletionContent(t, shell, "tool", "bundled completion")
+}
+
+func TestUpdateSelectRequiresSingleTarget(t *testing.T) {
+	setupTestConfig(t)
+	cmd := newUpdateCmd()
+	cmd.cmd.SetArgs([]string{"--select", "tool.tar.gz"})
+	if err := cmd.cmd.Execute(); err == nil || err.Error() != "--select requires exactly one update target" {
+		t.Fatalf("update --select error = %v", err)
+	}
 }
 
 func TestUpdateRetainsManagedDMGBundleAndProviderProduct(t *testing.T) {

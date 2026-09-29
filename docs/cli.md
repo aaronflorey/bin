@@ -17,7 +17,7 @@
 | `run` | Download a binary into the user cache and execute it | Supports passthrough args after `--`. Cached files live under `os.UserCacheDir()/bin`; provider versions remain cache identities even when encoded for safe filenames. |
 | `ensure` | Reinstall tracked binaries when they are missing or mismatched | Alias: `e`. |
 | `outdated` | Show tracked binaries with newer versions available | `--format=text|json` (default `text`). |
-| `update` | Update one or more tracked binaries | Alias: `u`. Supports `--yes`, `--dry-run`, `--all`, `--parallelism`, `--skip-path-check`, `--continue-on-error`. Defaults to `--continue-on-error=true`: later binaries still run after a per-binary failure, but the command exits with code `4` if any update failed. Use `--continue-on-error=false` to stop on the first per-binary failure. |
+| `update` | Update one or more tracked binaries | Alias: `u`. Supports `--yes`, `--dry-run`, `--all`, `--select`, `--parallelism`, `--skip-path-check`, `--continue-on-error`. `--select` requires exactly one update target and explicitly chooses its release asset; persisted member and payload validation still apply. Defaults to `--continue-on-error=true`: later binaries still run after a per-binary failure, but the command exits with code `4` if any update failed. Use `--continue-on-error=false` to stop on the first per-binary failure. |
 | `set-config` | Update supported config keys | Only `default_path` and `use_gh_for_github_token`. |
 | `export` | Write managed binaries as JSON | Writes to stdout unless a file is passed. |
 | `import` | Read managed binaries from JSON | `--skip-ensure` skips the post-import ensure step. |

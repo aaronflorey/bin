@@ -167,6 +167,7 @@ func selectEligibleReleaseCandidate(candidates []ReleaseCandidate, request Relea
 	if len(eligible) == 0 {
 		return nil, releaseCandidateResolutionError(ReleaseCandidateIncompatible, request.ExplicitID, candidateIDs(candidates))
 	}
+	eligible = preferExactABI(eligible, request.Target.ABI)
 	eligible = mostSpecificReleaseCandidates(eligible)
 	if hasAmbiguousReleaseVariant(eligible) {
 		return nil, releaseCandidateResolutionError(ReleaseCandidateAmbiguousVariant, "", candidateIDs(eligible))
@@ -182,6 +183,20 @@ func selectEligibleReleaseCandidate(candidates []ReleaseCandidate, request Relea
 		return eligible[i].ID < eligible[j].ID
 	})
 	return &ReleaseCandidateResolution{Candidate: eligible[0], EligibleCandidates: eligible}, nil
+}
+
+func preferExactABI(candidates []ReleaseCandidate, requested []string) []ReleaseCandidate {
+	exact := make([]ReleaseCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		target, valid := mergedCandidateTarget(candidate)
+		if valid && targetFieldMatches(target.ABI, requested, canonicalABI) {
+			exact = append(exact, candidate)
+		}
+	}
+	if len(exact) > 0 {
+		return exact
+	}
+	return candidates
 }
 
 func mostSpecificReleaseCandidates(candidates []ReleaseCandidate) []ReleaseCandidate {
@@ -210,8 +225,18 @@ func candidateMatchesReleaseTarget(candidate ReleaseCandidate, requested Release
 	}
 	return targetFieldMatches(target.OS, requested.OS, canonicalOS) &&
 		targetFieldMatches(target.Architecture, requested.Architecture, canonicalArchitecture) &&
-		targetFieldMatches(target.ABI, requested.ABI, canonicalABI) &&
+		abiMatches(target.ABI, requested.ABI) &&
 		cpuVariantMatches(target.CPUVariant, requested.CPUVariant, rules)
+}
+
+func abiMatches(candidate, requested []string) bool {
+	if targetFieldMatches(candidate, requested, canonicalABI) {
+		return true
+	}
+	candidateValues, requestedValues := canonicalValues(candidate, canonicalABI), canonicalValues(requested, canonicalABI)
+	_, candidateIsMusl := candidateValues["musl"]
+	_, requestedIsGlibc := requestedValues["glibc"]
+	return len(candidateValues) == 1 && len(requestedValues) == 1 && candidateIsMusl && requestedIsGlibc
 }
 
 func mergedCandidateTarget(candidate ReleaseCandidate) (ReleaseTarget, bool) {
