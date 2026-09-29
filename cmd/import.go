@@ -225,6 +225,9 @@ func equalSelectionDescriptor(a, b *config.SelectionDescriptor) bool {
 	if a.LogicalProduct != b.LogicalProduct || a.ArchiveMember != b.ArchiveMember {
 		return false
 	}
+	if (a.Variant == nil) != (b.Variant == nil) || (a.Variant != nil && *a.Variant != *b.Variant) {
+		return false
+	}
 	if a.Target == nil || b.Target == nil {
 		return a.Target == b.Target
 	}

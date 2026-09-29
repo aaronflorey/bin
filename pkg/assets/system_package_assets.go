@@ -54,7 +54,7 @@ const (
 
 var knownOSTokens = []string{
 	"darwin", "macos", "macosx", "osx", "apple",
-	"linux", "manylinux", "android",
+	"linux", "linux32", "linux64", "manylinux", "android",
 	"windows", "win", "win32", "win64",
 	"freebsd", "openbsd", "netbsd", "dragonfly",
 }
@@ -113,6 +113,8 @@ func preferredOSTokens() map[string]struct{} {
 	}
 	if _, ok := preferred["linux"]; ok {
 		preferred["manylinux"] = struct{}{}
+		preferred["linux32"] = struct{}{}
+		preferred["linux64"] = struct{}{}
 	}
 	if _, ok := preferred["windows"]; ok {
 		preferred["win32"] = struct{}{}

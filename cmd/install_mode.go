@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -62,6 +61,10 @@ var lifecycleRegistry = map[string]lifecycleStrategy{
 			fetchOpts.PackageName = b.RemoteName
 			fetchOpts.ReleaseTagPrefix = providers.EffectiveReleaseTagPrefix(b.Version, b.ReleaseTagPrefix)
 			fetchOpts.SelectionIntent = storedSelectionIntent(b)
+			if fetchOpts.SelectionIntent != nil && fetchOpts.SelectionIntent.ArchiveMember == "" {
+				// A decompressed standalone filename is not an archive-member constraint.
+				fetchOpts.PackagePath = ""
+			}
 			return nil
 		},
 		applyRequestFetch: func(requestedName string, fetchOpts *providers.FetchOpts) error {
@@ -170,5 +173,5 @@ func requestedInstallModes(strictSystemPackage, preferSystemPackage bool, reques
 }
 
 func shouldFallbackInstallMode(err error) bool {
-	return err != nil && (errors.Is(err, assets.ErrNoCompatibleFiles) || errors.Is(err, systempackage.ErrIncompatible))
+	return isCompatibilityError(err)
 }

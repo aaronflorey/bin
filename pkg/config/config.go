@@ -179,6 +179,9 @@ type SelectionDescriptor struct {
 	LogicalProduct string           `json:"logical_product,omitempty"`
 	Target         *SelectionTarget `json:"target,omitempty"`
 	ArchiveMember  string           `json:"archive_member,omitempty"`
+	// Variant distinguishes filename build variants such as static or gnu-2-17.
+	// A non-nil empty value records the default build explicitly.
+	Variant *string `json:"variant,omitempty"`
 }
 
 // SelectionTarget records the target constraints for a selected release
@@ -281,6 +284,10 @@ func CloneSelectionDescriptor(descriptor *SelectionDescriptor) *SelectionDescrip
 	}
 
 	clone := *descriptor
+	if descriptor.Variant != nil {
+		variant := *descriptor.Variant
+		clone.Variant = &variant
+	}
 	if descriptor.Target != nil {
 		target := *descriptor.Target
 		clone.Target = &target

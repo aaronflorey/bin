@@ -83,6 +83,7 @@ type ReleaseCandidate struct {
 	Target        ReleaseTarget
 	Format        ReleasePackageFormat
 	ImpliedTarget ReleaseTarget
+	Variant       string
 }
 
 // CPUVariantRule explicitly permits a candidate CPU variant for a requested
@@ -255,15 +256,16 @@ func mergedCandidateTarget(candidate ReleaseCandidate) (ReleaseTarget, bool) {
 		!singleTargetFact(implied.CPUVariant, canonicalCPUVariant) {
 		return ReleaseTarget{}, false
 	}
-	return ReleaseTarget{
-			OS:           mergeTargetValues(candidate.Target.OS, implied.OS, canonicalOS),
-			Architecture: mergeTargetValues(candidate.Target.Architecture, implied.Architecture, canonicalArchitecture),
-			ABI:          mergeTargetValues(candidate.Target.ABI, implied.ABI, canonicalABI),
-			CPUVariant:   mergeTargetValues(candidate.Target.CPUVariant, implied.CPUVariant, canonicalCPUVariant),
-		}, targetValuesCompatible(candidate.Target.OS, implied.OS, canonicalOS) &&
-			targetValuesCompatible(candidate.Target.Architecture, implied.Architecture, canonicalArchitecture) &&
-			targetValuesCompatible(candidate.Target.ABI, implied.ABI, canonicalABI) &&
-			targetValuesCompatible(candidate.Target.CPUVariant, implied.CPUVariant, canonicalCPUVariant)
+	target := ReleaseTarget{
+		OS:           mergeTargetValues(candidate.Target.OS, implied.OS, canonicalOS),
+		Architecture: mergeTargetValues(candidate.Target.Architecture, implied.Architecture, canonicalArchitecture),
+		ABI:          mergeTargetValues(candidate.Target.ABI, implied.ABI, canonicalABI),
+		CPUVariant:   mergeTargetValues(candidate.Target.CPUVariant, implied.CPUVariant, canonicalCPUVariant),
+	}
+	return target, targetValuesCompatible(candidate.Target.OS, implied.OS, canonicalOS) &&
+		targetValuesCompatible(candidate.Target.Architecture, implied.Architecture, canonicalArchitecture) &&
+		targetValuesCompatible(candidate.Target.ABI, implied.ABI, canonicalABI) &&
+		targetValuesCompatible(candidate.Target.CPUVariant, implied.CPUVariant, canonicalCPUVariant)
 }
 
 func targetFieldMatches(candidate, requested []string, canonical func(string) string) bool {
@@ -416,7 +418,7 @@ func canonicalOS(value string) string {
 		return "darwin"
 	case "win", "win32", "win64", "windows":
 		return "windows"
-	case "manylinux", "linux":
+	case "manylinux", "linux", "linux32", "linux64":
 		return "linux"
 	default:
 		return strings.ToLower(strings.TrimSpace(value))
@@ -429,8 +431,20 @@ func canonicalArchitecture(value string) string {
 		return "amd64"
 	case "aarch64", "arm64":
 		return "arm64"
-	case "i386", "i686", "x86", "386", "32bit":
+	case "i386", "i586", "i686", "x86", "386", "32bit":
 		return "386"
+	case "powerpc64":
+		return "ppc64"
+	case "powerpc64le":
+		return "ppc64le"
+	case "riscv64gc":
+		return "riscv64"
+	case "mips64el":
+		return "mips64le"
+	case "mipsel":
+		return "mipsle"
+	case "loongarch64":
+		return "loong64"
 	default:
 		return strings.ToLower(strings.TrimSpace(value))
 	}
@@ -491,7 +505,48 @@ func describeReleaseCandidate(asset *Asset, intendedProduct string) ReleaseCandi
 	default:
 		candidate.Format = ReleasePackageFormat(releaseAssetFormat(lower))
 	}
+	candidate.Variant = releaseBuildVariant(lower, candidate.Product)
 	return candidate
+}
+
+// releaseBuildVariant retains build qualifiers after removing product, release
+// version, packaging, and target tokens. Numeric ABI qualifiers remain intact.
+func releaseBuildVariant(name, product string) string {
+	format := releaseAssetFormat(name)
+	if format != "standalone" {
+		name = strings.TrimSuffix(name, "."+format)
+	}
+	for _, suffix := range []string{".appimage", ".exe", ".msi", ".dmg", ".deb", ".rpm", ".apk"} {
+		name = strings.TrimSuffix(name, suffix)
+	}
+	name = strings.ReplaceAll(name, "x86_64", "amd64")
+	parts := strings.FieldsFunc(name, func(r rune) bool { return r == '-' || r == '_' })
+	productParts := strings.Split(product, "-")
+	for len(parts) > 0 && len(productParts) > 0 && parts[0] == productParts[0] {
+		parts, productParts = parts[1:], productParts[1:]
+	}
+	var variant []string
+	targetSeen := false
+	for _, part := range parts {
+		// Some archives join their release version and OS with a dot.
+		if !targetSeen {
+			for dot := strings.LastIndex(part, "."); dot > 0; dot = strings.LastIndex(part[:dot], ".") {
+				if isVersionToken(part[:dot]) && isReleaseTargetToken(part[dot+1:]) {
+					part = part[dot+1:]
+					break
+				}
+			}
+		}
+		if isReleaseTargetToken(part) || part == "unknown" || part == "pc" || part == "msvc" {
+			targetSeen = true
+			continue
+		}
+		if !targetSeen && isVersionToken(part) {
+			continue
+		}
+		variant = append(variant, part)
+	}
+	return strings.Join(variant, "-")
 }
 
 func containsReleaseArchitectureToken(name, token string) bool {

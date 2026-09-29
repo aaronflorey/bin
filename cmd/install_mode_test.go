@@ -168,3 +168,21 @@ func TestShouldFallbackInstallMode(t *testing.T) {
 		t.Fatal("did not expect generic error to trigger fallback")
 	}
 }
+
+func TestArchiveFailureDoesNotFallBack(t *testing.T) {
+	err := fmt.Errorf("%w: %w", assets.ErrNoCompatibleFiles, &assets.ArchiveMemberResolutionError{Reason: assets.ArchiveMemberNoEligible})
+	if shouldFallbackInstallMode(err) || shouldFallbackProviderFetch(err) {
+		t.Fatal("archive failure triggered fallback")
+	}
+}
+
+func TestCompressedStandaloneUpdateDropsOldFilename(t *testing.T) {
+	binary := &config.Binary{Path: filepath.Join(t.TempDir(), "restic.bz2"), RemoteName: "restic.bz2", SourceAsset: "restic_0.16.0_linux_amd64.bz2", PackagePath: "restic_0.16.0_linux_amd64.bz2"}
+	var opts providers.FetchOpts
+	if err := lifecycleForMode(installModeBinary).applyStoredFetch(binary, &opts); err != nil {
+		t.Fatal(err)
+	}
+	if opts.PackagePath != "" || opts.SelectionIntent == nil || opts.SelectionIntent.ArchiveMember != "" {
+		t.Fatalf("stale compressed filename retained: %#v", opts)
+	}
+}

@@ -889,7 +889,7 @@ func TestExportImportDerivesAndRoundTripsSelectionIntent(t *testing.T) {
 		PackagePath: "tool-v2/bin/tool",
 	}
 	intent := storedSelectionIntent(legacy)
-	if intent == nil || intent.LogicalProduct != "tool" || intent.Target == nil || intent.Target.CPUVariant != "avx2" || intent.ArchiveMember != "bin/tool" {
+	if intent == nil || intent.LogicalProduct != "tool" || intent.Target == nil || intent.Target.CPUVariant != "avx2" || intent.ArchiveMember != "bin/tool" || intent.Variant == nil || *intent.Variant != "cli" {
 		t.Fatalf("derived selection intent = %#v", intent)
 	}
 	if err := config.UpsertBinary(legacy); err != nil {
