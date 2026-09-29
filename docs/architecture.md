@@ -28,6 +28,6 @@
 
 - Hooks are part of persisted config and are executed around install/update/remove operations.
 - `install` and `update` preserve provider metadata so later runs can use the same provider and artifact selection. `remote_name` is the stable command name; `source_asset` is informational and is never an exact update constraint.
-- `selection_intent` is distinct from source provenance. Its archive-member identity ignores only a narrow versioned top-level wrapper (`tool-v1/bin/tool` becomes `bin/tool`), preserving meaningful internal directories while allowing releases to change wrapper versions.
+- `selection_intent` is distinct from source provenance. A member identity is recorded only after tar/ZIP traversal; raw filenames and gzip/xz/bzip2 stream names are not archive members. Its identity ignores only a narrow versioned top-level wrapper (`tool-v1/bin/tool` becomes `bin/tool`) whose remaining suffix is made entirely of recognized target tokens, preserving meaningful internal directories while allowing releases to change wrapper versions.
 - Only explicit user destinations receive environment-variable expansion. `run` encodes unsafe version characters in cache filenames while retaining the original version as its cache identity; command code deterministically closes fetched streams and removes failed temporary package artifacts.
 - System-package installs can carry extra metadata such as package type and macOS app bundle name so later lifecycle commands still work.

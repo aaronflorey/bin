@@ -33,13 +33,18 @@ func TestResolveReleaseCandidateTargetAndVariantSafety(t *testing.T) {
 		{ID: "musl", Product: "tool", Target: ReleaseTarget{OS: []string{"linux"}, Architecture: []string{"x64"}, ABI: []string{"musl"}}},
 		{ID: "avx2", Product: "tool", Target: ReleaseTarget{OS: []string{"linux"}, Architecture: []string{"amd64"}, ABI: []string{"gnu"}, CPUVariant: []string{"avx2"}}},
 	}
-	_, err := ResolveReleaseCandidate(candidates, request)
-	assertReleaseCandidateReason(t, err, ErrIncompatibleReleaseTarget, ReleaseCandidateIncompatible)
+	result, err := ResolveReleaseCandidate(candidates, request)
+	if err != nil || result.Candidate.ID != "musl" {
+		t.Fatalf("static musl fallback = %#v, %v", result, err)
+	}
 
-	result, err := ResolveReleaseCandidate(append(candidates, ReleaseCandidate{ID: "baseline", Product: "tool", Target: ReleaseTarget{OS: []string{"linux", "linux"}, Architecture: []string{"amd64", "x86_64"}, ABI: []string{"glibc", "gnu"}}}), request)
+	result, err = ResolveReleaseCandidate(append(candidates, ReleaseCandidate{ID: "baseline", Product: "tool", Target: ReleaseTarget{OS: []string{"linux", "linux"}, Architecture: []string{"amd64", "x86_64"}, ABI: []string{"glibc", "gnu"}}}), request)
 	if err != nil || result.Candidate.ID != "baseline" {
 		t.Fatalf("baseline resolution = %#v, %v", result, err)
 	}
+
+	_, err = ResolveReleaseCandidate([]ReleaseCandidate{{ID: "glibc", Product: "tool", Target: ReleaseTarget{OS: []string{"linux"}, Architecture: []string{"amd64"}, ABI: []string{"glibc"}}}}, ReleaseCandidateResolutionRequest{Product: "tool", Target: ReleaseTarget{OS: []string{"linux"}, Architecture: []string{"amd64"}, ABI: []string{"musl"}}})
+	assertReleaseCandidateReason(t, err, ErrIncompatibleReleaseTarget, ReleaseCandidateIncompatible)
 }
 
 func TestResolveReleaseCandidateVariantAmbiguityRequiresExplicitRule(t *testing.T) {

@@ -493,6 +493,8 @@ func (a args) String() string {
 }
 
 func TestFilterAssets(t *testing.T) {
+	originalResolver := resolver
+	t.Cleanup(func() { resolver = originalResolver })
 	cases := []struct {
 		in       args
 		out      string

@@ -77,17 +77,17 @@ func resolveArchiveMember(inventory *artifactInventory, request archiveMemberRes
 	if len(candidates) == 0 {
 		return nil, archiveMemberResolutionError(ArchiveMemberNoEligible, "")
 	}
-	if entry := resolveArchiveMemberIdentity(candidates, request.packagePath, false); entry != nil {
-		return entry, nil
+	if entry, err := resolveArchiveMemberIdentity(candidates, request.packagePath, false); entry != nil || err != nil {
+		return entry, err
 	}
-	if entry := resolveArchiveMemberIdentity(candidates, request.logicalName, false); entry != nil {
-		return entry, nil
+	if entry, err := resolveArchiveMemberIdentity(candidates, request.logicalName, false); entry != nil || err != nil {
+		return entry, err
 	}
-	if entry := resolveArchiveMemberIdentity(candidates, request.packagePath, true); entry != nil {
-		return entry, nil
+	if entry, err := resolveArchiveMemberIdentity(candidates, request.packagePath, true); entry != nil || err != nil {
+		return entry, err
 	}
-	if entry := resolveArchiveMemberIdentity(candidates, request.logicalName, true); entry != nil {
-		return entry, nil
+	if entry, err := resolveArchiveMemberIdentity(candidates, request.logicalName, true); entry != nil || err != nil {
+		return entry, err
 	}
 	// A release with one eligible member is safe to install even when its
 	// archive-derived name does not repeat the repository name. A stored member
@@ -137,13 +137,13 @@ func isEligibleArchiveMember(entry *artifactInventoryEntry) bool {
 	return entry.class == artifactEntryExecutable && entry.stagedPath != "" && entry.targetCompatible && entry.runnable
 }
 
-func resolveArchiveMemberIdentity(candidates []*artifactInventoryEntry, requested string, normalizeWrapper bool) *artifactInventoryEntry {
+func resolveArchiveMemberIdentity(candidates []*artifactInventoryEntry, requested string, normalizeWrapper bool) (*artifactInventoryEntry, error) {
 	if requested == "" {
-		return nil
+		return nil, nil
 	}
 	requestedIdentity, err := normalizeArtifactMemberIdentity(requested)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	if normalizeWrapper {
 		requestedIdentity = normalizeArchiveMemberVersionWrapper(requestedIdentity)
@@ -158,7 +158,14 @@ func resolveArchiveMemberIdentity(candidates []*artifactInventoryEntry, requeste
 			matches = append(matches, entry)
 		}
 	}
-	return shallowestArchiveMember(matches)
+	switch len(matches) {
+	case 0:
+		return nil, nil
+	case 1:
+		return matches[0], nil
+	default:
+		return nil, archiveMemberResolutionErrorWithCandidates(ArchiveMemberAmbiguous, requested, matches)
+	}
 }
 
 func resolveArchiveMemberBasename(candidates []*artifactInventoryEntry, requested string) (*artifactInventoryEntry, error) {
@@ -186,26 +193,19 @@ func resolveArchiveMemberBasename(candidates []*artifactInventoryEntry, requeste
 	}
 }
 
-func shallowestArchiveMember(matches []*artifactInventoryEntry) *artifactInventoryEntry {
-	if len(matches) == 0 {
-		return nil
-	}
-	selected := matches[0]
-	for _, entry := range matches[1:] {
-		if archiveEntryDepth(entry.identity) < archiveEntryDepth(selected.identity) ||
-			(archiveEntryDepth(entry.identity) == archiveEntryDepth(selected.identity) && entry.identity < selected.identity) {
-			selected = entry
-		}
-	}
-	return selected
-}
-
 func normalizeArchiveMemberVersionWrapper(identity string) string {
 	if scopeEnd := strings.LastIndex(identity, "!/"); scopeEnd >= 0 {
 		return identity[:scopeEnd+2] + normalizeArchiveMemberVersionWrapper(identity[scopeEnd+2:])
 	}
 	parts := strings.Split(identity, "/")
-	if len(parts) < 2 || !isVersionArchiveWrapper(parts[0], parts[len(parts)-1]) {
+	if len(parts) < 2 {
+		return identity
+	}
+	leaf := parts[len(parts)-1]
+	if len(parts) >= 3 && parts[0] == leaf && isVersionToken(parts[1]) {
+		return strings.Join(parts[2:], "/")
+	}
+	if !isVersionArchiveWrapper(parts[0], leaf) {
 		return identity
 	}
 	return strings.Join(parts[1:], "/")
@@ -214,8 +214,7 @@ func normalizeArchiveMemberVersionWrapper(identity string) string {
 // isVersionArchiveWrapper reports whether component is a versioned top-level
 // wrapper for leaf, such as "tool-v1", "gum_2.0.1_Darwin_arm64", or
 // "mago-1.49.0-aarch64-apple-darwin". The wrapper must start with the leaf
-// followed by a separator and an immediately-versioned token; any OS, ABI, or
-// architecture suffix after the version is packaging, not portable identity.
+// followed by a separator, a version token, and only recognized target tokens.
 func isVersionArchiveWrapper(component, leaf string) bool {
 	if leaf == "" || len(component) <= len(leaf) || component[:len(leaf)] != leaf {
 		return false
@@ -225,10 +224,38 @@ func isVersionArchiveWrapper(component, leaf string) bool {
 		return false
 	}
 	remainder = remainder[1:]
-	if cut := strings.IndexAny(remainder, "-_"); cut >= 0 {
-		remainder = remainder[:cut]
+	separator := strings.IndexAny(remainder, "-_")
+	if separator < 0 {
+		return isVersionToken(remainder)
 	}
-	return isVersionToken(remainder)
+	if !isVersionToken(remainder[:separator]) {
+		return false
+	}
+	return isReleaseTargetSuffix(remainder[separator:])
+}
+
+func isReleaseTargetSuffix(suffix string) bool {
+	for suffix != "" {
+		if suffix[0] != '-' && suffix[0] != '_' {
+			return false
+		}
+		suffix = suffix[1:]
+		matched := 0
+		for end := len(suffix); end > 0; end-- {
+			if end < len(suffix) && suffix[end] != '-' && suffix[end] != '_' {
+				continue
+			}
+			if isReleaseTargetToken(strings.ToLower(suffix[:end])) {
+				matched = end
+				break
+			}
+		}
+		if matched == 0 {
+			return false
+		}
+		suffix = suffix[matched:]
+	}
+	return true
 }
 
 func isVersionToken(token string) bool {

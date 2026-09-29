@@ -109,13 +109,7 @@ var lifecycleRegistry = map[string]lifecycleStrategy{
 // conservatively parsed; otherwise their legacy package-name/path behavior is
 // retained.
 func storedSelectionIntent(binary *config.Binary) *config.SelectionDescriptor {
-	if binary == nil {
-		return nil
-	}
-	if binary.SelectionIntent != nil {
-		return config.CloneSelectionDescriptor(binary.SelectionIntent)
-	}
-	return assets.DeriveSelectionDescriptor(binary)
+	return assets.StoredSelectionDescriptor(binary)
 }
 
 func validateStoredBinaryForReuse(b *config.Binary) error {
