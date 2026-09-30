@@ -96,13 +96,13 @@ func newRootCmd(version string, exit func(int)) *rootCmd {
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			allowInsecureHTTP = root.allowInsecureHTTP
 
-			// inspect is read-only: it must not create, load, or mutate
-			// configuration, default paths, caches, log files, or install state.
-			// Handle it before configureLogger so --log-file cannot create a
-			// durable log file.
-			if cmd.Name() == "inspect" {
+			// inspect, search, and browse are read-only: they must not create, load, or
+			// mutate configuration, default paths, caches, log files, or install
+			// state. Handle them before configureLogger so --log-file cannot
+			// create a durable log file.
+			if cmd.Name() == "inspect" || cmd.Name() == "search" || cmd.Name() == "browse" {
 				if strings.TrimSpace(root.logFile) != "" {
-					return fmt.Errorf("inspect is read-only and cannot write --log-file")
+					return fmt.Errorf("%s is read-only and cannot write --log-file", cmd.Name())
 				}
 				if root.verbose {
 					log.SetLevel(log.DebugLevel)
@@ -167,6 +167,8 @@ func newRootCmd(version string, exit func(int)) *rootCmd {
 		newCompletionsCmd().cmd,
 		newVersionCmd(version).cmd,
 		newInspectCmd().cmd,
+		newSearchCmd().cmd,
+		newBrowseCmd().cmd,
 	)
 
 	root.cmd = cmd

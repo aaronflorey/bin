@@ -133,6 +133,8 @@ jobs:
 | Command                     | Description                                | Example                          |
 | --------------------------- | ------------------------------------------ | -------------------------------- |
 | `bin install <repo> [path]` or `bin install <repo>...` | Install one or many binaries                | `bin install github.com/cli/cli github.com/sharkdp/fd` |
+| `bin search <query>...` | Search GitHub repositories | `bin search ripgrep` |
+| `bin browse <source>` | Browse recent releases without installing | `bin browse github.com/sharkdp/hyperfine` |
 | `bin list`                  | List installed binaries and versions       | `bin list`                       |
 | `bin export [file]`         | Export installed binaries as JSON          | `bin export bins.json`           |
 | `bin import [file]`         | Import binaries from JSON and ensure them  | `bin import bins.json`           |
@@ -144,6 +146,10 @@ jobs:
 | `bin unpin <binary...>`     | Unpin binaries (allow updates)             | `bin unpin terraform`            |
 | `bin prune`                 | Remove missing binaries from database      | `bin prune`                      |
 | `bin help`                  | Show help for any command                  | `bin help install`               |
+
+`bin search` shows up to 20 GitHub repositories with their names, stars, descriptions, and a `bin browse` hint. GitHub search qualifiers work in a quoted query, for example `bin search 'ripgrep language:rust stars:>100'`. Search results describe repositories; they do not guarantee an installable binary.
+
+`bin browse` shows or selects from a provider's recent releases using asset metadata only; it does not download or validate release payloads. See the [CLI reference](docs/cli.md#search-and-browse) for exact-tag selection, non-interactive listing, and provider details.
 
 **Tips**: if `bin` cannot determine the intended product, try `bin install -a` to show all compatible options for the current platform without product scoring.
 For commands that target managed binaries (for example `update`/`outdated`/`ensure`), you can use a unique prefix (like `uni`) and `bin` will suggest a matching managed name.

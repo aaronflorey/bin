@@ -75,8 +75,16 @@ func discoverInstallableReleasePrefixes(newProvider providerFactory, url, forced
 }
 
 func compatibleReleaseAsset(release *providers.ReleaseInfo, fetchOpts providers.FetchOpts) (string, bool) {
-	if release == nil || len(release.Assets) == 0 {
+	compatible := compatibleReleaseAssets(release, fetchOpts)
+	if len(compatible) == 0 {
 		return "", false
+	}
+	return compatible[0], true
+}
+
+func compatibleReleaseAssets(release *providers.ReleaseInfo, fetchOpts providers.FetchOpts) []string {
+	if release == nil || len(release.Assets) == 0 {
+		return nil
 	}
 	candidates := make([]*assets.Asset, 0, len(release.Assets))
 	for _, name := range release.Assets {
@@ -86,7 +94,7 @@ func compatibleReleaseAsset(release *providers.ReleaseInfo, fetchOpts providers.
 		candidates = append(candidates, &assets.Asset{Name: name, URL: "https://example.invalid/" + name})
 	}
 	if len(candidates) == 0 {
-		return "", false
+		return nil
 	}
 
 	f := assets.NewFilter(&assets.FilterOpts{
@@ -100,9 +108,13 @@ func compatibleReleaseAsset(release *providers.ReleaseInfo, fetchOpts providers.
 	autoSelect := f.ParseAutoSelection(fetchOpts.AutoSelect)
 	compatible := f.CompatibleAssets(candidates, autoSelect)
 	if len(compatible) == 0 {
-		return "", false
+		return nil
 	}
-	return compatible[0].Name, true
+	names := make([]string, 0, len(compatible))
+	for _, asset := range compatible {
+		names = append(names, asset.Name)
+	}
+	return names
 }
 
 func selectReleaseTagPrefixesInteractively(releaseOptions []releasePrefixOption, nonInteractive bool) ([]string, error) {

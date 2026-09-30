@@ -419,14 +419,7 @@ func cachedGitHubRelease(key githubReleaseCacheKey) (*github.RepositoryRelease, 
 	return entry.releases[0], true
 }
 
-func newGitHub(u *url.URL) (Provider, error) {
-	segments := providerPathSegments(u)
-	if len(segments) < 2 {
-		return nil, fmt.Errorf("error parsing Github URL %s, can't find owner and repo", u.String())
-	}
-
-	tag := releaseTagFromSegments(segments)
-
+func newGitHubClient() (*github.Client, string, [sha256.Size]byte, error) {
 	token := os.Getenv("GITHUB_AUTH_TOKEN")
 	tokenSource := ""
 	if len(token) == 0 {
@@ -482,7 +475,7 @@ func newGitHub(u *url.URL) (Provider, error) {
 
 	if ghesConfigured {
 		if client, err = github.NewClient(tc).WithEnterpriseURLs(gbu, guu); err != nil {
-			return nil, fmt.Errorf("error initializing GHES client %v", err)
+			return nil, "", [sha256.Size]byte{}, fmt.Errorf("error initializing GHES client %v", err)
 		}
 	} else {
 		client = github.NewClient(tc)
@@ -493,6 +486,21 @@ func newGitHub(u *url.URL) (Provider, error) {
 		effectiveToken = gau
 	}
 
+	return client, token, sha256.Sum256([]byte(effectiveToken)), nil
+}
+
+func newGitHub(u *url.URL) (Provider, error) {
+	segments := providerPathSegments(u)
+	if len(segments) < 2 {
+		return nil, fmt.Errorf("error parsing Github URL %s, can't find owner and repo", u.String())
+	}
+
+	tag := releaseTagFromSegments(segments)
+	client, token, authFingerprint, err := newGitHubClient()
+	if err != nil {
+		return nil, err
+	}
+
 	return &gitHub{
 		url:             u,
 		client:          client,
@@ -500,7 +508,7 @@ func newGitHub(u *url.URL) (Provider, error) {
 		repo:            segments[1],
 		tag:             tag,
 		token:           token,
-		authFingerprint: sha256.Sum256([]byte(effectiveToken)),
+		authFingerprint: authFingerprint,
 	}, nil
 }
 

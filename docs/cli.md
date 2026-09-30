@@ -28,6 +28,8 @@
 | `completions sync <binary> <shell> [-- <generator-args...>]` | Install or refresh a completion for an existing managed direct binary | `<shell>` is exactly `bash`, `zsh`, or `fish`. |
 | `completion <shell>` | Generate a completion script for `bin` itself | This is Cobra's built-in singular command, not managed-tool completion sync. |
 | `inspect` | Resolve a supported release or generic-URL source read-only and report artifact decisions | Requires `--json`, which is the only supported output and writes the stable automation report to stdout. Never prompts, runs no hooks, package managers, or completion work, and rejects effectful Docker, Go-install, and forced non-release providers without creating config, cache, log, or install state. |
+| `search <query>...` | Search GitHub repository metadata | Prints up to the first 20 results with name, stars, description, and a `browse` hint. |
+| `browse <source>` | Browse recent releases without installing | Supports GitHub, GitLab, and Codeberg release-history providers; compatible assets are determined from metadata only. |
 | `version` | Print the `bin` version | Useful for installation checks. |
 
 ## Notes
@@ -42,6 +44,47 @@
 - `update` pre/post hooks are global blockers: if either hook fails, the command stops instead of continuing per binary (`cmd/update.go`).
 - `remove` without arguments requires an interactive terminal (`cmd/remove.go`).
 - `--package-type flatpack` is normalized to `flatpak` (`pkg/systempackage/systempackage.go`).
+
+## Search and browse
+
+`search` accepts a GitHub repository search query. Quote the query when it
+contains spaces or shell-sensitive qualifiers:
+
+```bash
+bin search ripgrep
+bin search 'ripgrep language:rust stars:>100'
+```
+
+Each result includes the repository name, star count, description, and a
+`bin browse` command. Search ranks repositories, not installable binaries; a
+result is not a guarantee that it publishes a compatible release.
+
+`browse` reads release history from GitHub, GitLab, or Codeberg (including a
+forced provider for custom hosts):
+
+```bash
+bin browse github.com/sharkdp/hyperfine
+bin browse --version 'v1.19.0' github.com/sharkdp/hyperfine
+bin browse --non-interactive github.com/sharkdp/hyperfine
+bin browse github.com/sharkdp/hyperfine > hyperfine-releases.txt
+bin browse --provider gitlab gitlab.com/group/project
+```
+
+Without `--version`, an interactive terminal prompts to choose one release;
+with `--non-interactive` or redirected output, `browse` lists releases instead.
+`--version` selects an exact tag only when it appears in the provider's 20 most
+recent releases. Compatible asset names are a metadata-only platform match;
+`browse` does not download assets or verify that their payloads contain an
+executable. For compatible assets it prints a POSIX-shell-quoted `bin install`
+command as guidance, but never runs that command. When `--provider` is given,
+the printed install command retains it so installation uses the same provider.
+
+Both commands are read-only: they do not load or mutate `bin` configuration or
+create install/cache state, and they reject `--log-file`. GitHub authentication
+uses the existing environment variables `GITHUB_AUTH_TOKEN` or `GITHUB_TOKEN`;
+GitHub Enterprise Server uses `GHES_BASE_URL`, `GHES_UPLOAD_URL`, and
+`GHES_AUTH_TOKEN`. These commands do not load the user's `bin` config for GitHub
+CLI token settings.
 
 ## Managed tool completions
 
