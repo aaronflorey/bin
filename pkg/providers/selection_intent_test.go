@@ -14,6 +14,11 @@ func TestGitHubFetchAppliesAndReturnsSelectionIntent(t *testing.T) {
 	resetGitHubReleaseCache(t)
 	firstAssetName := platformFixtureName("tool-v2.0.0-linux-amd64-musl", "tool-v2.0.0-windows-amd64-gnu"+genericScriptExtension())
 	secondAssetName := platformFixtureName("tool-v2.0.0-linux-amd64-glibc", "tool-v2.0.0-windows-amd64-msvc"+genericScriptExtension())
+	if runtime.GOOS == "darwin" {
+		// Darwin has no libc preference with which to distinguish the two Linux-style fixtures.
+		// Keep a second product so this still proves the persisted logical product is applied.
+		secondAssetName = "other-v2.0.0-darwin-" + runtime.GOARCH
+	}
 	payload := genericRunnablePayload(t)
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

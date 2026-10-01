@@ -153,7 +153,11 @@ func TestResolveDMGAppBundlePreservesCallerRootPath(t *testing.T) {
 		t.Skip("symlink path spelling regression is Unix-specific")
 	}
 	canonicalRoot := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(canonicalRoot, "Fastpotify.app"), 0o755); err != nil {
+	executableDir := filepath.Join(canonicalRoot, "Fastpotify.app", "Contents", "MacOS")
+	if err := os.MkdirAll(executableDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(executableDir, "Fastpotify"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	aliasRoot := filepath.Join(t.TempDir(), "mount-alias")
@@ -167,6 +171,13 @@ func TestResolveDMGAppBundlePreservesCallerRootPath(t *testing.T) {
 	}
 	if want := filepath.Join(aliasRoot, "Fastpotify.app"); got != want {
 		t.Fatalf("resolveDMGAppBundle() = %q, want caller-rooted path %q", got, want)
+	}
+	executable, err := resolveDMGSourceExecutable(aliasRoot, got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(aliasRoot, "Fastpotify.app", "Contents", "MacOS", "Fastpotify"); executable != want {
+		t.Fatalf("resolveDMGSourceExecutable() = %q, want caller-rooted path %q", executable, want)
 	}
 }
 

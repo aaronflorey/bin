@@ -280,10 +280,14 @@ func resolveDMGSourceExecutable(mountPoint, bundlePath string) (string, error) {
 	if !pathWithin(canonicalBundle, canonicalExecutable) {
 		return "", fmt.Errorf("app bundle %q executable escapes bundle", filepath.Base(bundlePath))
 	}
-	if err := assets.ValidateRunnablePayload(executable, filepath.Base(executable)); err != nil {
+	if err := assets.ValidateRunnablePayload(canonicalExecutable, filepath.Base(canonicalExecutable)); err != nil {
 		return "", fmt.Errorf("app bundle %q contains an invalid executable: %w", filepath.Base(bundlePath), err)
 	}
-	return executable, nil
+	relativeExecutable, err := filepath.Rel(canonicalBundle, canonicalExecutable)
+	if err != nil {
+		return "", fmt.Errorf("resolve app executable path: %w", err)
+	}
+	return filepath.Join(bundlePath, relativeExecutable), nil
 }
 
 func offerToSignUnsignedApp(appPath string, nonInteractive bool) error {
