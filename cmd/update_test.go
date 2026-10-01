@@ -550,7 +550,7 @@ func TestUpdateYesFlagNoArgsSkipsInteractiveSelector(t *testing.T) {
 func TestUpdateAppliesPersistedSelectionIntent(t *testing.T) {
 	installDir := setupTestConfig(t)
 	path := filepath.Join(installDir, "tool")
-	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+	if err := os.WriteFile(path, testRunnablePayload(t), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	intent := &config.SelectionDescriptor{LogicalProduct: "tool-cli", Target: &config.SelectionTarget{OS: "linux", Architecture: "amd64", ABI: "musl"}, ArchiveMember: "bin/tool"}
@@ -573,7 +573,7 @@ func TestUpdateAppliesPersistedSelectionIntent(t *testing.T) {
 				t.Fatalf("update bundled completion request = (%q, %q)", opts.BundledCompletionShell, opts.BundledCompletionCommand)
 			}
 			return &providers.File{
-				Data:              strings.NewReader("#!/bin/sh\nexit 0\n"),
+				Data:              strings.NewReader(testRunnablePayloadString(t)),
 				Name:              "tool",
 				Version:           "v2.0.0",
 				BundledCompletion: []byte("bundled completion"),

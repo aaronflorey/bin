@@ -927,7 +927,7 @@ func TestProcessReleaseArtifactPersistsOnlyRealArchiveMembers(t *testing.T) {
 	originalResolver := resolver
 	resolver = testLinuxAMDResolver
 	t.Cleanup(func() { resolver = originalResolver })
-	fixture := testRunnableFixture("tool")
+	fixture := runnableTestFixture{name: "tool", contents: "#!/bin/sh\nexit 0\n"}
 
 	process := func(t *testing.T, name string, payload []byte, intent *config.SelectionDescriptor) (*Filter, *artifactProcessingResult, error) {
 		t.Helper()

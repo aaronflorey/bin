@@ -1,5 +1,52 @@
 # Changelog
 
+## [2.7.0](https://github.com/aaronflorey/bin/compare/v2.6.0...v2.7.0) (2026-09-30)
+
+
+### Features
+
+* add macos app signing ([cfd883f](https://github.com/aaronflorey/bin/commit/cfd883f59922946429c0c469f4f5c565b463e071))
+* add read-only artifact inspection ([3240497](https://github.com/aaronflorey/bin/commit/3240497609397b4fe17562d888cad7c13df91214))
+* add repository search and release browsing ([8ee779d](https://github.com/aaronflorey/bin/commit/8ee779d96dcff0ce1a419f35b9138b20708814a7))
+* **assets:** expose platform-compatible installable assets ([1471130](https://github.com/aaronflorey/bin/commit/147113080a1b0b66dcfa0aba98ba2b71e8d7ec9c))
+* cache github responses ([1c0a3cd](https://github.com/aaronflorey/bin/commit/1c0a3cd47112b76747fa2882cc9b3965506972b6))
+* carry bundled completion artifacts ([501e28a](https://github.com/aaronflorey/bin/commit/501e28a02b97a942b5945a9735c5f66fb3775420))
+* carry bundled completion artifacts ([4248d9b](https://github.com/aaronflorey/bin/commit/4248d9b2fd045da94e924fe35134db94c8fdbebc))
+* **config:** default use_gh_for_github_token to true ([5da1914](https://github.com/aaronflorey/bin/commit/5da1914ab21c9ee3ad36c5b1c0929b89e2515216))
+* harden binary payload validation and selection ([4499d08](https://github.com/aaronflorey/bin/commit/4499d087a579b86923afeb08ccadc3a8d59bc845))
+* **install:** select compatible products and release lanes ([8322028](https://github.com/aaronflorey/bin/commit/8322028815fc2baa27a5dd462167dd2bada46ac6))
+* integrate managed completion lifecycle ([6e12db6](https://github.com/aaronflorey/bin/commit/6e12db615ad2e52f91eb51c12ce531ec2082b84e))
+* **logging:** expose GitHub auth/rate-limit state and archive contents in errors ([1a513e1](https://github.com/aaronflorey/bin/commit/1a513e19d4044907ca3aad77ac33089342d94101))
+* persist stable selection intent ([3e5145e](https://github.com/aaronflorey/bin/commit/3e5145e856305068bd8b3bfadba20f2e28fd470d))
+* prefer bundled managed completions ([2ea9ebb](https://github.com/aaronflorey/bin/commit/2ea9ebbf3e43ae7ae1746465d5abb83022fe31d3))
+* prefer bundled managed completions ([d1e0ccc](https://github.com/aaronflorey/bin/commit/d1e0ccc5167b4451d1d927a39970929f4209f01a))
+* sync managed binary completions ([2d898a1](https://github.com/aaronflorey/bin/commit/2d898a1930843d5f0c750ce60fd5aa9934940cf9))
+
+
+### Bug Fixes
+
+* address release binary compatibility audit findings ([e9e7725](https://github.com/aaronflorey/bin/commit/e9e77252b0b5f0f6bfa5e963e5f7d27400405a1e))
+* **assets:** log gzip inner name during decompression ([4c78b14](https://github.com/aaronflorey/bin/commit/4c78b14f4b854c8f177f176ea83c9ecf424f5d36))
+* **assets:** preserve archive install selection ([1173539](https://github.com/aaronflorey/bin/commit/1173539109cb9371383dc98a276e53b6a148119a))
+* bind checksums to exact artifacts ([1d7ef29](https://github.com/aaronflorey/bin/commit/1d7ef2931c50e2b937b15d5f2fae904525ff948e))
+* bound artifact processing inventory ([41d8419](https://github.com/aaronflorey/bin/commit/41d84191375653ee48ab6d8649befc941d794089))
+* commit binary installs recoverably ([ad8d74b](https://github.com/aaronflorey/bin/commit/ad8d74b6dba21949fb57482c4db8bebed7388473))
+* **config:** recreate cached default path if missing ([16a0c67](https://github.com/aaronflorey/bin/commit/16a0c67d3a6574de4001ad14e04eaddee47619fd))
+* contain remote artifact names ([11327d2](https://github.com/aaronflorey/bin/commit/11327d26162ce05d249da83c33c90cf66f5429f7))
+* improve archive member resolution ([1ae6e0d](https://github.com/aaronflorey/bin/commit/1ae6e0d31f24bb678d0a730e5dc6fed4718e7b40))
+* **install:** preserve requested release lane for existing binaries ([2ecd586](https://github.com/aaronflorey/bin/commit/2ecd5862b52e95ced5be2fb069c26b98f5838e2c))
+* preserve Go import path separators ([c3750de](https://github.com/aaronflorey/bin/commit/c3750dea9bf2809b82bcfa52e3933ac662b8e1b3))
+* process generic URLs through artifact resolver ([a8d392b](https://github.com/aaronflorey/bin/commit/a8d392b0e9260a85b042c9a1d7db05712a5cd0b0))
+* replace binaries atomically ([2ab8115](https://github.com/aaronflorey/bin/commit/2ab8115e385930c9a69cd77c8814309016dd69da))
+* resolve archive members by identity ([91a8629](https://github.com/aaronflorey/bin/commit/91a8629745cff221ad8ea8d40d38760cfdae38d0))
+* resolve managed Windows targets ([e4cb2c5](https://github.com/aaronflorey/bin/commit/e4cb2c556c267b51a31c1161fcfb8fa16e1d2745))
+* resolve release products before packaging ([1fbd6e6](https://github.com/aaronflorey/bin/commit/1fbd6e67f059534950fa3686e618f7cd77c1db2d))
+* select dmg bundles by managed identity ([5eb2fef](https://github.com/aaronflorey/bin/commit/5eb2fef4cfa04b020a6be00b5a7b85d7a35042e1))
+* smoketests failing ([5341066](https://github.com/aaronflorey/bin/commit/534106675b7860a0b6bf8bbc770840a8ade39a88))
+* verify artifact integrity across installs ([c0b307a](https://github.com/aaronflorey/bin/commit/c0b307a10a3bf5b71d542aeeb7ed490396160309))
+* warn when bundled completions are skipped ([770f256](https://github.com/aaronflorey/bin/commit/770f2567764cb225b481f7998832d7a138caf5da))
+* warn when bundled completions are skipped ([1954251](https://github.com/aaronflorey/bin/commit/1954251fa1470789bdd6a231641160badd963303))
+
 ## [2.6.0](https://github.com/aaronflorey/bin/compare/v2.5.4...v2.6.0) (2026-07-09)
 
 

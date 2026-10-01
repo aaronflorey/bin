@@ -302,14 +302,15 @@ func TestCompletionSyncRejectsOwnershipConflictAndAllowsExplicitRenamedCommand(t
 	})
 
 	t.Run("renamed command requires explicit argv", func(t *testing.T) {
-		setupCompletionSyncBinary(t, "alias", "upstream", `printf '%s|%s' "$1" "$2"`, installModeBinary)
-		if _, err := runCompletionSync(t, "alias", "fish"); err == nil {
+		const command = "bin-test-renamed-command"
+		setupCompletionSyncBinary(t, command, "upstream", `printf '%s|%s' "$1" "$2"`, installModeBinary)
+		if _, err := runCompletionSync(t, command, "fish"); err == nil {
 			t.Fatal("sync generated a default completion for renamed command")
 		}
-		if _, err := runCompletionSync(t, "alias", "fish", "--", "custom", "fish"); err != nil {
+		if _, err := runCompletionSync(t, command, "fish", "--", "custom", "fish"); err != nil {
 			t.Fatalf("sync explicit argv for renamed command: %v", err)
 		}
-		assertCompletionContent(t, "fish", "alias", "custom|fish")
+		assertCompletionContent(t, "fish", command, "custom|fish")
 	})
 }
 
