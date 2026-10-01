@@ -79,7 +79,7 @@ func TestEnsureAppliesPersistedSelectionIntent(t *testing.T) {
 				t.Fatalf("ensure bundled completion request = (%q, %q)", opts.BundledCompletionShell, opts.BundledCompletionCommand)
 			}
 			return &providers.File{
-				Data:              strings.NewReader("#!/bin/sh\nexit 0\n"),
+				Data:              strings.NewReader(testRunnablePayloadString(t)),
 				Name:              "missing-tool",
 				Version:           "1.0.0",
 				BundledCompletion: []byte("bundled completion"),

@@ -477,7 +477,7 @@ func absExpandedPath(path string) (string, error) {
 // must remain literal.
 func expandTrackedBinaryPath(path string) string {
 	dir, name := filepath.Split(path)
-	return os.ExpandEnv(dir) + name
+	return filepath.Join(os.ExpandEnv(dir), name)
 }
 
 func ensureReleaseAge(providerID, version string, publishedAt *time.Time, minAgeDays int) error {
