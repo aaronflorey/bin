@@ -139,6 +139,10 @@ func TestGitHubFetchArchiveDoesNotInheritDownloadIntegrity(t *testing.T) {
 func TestGitHubFetchExplicitSelectionValidatesFinalPayload(t *testing.T) {
 	resetGitHubReleaseCache(t)
 	filename := platformFixtureName("tool-linux-amd64", "tool-windows-amd64"+genericScriptExtension())
+	invalidPayload := "not executable"
+	if genericScriptExtension() != "" {
+		invalidPayload = "#!/bin/sh\nexit 0\n"
+	}
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -147,7 +151,7 @@ func TestGitHubFetchExplicitSelectionValidatesFinalPayload(t *testing.T) {
 				{"name": filename, "url": server.URL + "/asset"},
 			}})
 		case "/asset":
-			_, _ = fmt.Fprint(w, "not executable")
+			_, _ = fmt.Fprint(w, invalidPayload)
 		default:
 			http.NotFound(w, r)
 		}
