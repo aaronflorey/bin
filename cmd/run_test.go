@@ -26,7 +26,7 @@ type runTestProvider struct {
 	err        error
 }
 
-const runnableRunScript = "#!/bin/sh\nexit 0\n"
+var runnableRunScript = string(sharedRunnableTestPayload)
 
 func (p *runTestProvider) Fetch(opts *providers.FetchOpts) (*providers.File, error) {
 	p.fetchCount++

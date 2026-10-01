@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -243,7 +244,11 @@ func TestRemoveWarnsForUnmanagedBinary(t *testing.T) {
 	setupTestConfig(t)
 
 	toolDir := t.TempDir()
-	toolPath := filepath.Join(toolDir, "external-tool")
+	toolName := "external-tool"
+	if runtime.GOOS == "windows" {
+		toolName += ".exe"
+	}
+	toolPath := filepath.Join(toolDir, toolName)
 	if err := os.WriteFile(toolPath, []byte("binary"), 0o755); err != nil {
 		t.Fatalf("failed creating executable: %v", err)
 	}
@@ -467,10 +472,15 @@ func TestRemoveMissingExplicitPathCleansConfig(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				argument, err = filepath.Rel(cwd, path)
-				if err != nil {
+				if err := os.Chdir(directory); err != nil {
 					t.Fatal(err)
 				}
+				t.Cleanup(func() {
+					if err := os.Chdir(cwd); err != nil {
+						t.Errorf("restore cwd: %v", err)
+					}
+				})
+				argument = filepath.Base(path)
 			}
 			root := newRemoveCmd()
 			root.newProvider = func(string, string) (providers.Provider, error) { return removeTestProvider{}, nil }

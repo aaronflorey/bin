@@ -280,10 +280,14 @@ func resolveDMGSourceExecutable(mountPoint, bundlePath string) (string, error) {
 	if !pathWithin(canonicalBundle, canonicalExecutable) {
 		return "", fmt.Errorf("app bundle %q executable escapes bundle", filepath.Base(bundlePath))
 	}
-	if err := assets.ValidateRunnablePayload(executable, filepath.Base(executable)); err != nil {
+	if err := assets.ValidateRunnablePayload(canonicalExecutable, filepath.Base(canonicalExecutable)); err != nil {
 		return "", fmt.Errorf("app bundle %q contains an invalid executable: %w", filepath.Base(bundlePath), err)
 	}
-	return executable, nil
+	relativeExecutable, err := filepath.Rel(canonicalBundle, canonicalExecutable)
+	if err != nil {
+		return "", fmt.Errorf("resolve app executable path: %w", err)
+	}
+	return filepath.Join(bundlePath, relativeExecutable), nil
 }
 
 func offerToSignUnsignedApp(appPath string, nonInteractive bool) error {
@@ -364,12 +368,13 @@ func eligibleDMGAppBundles(root string) ([]dmgAppBundleCandidate, error) {
 		return nil, fmt.Errorf("read dmg mount root: %w", err)
 	}
 
-	byIdentity := make(map[string]dmgAppBundleCandidate)
+	candidates := make([]dmgAppBundleCandidate, 0, len(entries))
 	for _, entry := range entries {
 		if entry.Type()&os.ModeSymlink != 0 || !entry.IsDir() || !strings.HasSuffix(strings.ToLower(entry.Name()), ".app") {
 			continue
 		}
-		candidatePath, err := filepath.EvalSymlinks(filepath.Join(canonicalRoot, entry.Name()))
+		sourcePath := filepath.Join(root, entry.Name())
+		candidatePath, err := filepath.EvalSymlinks(sourcePath)
 		if err != nil {
 			return nil, fmt.Errorf("resolve dmg app bundle %q: %w", entry.Name(), err)
 		}
@@ -380,21 +385,27 @@ func eligibleDMGAppBundles(root string) ([]dmgAppBundleCandidate, error) {
 		if err != nil {
 			return nil, err
 		}
-		candidate := dmgAppBundleCandidate{path: candidatePath, name: entry.Name(), identity: identity}
-		if existing, ok := byIdentity[identity]; ok {
-			names := []string{existing.name, candidate.name}
-			sort.Strings(names)
-			return nil, fmt.Errorf("dmg contained colliding app bundle identities (%s)", strings.Join(names, ", "))
-		}
-		byIdentity[identity] = candidate
+		candidates = append(candidates, dmgAppBundleCandidate{path: sourcePath, name: entry.Name(), identity: identity})
 	}
 
-	candidates := make([]dmgAppBundleCandidate, 0, len(byIdentity))
-	for _, candidate := range byIdentity {
-		candidates = append(candidates, candidate)
+	if err := validateUniqueDMGAppBundleIdentities(candidates); err != nil {
+		return nil, err
 	}
 	sort.Slice(candidates, func(i, j int) bool { return candidates[i].name < candidates[j].name })
 	return candidates, nil
+}
+
+func validateUniqueDMGAppBundleIdentities(candidates []dmgAppBundleCandidate) error {
+	byIdentity := make(map[string]string, len(candidates))
+	for _, candidate := range candidates {
+		if existing, ok := byIdentity[candidate.identity]; ok {
+			names := []string{existing, candidate.name}
+			sort.Strings(names)
+			return fmt.Errorf("dmg contained colliding app bundle identities (%s)", strings.Join(names, ", "))
+		}
+		byIdentity[candidate.identity] = candidate.name
+	}
+	return nil
 }
 
 func firstDMGAppIdentity(requestedIdentity, storedIdentity, legacyName string) (string, string, error) {

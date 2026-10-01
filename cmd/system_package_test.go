@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -31,6 +32,7 @@ func TestSystemPackagePathLooksExplicitForEitherSeparator(t *testing.T) {
 }
 
 func TestResolveAppBundleExecutablePrefersBundleName(t *testing.T) {
+	requireDMGFixturePlatform(t)
 	appPath := filepath.Join(t.TempDir(), "Paseo.app")
 	execDir := filepath.Join(appPath, "Contents", "MacOS")
 	if err := os.MkdirAll(execDir, 0o755); err != nil {
@@ -50,6 +52,13 @@ func TestResolveAppBundleExecutablePrefersBundleName(t *testing.T) {
 	}
 	if resolved != mainExec {
 		t.Fatalf("unexpected executable path: got %s want %s", resolved, mainExec)
+	}
+}
+
+func requireDMGFixturePlatform(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("DMG app bundle fixtures require Unix executable semantics")
 	}
 }
 
@@ -94,11 +103,6 @@ func TestResolveDMGAppBundle(t *testing.T) {
 			bundles:           []string{"Fastpotify.APP"},
 			requestedIdentity: "  fAsTpOtIfY.aPp ",
 			wantBundle:        "Fastpotify.APP",
-		},
-		{
-			name:      "case collisions are rejected",
-			bundles:   []string{"Fastpotify.app", "fastpotify.APP"},
-			wantError: "colliding app bundle identities",
 		},
 		{
 			name:              "missing named identity does not fall back",
@@ -149,6 +153,49 @@ func TestResolveDMGAppBundle(t *testing.T) {
 				t.Fatalf("resolveDMGAppBundle() = %q, want %q", got, want)
 			}
 		})
+	}
+}
+
+func TestResolveDMGAppBundlePreservesCallerRootPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink path spelling regression is Unix-specific")
+	}
+	canonicalRoot := t.TempDir()
+	executableDir := filepath.Join(canonicalRoot, "Fastpotify.app", "Contents", "MacOS")
+	if err := os.MkdirAll(executableDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(executableDir, "Fastpotify"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	aliasRoot := filepath.Join(t.TempDir(), "mount-alias")
+	if err := os.Symlink(canonicalRoot, aliasRoot); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := resolveDMGAppBundle(aliasRoot, "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(aliasRoot, "Fastpotify.app"); got != want {
+		t.Fatalf("resolveDMGAppBundle() = %q, want caller-rooted path %q", got, want)
+	}
+	executable, err := resolveDMGSourceExecutable(aliasRoot, got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(aliasRoot, "Fastpotify.app", "Contents", "MacOS", "Fastpotify"); executable != want {
+		t.Fatalf("resolveDMGSourceExecutable() = %q, want caller-rooted path %q", executable, want)
+	}
+}
+
+func TestValidateUniqueDMGAppBundleIdentitiesRejectsCaseCollisions(t *testing.T) {
+	candidates := []dmgAppBundleCandidate{
+		{name: "Fastpotify.app", identity: "fastpotify"},
+		{name: "fastpotify.APP", identity: "fastpotify"},
+	}
+	if err := validateUniqueDMGAppBundleIdentities(candidates); err == nil || !strings.Contains(err.Error(), "colliding app bundle identities") {
+		t.Fatalf("validateUniqueDMGAppBundleIdentities() error = %v, want collision", err)
 	}
 }
 
@@ -319,6 +366,7 @@ func TestFindManagedBinByAliasMatchesAppBundleName(t *testing.T) {
 }
 
 func TestInstallSystemPackageDMGTracksInstalledAppBundle(t *testing.T) {
+	requireDMGFixturePlatform(t)
 	setupTestConfig(t)
 
 	originalApplicationsDir := applicationsDir
@@ -429,6 +477,7 @@ func TestInstallSystemPackageDMGTracksInstalledAppBundle(t *testing.T) {
 }
 
 func TestInstallSystemPackageDMGReinstallUsesStoredBundleOverSibling(t *testing.T) {
+	requireDMGFixturePlatform(t)
 	setupTestConfig(t)
 	originalApplicationsDir := applicationsDir
 	originalExec := execCommand
@@ -508,6 +557,7 @@ func TestInstallSystemPackageDMGReinstallUsesStoredBundleOverSibling(t *testing.
 }
 
 func TestInstallDMGAppRejectsInvalidSourceBeforeCopyOrSigning(t *testing.T) {
+	requireDMGFixturePlatform(t)
 	originalApplicationsDir := applicationsDir
 	originalExec := execCommand
 	applicationsDir = t.TempDir()
