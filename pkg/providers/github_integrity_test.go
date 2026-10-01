@@ -138,12 +138,13 @@ func TestGitHubFetchArchiveDoesNotInheritDownloadIntegrity(t *testing.T) {
 
 func TestGitHubFetchExplicitSelectionValidatesFinalPayload(t *testing.T) {
 	resetGitHubReleaseCache(t)
+	filename := platformFixtureName("tool-linux-amd64", "tool-windows-amd64"+genericScriptExtension())
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/repos/acme/tool/releases/latest":
 			_ = json.NewEncoder(w).Encode(map[string]any{"tag_name": "v1.2.3", "assets": []map[string]string{
-				{"name": "tool-linux-amd64", "url": server.URL + "/asset"},
+				{"name": filename, "url": server.URL + "/asset"},
 			}})
 		case "/asset":
 			_, _ = fmt.Fprint(w, "not executable")
@@ -153,7 +154,7 @@ func TestGitHubFetchExplicitSelectionValidatesFinalPayload(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := newTestGitHubProvider(t, server.URL, "acme", "tool", "").Fetch(&FetchOpts{AutoSelect: "tool-linux-amd64"})
+	_, err := newTestGitHubProvider(t, server.URL, "acme", "tool", "").Fetch(&FetchOpts{AutoSelect: filename})
 	if !errors.Is(err, assets.ErrNoCompatibleFiles) {
 		t.Fatalf("Fetch() error = %v, want final runnable-payload validation failure", err)
 	}

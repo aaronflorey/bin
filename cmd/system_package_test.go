@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -96,11 +97,6 @@ func TestResolveDMGAppBundle(t *testing.T) {
 			wantBundle:        "Fastpotify.APP",
 		},
 		{
-			name:      "case collisions are rejected",
-			bundles:   []string{"Fastpotify.app", "fastpotify.APP"},
-			wantError: "colliding app bundle identities",
-		},
-		{
 			name:              "missing named identity does not fall back",
 			bundles:           []string{"Fastpotify.app"},
 			requestedIdentity: "Spotify.app",
@@ -149,6 +145,38 @@ func TestResolveDMGAppBundle(t *testing.T) {
 				t.Fatalf("resolveDMGAppBundle() = %q, want %q", got, want)
 			}
 		})
+	}
+}
+
+func TestResolveDMGAppBundlePreservesCallerRootPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink path spelling regression is Unix-specific")
+	}
+	canonicalRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(canonicalRoot, "Fastpotify.app"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	aliasRoot := filepath.Join(t.TempDir(), "mount-alias")
+	if err := os.Symlink(canonicalRoot, aliasRoot); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := resolveDMGAppBundle(aliasRoot, "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(aliasRoot, "Fastpotify.app"); got != want {
+		t.Fatalf("resolveDMGAppBundle() = %q, want caller-rooted path %q", got, want)
+	}
+}
+
+func TestValidateUniqueDMGAppBundleIdentitiesRejectsCaseCollisions(t *testing.T) {
+	candidates := []dmgAppBundleCandidate{
+		{name: "Fastpotify.app", identity: "fastpotify"},
+		{name: "fastpotify.APP", identity: "fastpotify"},
+	}
+	if err := validateUniqueDMGAppBundleIdentities(candidates); err == nil || !strings.Contains(err.Error(), "colliding app bundle identities") {
+		t.Fatalf("validateUniqueDMGAppBundleIdentities() error = %v, want collision", err)
 	}
 }
 
