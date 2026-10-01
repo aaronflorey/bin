@@ -32,6 +32,7 @@ func TestSystemPackagePathLooksExplicitForEitherSeparator(t *testing.T) {
 }
 
 func TestResolveAppBundleExecutablePrefersBundleName(t *testing.T) {
+	requireDMGFixturePlatform(t)
 	appPath := filepath.Join(t.TempDir(), "Paseo.app")
 	execDir := filepath.Join(appPath, "Contents", "MacOS")
 	if err := os.MkdirAll(execDir, 0o755); err != nil {
@@ -51,6 +52,13 @@ func TestResolveAppBundleExecutablePrefersBundleName(t *testing.T) {
 	}
 	if resolved != mainExec {
 		t.Fatalf("unexpected executable path: got %s want %s", resolved, mainExec)
+	}
+}
+
+func requireDMGFixturePlatform(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("DMG app bundle fixtures require Unix executable semantics")
 	}
 }
 
@@ -358,6 +366,7 @@ func TestFindManagedBinByAliasMatchesAppBundleName(t *testing.T) {
 }
 
 func TestInstallSystemPackageDMGTracksInstalledAppBundle(t *testing.T) {
+	requireDMGFixturePlatform(t)
 	setupTestConfig(t)
 
 	originalApplicationsDir := applicationsDir
@@ -468,6 +477,7 @@ func TestInstallSystemPackageDMGTracksInstalledAppBundle(t *testing.T) {
 }
 
 func TestInstallSystemPackageDMGReinstallUsesStoredBundleOverSibling(t *testing.T) {
+	requireDMGFixturePlatform(t)
 	setupTestConfig(t)
 	originalApplicationsDir := applicationsDir
 	originalExec := execCommand
@@ -547,6 +557,7 @@ func TestInstallSystemPackageDMGReinstallUsesStoredBundleOverSibling(t *testing.
 }
 
 func TestInstallDMGAppRejectsInvalidSourceBeforeCopyOrSigning(t *testing.T) {
+	requireDMGFixturePlatform(t)
 	originalApplicationsDir := applicationsDir
 	originalExec := execCommand
 	applicationsDir = t.TempDir()

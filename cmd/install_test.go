@@ -42,7 +42,7 @@ func TestInstallCompletionFlag(t *testing.T) {
 
 	installProviderFactory = func(string, string) (providers.Provider, error) {
 		return testFetchProvider{file: &providers.File{
-			Data:    strings.NewReader("#!/bin/sh\nexit 0\n"),
+			Data:    strings.NewReader(testRunnablePayloadString(t)),
 			Name:    "tool",
 			Version: "1.0.0",
 		}}, nil

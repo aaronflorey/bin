@@ -157,7 +157,7 @@ func TestGenericURLGetLatestVersionNoVersionReturnsError(t *testing.T) {
 
 func TestGenericURLFetchReturnsFileNameVersionAndData(t *testing.T) {
 	payload := genericRunnablePayload(t)
-	filename := genericArtifactName("", "")
+	filename := genericArtifactName("", genericScriptExtension())
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
 		_, _ = w.Write(payload)
@@ -393,7 +393,7 @@ func TestGenericURLFetchProcessesTarAndRejectsNonRunnablePayload(t *testing.T) {
 }
 
 func TestGenericURLFetchUsesResponseMetadataAndOneDownload(t *testing.T) {
-	filename := genericArtifactName("content", "")
+	filename := genericArtifactName("content", genericScriptExtension())
 	var getCalls, sidecarCalls int
 	mux := http.NewServeMux()
 	mux.HandleFunc("/download", func(w http.ResponseWriter, r *http.Request) {
@@ -401,7 +401,7 @@ func TestGenericURLFetchUsesResponseMetadataAndOneDownload(t *testing.T) {
 			t.Fatalf("request method = %s, want GET", r.Method)
 		}
 		getCalls++
-		http.Redirect(w, r, "/redirected/"+genericArtifactName("redirect", ""), http.StatusFound)
+		http.Redirect(w, r, "/redirected/"+genericArtifactName("redirect", genericScriptExtension()), http.StatusFound)
 	})
 	mux.HandleFunc("/redirected/", func(w http.ResponseWriter, r *http.Request) {
 		getCalls++
@@ -428,7 +428,7 @@ func TestGenericURLFetchUsesResponseMetadataAndOneDownload(t *testing.T) {
 }
 
 func TestGenericURLFetchDoesNotForwardBasicAuthAcrossRedirect(t *testing.T) {
-	filename := genericArtifactName("redirected", "")
+	filename := genericArtifactName("redirected", genericScriptExtension())
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if authorization := r.Header.Get("Authorization"); authorization != "" {
 			t.Fatalf("redirected request Authorization = %q, want empty", authorization)
@@ -473,9 +473,9 @@ func TestGenericURLFetchDoesNotForwardBasicAuthAcrossRedirect(t *testing.T) {
 }
 
 func TestGenericURLFetchFilenamePrecedence(t *testing.T) {
-	contentName := genericArtifactName("content", "")
-	redirectName := genericArtifactName("redirect", "")
-	originalName := genericArtifactName("original", "")
+	contentName := genericArtifactName("content", genericScriptExtension())
+	redirectName := genericArtifactName("redirect", genericScriptExtension())
+	originalName := genericArtifactName("original", genericScriptExtension())
 
 	for _, test := range []struct {
 		name       string

@@ -86,7 +86,7 @@ func TestInstallBinaryPreservesArchiveMemberResolutionOutcomes(t *testing.T) {
 					t.Fatal("interactive install unexpectedly requested non-interactive fetch")
 				}
 				return &providers.File{
-					Data:        strings.NewReader("#!/bin/sh\nexit 0\n"),
+					Data:        strings.NewReader(testRunnablePayloadString(t)),
 					Name:        "tool",
 					Version:     "1.0.0",
 					PackagePath: "two/tool",
@@ -177,7 +177,7 @@ func TestInstallBinaryPersistsResolvedSelectionIntent(t *testing.T) {
 	intent := &config.SelectionDescriptor{LogicalProduct: "tool-cli", Target: &config.SelectionTarget{OS: "linux", Architecture: "amd64", ABI: "musl"}, ArchiveMember: "bin/tool"}
 	installProviderFactory = func(string, string) (providers.Provider, error) {
 		return fetchBinaryTestProvider{id: "test", fetchFn: func(*providers.FetchOpts) (*providers.File, error) {
-			return &providers.File{Data: strings.NewReader("#!/bin/sh\nexit 0\n"), Name: "tool", Version: "2.0.0", ReleaseTagPrefix: "nightly-", SourceAsset: "tool-cli-v2.0.0-linux-amd64-musl.tar.gz", PackagePath: "tool-v2/bin/tool", SelectionIntent: intent}, nil
+			return &providers.File{Data: strings.NewReader(testRunnablePayloadString(t)), Name: "tool", Version: "2.0.0", ReleaseTagPrefix: "nightly-", SourceAsset: "tool-cli-v2.0.0-linux-amd64-musl.tar.gz", PackagePath: "tool-v2/bin/tool", SelectionIntent: intent}, nil
 		}}, nil
 	}
 
@@ -496,7 +496,7 @@ func TestExistingConfigBinaryMatchesExpandedPath(t *testing.T) {
 func TestSaveToDiskValidatesExpectedSHA(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "tool")
-	payload := "#!/bin/sh\necho hello\n"
+	payload := testRunnablePayloadString(t)
 	sum := sha256.Sum256([]byte(payload))
 
 	_, err := saveToDisk(&providers.File{
@@ -564,7 +564,7 @@ func TestSaveToDiskOverwritePublishesRunnableBytesAndCleansStage(t *testing.T) {
 	if err := os.WriteFile(target, []byte("old executable"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	payload := "#!/bin/sh\necho updated\n"
+	payload := testRunnablePayloadString(t)
 
 	hash, err := saveToDisk(&providers.File{Data: strings.NewReader(payload), Name: "tool"}, target, true)
 	if err != nil {
@@ -598,7 +598,7 @@ func TestSaveToDiskConcurrentNonForcePublishesOneCandidate(t *testing.T) {
 	}
 	dir := t.TempDir()
 	target := filepath.Join(dir, "tool")
-	payloads := []string{"#!/bin/sh\necho first\n", "#!/bin/sh\necho second\n"}
+	payloads := []string{testRunnablePayloadString(t), testRunnablePayloadString(t)}
 	start := make(chan struct{})
 	staged := make(chan struct{}, len(payloads))
 	release := make(chan struct{})
@@ -1029,7 +1029,7 @@ func TestInstallBinaryKeepsProviderEnvironmentSyntaxLiteral(t *testing.T) {
 		return fetchBinaryTestProvider{
 			id: "test",
 			fetchFn: func(*providers.FetchOpts) (*providers.File, error) {
-				return &providers.File{Name: "$REMOTE_NAME", Version: "1.2.3", Data: strings.NewReader("#!/bin/sh\nexit 0\n")}, nil
+				return &providers.File{Name: "$REMOTE_NAME", Version: "1.2.3", Data: strings.NewReader(testRunnablePayloadString(t))}, nil
 			},
 		}, nil
 	}
@@ -1065,7 +1065,7 @@ func TestInstallBinaryExpandsDestinationWithoutPathResolution(t *testing.T) {
 		return fetchBinaryTestProvider{
 			id: "test",
 			fetchFn: func(*providers.FetchOpts) (*providers.File, error) {
-				return &providers.File{Name: "tool", Version: "1.2.3", Data: strings.NewReader("#!/bin/sh\nexit 0\n")}, nil
+				return &providers.File{Name: "tool", Version: "1.2.3", Data: strings.NewReader(testRunnablePayloadString(t))}, nil
 			},
 		}, nil
 	}
