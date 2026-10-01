@@ -63,7 +63,7 @@ func TestCompletionNativeHelperProcess(_ *testing.T) {
 	if os.Getenv("BIN_COMPLETION_TEST_SECRET") != "" {
 		completionNativeHelperFailure("generator inherited secret environment variable")
 	}
-	if os.Getenv("HOME") != workingDirectory || os.Getenv("TMPDIR") != workingDirectory {
+	if !sameTestFilePath(os.Getenv("HOME"), workingDirectory) || !sameTestFilePath(os.Getenv("TMPDIR"), workingDirectory) {
 		completionNativeHelperFailure("generator environment does not use its temporary working directory")
 	}
 	var input [1]byte
@@ -91,6 +91,12 @@ func completionNativeHelperArgs(args []string) ([]string, bool) {
 func completionNativeHelperFailure(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, format+"\n", args...)
 	os.Exit(1)
+}
+
+func sameTestFilePath(left, right string) bool {
+	leftInfo, leftErr := os.Stat(left)
+	rightInfo, rightErr := os.Stat(right)
+	return leftErr == nil && rightErr == nil && os.SameFile(leftInfo, rightInfo)
 }
 
 func TestGenerateNativeCompletionUsesDirectBoundedExecution(t *testing.T) {

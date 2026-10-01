@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"testing"
 
 	"github.com/aaronflorey/bin/pkg/config"
@@ -42,7 +43,10 @@ func TestGitHubFetchAppliesAndReturnsSelectionIntent(t *testing.T) {
 			t.Errorf("close fetched file: %v", err)
 		}
 	})
-	if file.SelectionIntent == nil || file.SelectionIntent.LogicalProduct != "tool" || file.SelectionIntent.Target == nil || file.SelectionIntent.Target.ABI == "" {
+	if file.SelectionIntent == nil || file.SelectionIntent.LogicalProduct != "tool" || file.SelectionIntent.Target == nil || file.SelectionIntent.Target.OS == "" || file.SelectionIntent.Target.Architecture == "" {
 		t.Fatalf("fetched file provenance/intent = %#v", file)
+	}
+	if runtime.GOOS == "linux" && file.SelectionIntent.Target.ABI == "" {
+		t.Fatalf("Linux fetched file omitted ABI provenance: %#v", file)
 	}
 }

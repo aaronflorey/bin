@@ -189,9 +189,13 @@ func TestProcessURLRejectsArchiveChecksumMismatch(t *testing.T) {
 }
 
 func TestProcessURLReportsByteTransformationEvidence(t *testing.T) {
-	plainName, renamedName, archiveAssetName := "tool-linux-amd64", "tool-renamed-linux-amd64", "tool-linux-amd64.zip"
+	plainName := "tool-" + runtime.GOOS + "-" + runtime.GOARCH
+	renamedName := "tool-renamed-" + runtime.GOOS + "-" + runtime.GOARCH
+	archiveAssetName := plainName + ".zip"
 	if runtime.GOOS == "windows" {
-		plainName, renamedName, archiveAssetName = "tool-windows-amd64", "tool-renamed-windows-amd64", "tool-windows-amd64.zip"
+		plainName = "tool-windows-" + runtime.GOARCH
+		renamedName = "tool-renamed-windows-" + runtime.GOARCH
+		archiveAssetName = plainName + ".zip"
 	}
 	plainFixture := testRunnableFixture(plainName)
 	renamedFixture := testRunnableFixture(renamedName)
