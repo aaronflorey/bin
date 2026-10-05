@@ -661,6 +661,46 @@ func TestFilterAssetsSelect(t *testing.T) {
 	}
 }
 
+func TestContainsDelimitedToken(t *testing.T) {
+	for _, test := range []struct {
+		candidate string
+		token     string
+		want      bool
+	}{
+		{"aarch64-apple-darwin", "", false},
+		{"tool--linux", "", false},
+		{"", "", false},
+		{"", "linux", false},
+		{"linux", "linux", true},
+		{"tool-linux-amd64", "linux", true},
+		{"tool-linux", "linux", true},
+		{"tool-linuxish", "linux", false},
+		{"tool-mylinux", "linux", false},
+		{"linuxish-linux", "linux", true},
+	} {
+		t.Run(test.candidate+"/"+test.token, func(t *testing.T) {
+			if got := containsDelimitedToken(test.candidate, test.token); got != test.want {
+				t.Fatalf("containsDelimitedToken(%q, %q) = %v, want %v", test.candidate, test.token, got, test.want)
+			}
+		})
+	}
+}
+
+func TestCompatibleAssetsWithoutProductName(t *testing.T) {
+	originalResolver := resolver
+	t.Cleanup(func() { resolver = originalResolver })
+	resolver = testDarwinARMResolver
+
+	compatible := NewFilter(&FilterOpts{}).CompatibleAssets([]*Asset{
+		{Name: "aarch64-apple-darwin.tar.gz"},
+		{Name: "x86_64-apple-darwin.tar.gz"},
+		{Name: "aarch64-unknown-linux-gnu.tar.gz"},
+	}, "")
+	if len(compatible) != 1 || compatible[0].Name != "aarch64-apple-darwin.tar.gz" {
+		t.Fatalf("unexpected compatible assets: %+v", compatible)
+	}
+}
+
 func TestFilterAssetsSelectsFFFExecutableProduct(t *testing.T) {
 	originalResolver := resolver
 	defer func() { resolver = originalResolver }()
