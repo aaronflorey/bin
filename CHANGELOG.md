@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.7.1](https://github.com/aaronflorey/bin/compare/v2.7.0...v2.7.1) (2026-10-05)
+
+
+### Bug Fixes
+
+* **assets:** prevent empty-token matching panic ([5700afc](https://github.com/aaronflorey/bin/commit/5700afca23a1e40f06fb7cd285a8f39b881f2b48))
+
 ## [2.7.0](https://github.com/aaronflorey/bin/compare/v2.6.0...v2.7.0) (2026-09-30)
 
 
