@@ -639,6 +639,10 @@ func classifyArch(candidate string, preferredSet map[string]struct{}) archRank {
 }
 
 func containsDelimitedToken(candidate, token string) bool {
+	if token == "" {
+		return false
+	}
+
 	start := 0
 	for {
 		index := strings.Index(candidate[start:], token)
