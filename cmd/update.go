@@ -63,6 +63,13 @@ func newUpdateCmd() *updateCmd {
 			if root.opts.autoSelect != "" && len(binsToProcess) != 1 {
 				return fmt.Errorf("--select requires exactly one update target")
 			}
+			binsToProcess, err = reconcileMiseTakeovers(binsToProcess, root.opts.dryRun)
+			if err != nil {
+				return err
+			}
+			if len(binsToProcess) == 0 {
+				return nil
+			}
 
 			var updates []availableUpdate
 			updateFailures := map[*config.Binary]error{}

@@ -43,6 +43,7 @@
 - `update` requires `--yes` or `--dry-run` in non-interactive mode when updates are available (`cmd/update.go`).
 - `update` pre/post hooks are global blockers: if either hook fails, the command stops instead of continuing per binary (`cmd/update.go`).
 - `remove` without arguments requires an interactive terminal (`cmd/remove.go`).
+- Before `update`, `ensure`, or `remove` acts on a direct binary, it checks whether that command now resolves to a mise shim. If mise has taken over, `bin` warns and forgets its stale registry entry without deleting the old executable or managed completion files. `update --dry-run` only reports what would be forgotten.
 - `--package-type flatpack` is normalized to `flatpak` (`pkg/systempackage/systempackage.go`).
 
 ## Search and browse

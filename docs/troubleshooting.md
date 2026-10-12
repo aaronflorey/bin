@@ -200,6 +200,17 @@ Pass explicit targets or run in an interactive terminal.
 
 Use `bin list` to confirm the managed path, then pass that exact name or path.
 
+## `... resolves to mise shim ... removed stale bin registry entry`
+
+**Cause**
+
+- A direct binary was still registered with `bin`, but the active command on `PATH` now resolves to a mise shim.
+- `update`, `ensure`, and `remove` treat mise as the active owner and forget the stale `bin` record.
+
+**Effect**
+
+The old executable and any completion files remain on disk. Remove them manually if they are no longer useful.
+
 ## Generic URL version inference fails
 
 **Cause**

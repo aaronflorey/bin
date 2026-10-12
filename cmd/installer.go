@@ -784,6 +784,19 @@ func resolveBinsToProcess(allBins map[string]*config.Binary, args []string) (map
 	bins := map[string]*config.Binary{}
 	for _, a := range args {
 		bin, err := getBinPath(a)
+		if err != nil && strings.Contains(err.Error(), "not managed by bin") {
+			resolved, lookupErr := lookPathCommand(a)
+			if lookupErr == nil && isMiseShim(resolved) {
+				aliasPath, aliasErr := findManagedBinByAlias(allBins, a)
+				if aliasErr != nil {
+					return nil, aliasErr
+				}
+				if aliasPath != "" {
+					bin = aliasPath
+					err = nil
+				}
+			}
+		}
 		if err != nil {
 			if !errors.Is(err, exec.ErrNotFound) && !errors.Is(err, os.ErrNotExist) {
 				return nil, err

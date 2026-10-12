@@ -62,6 +62,22 @@ func newRemoveCmd() *removeCmd {
 			for _, target := range targets {
 				selected[target.configPath] = target.binary
 			}
+			selected, err = reconcileMiseTakeovers(selected, false)
+			if err != nil {
+				return err
+			}
+			if len(selected) != len(targets) {
+				filtered := targets[:0]
+				for _, target := range targets {
+					if _, ok := selected[target.configPath]; ok {
+						filtered = append(filtered, target)
+					}
+				}
+				targets = filtered
+			}
+			if len(targets) == 0 {
+				return nil
+			}
 			if err := ensureDirectBinariesResolved(selected); err != nil {
 				return err
 			}

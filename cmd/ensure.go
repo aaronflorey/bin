@@ -44,6 +44,13 @@ func runEnsure(args []string) error {
 	if err != nil {
 		return err
 	}
+	binsToProcess, err = reconcileMiseTakeovers(binsToProcess, false)
+	if err != nil {
+		return err
+	}
+	if len(binsToProcess) == 0 {
+		return nil
+	}
 	if err := ensureDirectBinariesResolved(binsToProcess); err != nil {
 		return err
 	}
