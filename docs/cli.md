@@ -42,6 +42,7 @@
 - On macOS, GUI app releases that ship a `.dmg` should be installed with `--system-package --package-type dmg`, for example `bin install --system-package --package-type dmg github.com/getpaseo/paseo Paseo`; binary mode intentionally ignores Windows `.exe` installers on non-Windows platforms.
 - `update` requires `--yes` or `--dry-run` in non-interactive mode when updates are available (`cmd/update.go`).
 - `update` pre/post hooks are global blockers: if either hook fails, the command stops instead of continuing per binary (`cmd/update.go`).
+- Direct-binary installs, updates, ensures, and removals offer a sudo retry on Unix when a filesystem operation fails with a permission error and `sudo` is available. The prompt defaults to no and requires an interactive terminal; `install --non-interactive` disables it, and `--yes` or `--force` does not approve sudo. Consent applies to one binary's filesystem changes, including rollback. Downloads, config writes, and lifecycle hooks still run as the invoking user. Windows and system-package operations do not use this retry.
 - `remove` without arguments requires an interactive terminal (`cmd/remove.go`).
 - Before `update`, `ensure`, or `remove` acts on a direct binary, it checks whether that command now resolves to a mise shim. If mise has taken over, `bin` warns and forgets its stale registry entry without deleting the old executable or managed completion files. `update --dry-run` only reports what would be forgotten.
 - `--package-type flatpack` is normalized to `flatpak` (`pkg/systempackage/systempackage.go`).

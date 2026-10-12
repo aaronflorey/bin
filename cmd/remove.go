@@ -118,8 +118,9 @@ func newRemoveCmd() *removeCmd {
 					}
 				}
 
-				if err := os.Remove(target.deletePath); err != nil && !os.IsNotExist(err) {
-					return fmt.Errorf("error removing path %s: %v", target.deletePath, err)
+				fs := &binaryFilesystem{nonInteractive: !root.isInteractive()}
+				if _, err := fs.run("remove", target.deletePath); err != nil && !os.IsNotExist(err) {
+					return fmt.Errorf("error removing path %s: %w", target.deletePath, err)
 				}
 
 				if err := config.RemoveBinariesLocked([]string{target.configPath}, cleanupManagedCompletions); err != nil {

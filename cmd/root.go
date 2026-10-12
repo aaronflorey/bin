@@ -19,6 +19,13 @@ import (
 )
 
 func Execute(version string, exit func(int), args []string) {
+	if len(args) > 0 && args[0] == filesystemHelperCommand {
+		if err := executeFilesystemHelper(args[1:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			exit(1)
+		}
+		return
+	}
 	// enable colored output on travis
 	if os.Getenv("CI") != "" {
 		color.NoColor = false

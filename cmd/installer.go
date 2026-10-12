@@ -181,7 +181,7 @@ func installBinary(opts InstallOpts) (result *InstallResult, err error) {
 	}
 	log.Debugf("Resolved final install path to %q (overwrite=%t)", resolvedPath, overwrite)
 
-	candidate, err := prepareStagedBinary(pResult, resolvedPath, true)
+	candidate, err := prepareStagedBinary(pResult, resolvedPath, true, &binaryFilesystem{nonInteractive: fetchOpts.NonInteractive})
 	inputClosed = true
 	if err != nil {
 		return nil, fmt.Errorf("error installing binary: %w", err)
@@ -214,7 +214,7 @@ func installBinary(opts InstallOpts) (result *InstallResult, err error) {
 		Pinned:             pinned,
 		MinAgeDays:         minAgeDays,
 	}
-	publication := stagedBinaryPublication{candidate: candidate.path, destination: resolvedPath, overwrite: overwrite}
+	publication := stagedBinaryPublication{candidate: candidate.path, destination: resolvedPath, overwrite: overwrite, fs: candidate.fs}
 	transactionID := fmt.Sprintf("%x", sha256.Sum256([]byte(candidate.path)))
 	err = commitBinaryTransaction(config.BinaryTransaction{
 		ID:                      transactionID,
@@ -552,29 +552,34 @@ func saveToDiskAndCloseInput(f *providers.File, path string, overwrite bool) ([]
 }
 
 func saveToDiskWithInputClose(f *providers.File, path string, overwrite, closeInput bool) (hash []byte, err error) {
-	candidate, err := prepareStagedBinary(f, path, closeInput)
+	candidate, err := prepareStagedBinary(f, path, closeInput, &binaryFilesystem{})
 	if err != nil {
 		return nil, err
 	}
 	defer candidate.cleanup()
-	if err := publishStagedBinary(candidate.path, path, overwrite); err != nil {
+	operation := "publish"
+	if overwrite {
+		operation = "replace"
+	}
+	if _, err := candidate.fs.run(operation, candidate.path, path); err != nil {
 		return nil, err
 	}
 	return candidate.hash, nil
 }
 
 type stagedBinaryCandidate struct {
+	fs   *binaryFilesystem
 	path string
 	hash []byte
 }
 
 func (candidate *stagedBinaryCandidate) cleanup() {
 	if candidate != nil && candidate.path != "" {
-		_ = os.Remove(candidate.path)
+		_, _ = candidate.fs.run("remove", candidate.path)
 	}
 }
 
-func prepareStagedBinary(f *providers.File, path string, closeInput bool) (candidate *stagedBinaryCandidate, err error) {
+func prepareStagedBinary(f *providers.File, path string, closeInput bool, fs *binaryFilesystem) (candidate *stagedBinaryCandidate, err error) {
 	inputClosed := false
 	defer func() {
 		if !closeInput || inputClosed {
@@ -585,22 +590,26 @@ func prepareStagedBinary(f *providers.File, path string, closeInput bool) (candi
 		}
 	}()
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if _, err := fs.run("mkdir", filepath.Dir(path)); err != nil {
 		return nil, err
 	}
 
-	file, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
+	tempPath, err := fs.run("temp", path+".tmp")
 	if err != nil {
 		return nil, err
 	}
-	tempPath := file.Name()
+	file, err := os.OpenFile(tempPath, os.O_WRONLY, 0)
+	if err != nil {
+		_, _ = fs.run("remove", tempPath)
+		return nil, err
+	}
 
 	defer func() {
 		if file != nil {
 			_ = file.Close()
 		}
 		if err != nil {
-			_ = os.Remove(tempPath)
+			_, _ = fs.run("remove", tempPath)
 		}
 	}()
 
@@ -640,10 +649,11 @@ func prepareStagedBinary(f *providers.File, path string, closeInput bool) (candi
 		return nil, err
 	}
 
-	return &stagedBinaryCandidate{path: tempPath, hash: h.Sum(nil)}, nil
+	return &stagedBinaryCandidate{path: tempPath, hash: h.Sum(nil), fs: fs}, nil
 }
 
 type stagedBinaryPublication struct {
+	fs          *binaryFilesystem
 	candidate   string
 	destination string
 	overwrite   bool
@@ -653,15 +663,12 @@ type stagedBinaryPublication struct {
 }
 
 func (publication *stagedBinaryPublication) reserveBackup() (string, error) {
-	backup, err := os.CreateTemp(filepath.Dir(publication.destination), filepath.Base(publication.destination)+".rollback-*")
+	backup, err := publication.fs.run("temp", publication.destination+".rollback")
 	if err != nil {
 		return "", err
 	}
-	publication.backup = backup.Name()
-	if err := backup.Close(); err != nil {
-		return "", err
-	}
-	if err := os.Remove(publication.backup); err != nil {
+	publication.backup = backup
+	if _, err := publication.fs.run("remove", backup); err != nil {
 		return "", err
 	}
 	return publication.backup, nil
@@ -674,7 +681,7 @@ func (publication *stagedBinaryPublication) publish() error {
 	if err := publication.backupDestination(); err != nil {
 		return err
 	}
-	if err := publishStagedBinary(publication.candidate, publication.destination, false); err != nil {
+	if _, err := publication.fs.run("publish", publication.candidate, publication.destination); err != nil {
 		return errors.Join(err, publication.restoreBackup())
 	}
 	publication.published = true
@@ -698,7 +705,7 @@ func (publication *stagedBinaryPublication) backupDestination() error {
 	if publication.backup == "" {
 		return errors.New("rollback artifact was not reserved")
 	}
-	if err := os.Rename(publication.destination, publication.backup); err != nil {
+	if _, err := publication.fs.run("rename", publication.destination, publication.backup); err != nil {
 		return err
 	}
 	publication.backedUp = true
@@ -712,7 +719,7 @@ func (publication *stagedBinaryPublication) rollback() error {
 		}
 		return publication.restoreBackup()
 	}
-	if err := os.Remove(publication.destination); err != nil {
+	if _, err := publication.fs.run("remove", publication.destination); err != nil {
 		return err
 	}
 	publication.published = false
@@ -723,7 +730,7 @@ func (publication *stagedBinaryPublication) restoreBackup() error {
 	if publication.backup == "" {
 		return nil
 	}
-	if err := os.Rename(publication.backup, publication.destination); err != nil {
+	if _, err := publication.fs.run("rename", publication.backup, publication.destination); err != nil {
 		return err
 	}
 	publication.backup = ""
@@ -735,7 +742,7 @@ func (publication *stagedBinaryPublication) cleanup() error {
 	if publication.backup == "" {
 		return nil
 	}
-	err := os.Remove(publication.backup)
+	_, err := publication.fs.run("remove", publication.backup)
 	if err == nil || os.IsNotExist(err) {
 		publication.backup = ""
 		return nil
