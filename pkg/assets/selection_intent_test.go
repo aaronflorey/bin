@@ -2,6 +2,7 @@ package assets
 
 import (
 	"errors"
+	"os/exec"
 	"testing"
 
 	"github.com/aaronflorey/bin/pkg/config"
@@ -199,9 +200,19 @@ func TestStoredSelectionDescriptorRepairsOnlyPoisonedRawMember(t *testing.T) {
 }
 
 func TestStoredSelectionDescriptorRepairsVersionedNightlyVariant(t *testing.T) {
-	originalResolver := resolver
+	originalResolver, originalLookPath := resolver, lookPath
 	resolver = testDarwinARMResolver
-	t.Cleanup(func() { resolver = originalResolver })
+	// Simulate the package manager as well as the target platform so the DMG
+	// fixtures remain eligible on Linux and Windows test runners.
+	lookPath = func(name string) (string, error) {
+		if name == "hdiutil" {
+			return "/usr/bin/hdiutil", nil
+		}
+		return "", exec.ErrNotFound
+	}
+	t.Cleanup(func() {
+		resolver, lookPath = originalResolver, originalLookPath
+	})
 
 	legacyVariant := "nightly.20261007.2787"
 	original := &config.SelectionDescriptor{
