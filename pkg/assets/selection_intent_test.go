@@ -198,6 +198,57 @@ func TestStoredSelectionDescriptorRepairsOnlyPoisonedRawMember(t *testing.T) {
 	}
 }
 
+func TestStoredSelectionDescriptorRepairsVersionedNightlyVariant(t *testing.T) {
+	originalResolver := resolver
+	resolver = testDarwinARMResolver
+	t.Cleanup(func() { resolver = originalResolver })
+
+	legacyVariant := "nightly.20261007.2787"
+	original := &config.SelectionDescriptor{
+		LogicalProduct: "t3-code",
+		Target:         &config.SelectionTarget{OS: "darwin", Architecture: "arm64"},
+		Variant:        &legacyVariant,
+	}
+	binary := &config.Binary{
+		Version:         "v0.0.46-nightly.20261007.2787",
+		SourceAsset:     "T3-Code-0.0.46-nightly.20261007.2787-arm64.dmg",
+		SelectionIntent: original,
+	}
+
+	repaired := StoredSelectionDescriptor(binary)
+	if repaired == original || repaired.Variant == nil || *repaired.Variant != "" {
+		t.Fatalf("repaired descriptor = %#v", repaired)
+	}
+	if original.Variant == nil || *original.Variant != legacyVariant {
+		t.Fatalf("input descriptor was mutated: %#v", original)
+	}
+
+	selected, err := NewFilter(&FilterOpts{NonInteractive: true, SystemPackage: true, PackageType: "dmg", SelectionIntent: repaired}).FilterAssets("t3code", []*Asset{
+		{Name: "T3-Code-0.0.46-nightly.20261011.2994-x64.dmg"},
+		{Name: "T3-Code-0.0.46-nightly.20261011.2994-arm64.dmg"},
+	}, "")
+	if err != nil || selected.Name != "T3-Code-0.0.46-nightly.20261011.2994-arm64.dmg" {
+		t.Fatalf("nightly update selected %#v, %v", selected, err)
+	}
+}
+
+func TestNightlyVersionTokenDoesNotEraseBuildVariants(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		variant string
+	}{
+		{"T3-Code-0.0.46-nightly.20261011.2994-arm64.dmg", ""},
+		{"tool-v1.2.0-linux-amd64-static.tar.gz", "static"},
+		{"bottom_x86_64-unknown-linux-gnu-2-17.tar.gz", "2-17"},
+		{"tool-nightly.preview-linux-amd64.tar.gz", "nightly.preview"},
+	} {
+		candidate := describeReleaseCandidate(&Asset{Name: test.name}, "")
+		if candidate.Variant != test.variant {
+			t.Fatalf("%s variant = %q, want %q", test.name, candidate.Variant, test.variant)
+		}
+	}
+}
+
 func TestResolvePersistedArchiveMemberRejectsNormalizedCollisions(t *testing.T) {
 	orders := [][]string{
 		{"tool-v2.0-linux-amd64/bin/tool", "tool-v2.1-linux-amd64/bin/tool"},

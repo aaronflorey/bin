@@ -541,12 +541,33 @@ func releaseBuildVariant(name, product string) string {
 			targetSeen = true
 			continue
 		}
-		if !targetSeen && isVersionToken(part) {
+		if !targetSeen && (isVersionToken(part) || isNightlyVersionToken(part)) {
 			continue
 		}
 		variant = append(variant, part)
 	}
 	return strings.Join(variant, "-")
+}
+
+// isNightlyVersionToken recognizes date/build-qualified nightly versions such
+// as nightly.20261007.2787. These identify a release, not a reusable build
+// variant that should constrain future updates.
+func isNightlyVersionToken(token string) bool {
+	parts := strings.Split(strings.ToLower(strings.TrimSpace(token)), ".")
+	if len(parts) < 2 || parts[0] != "nightly" {
+		return false
+	}
+	for _, part := range parts[1:] {
+		if part == "" {
+			return false
+		}
+		for _, character := range part {
+			if character < '0' || character > '9' {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func containsReleaseArchitectureToken(name, token string) bool {

@@ -3,6 +3,7 @@ package assets
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/aaronflorey/bin/pkg/config"
 )
@@ -120,6 +121,9 @@ func StoredSelectionDescriptor(binary *config.Binary) *config.SelectionDescripto
 		return DeriveSelectionDescriptor(binary)
 	}
 	descriptor := config.CloneSelectionDescriptor(binary.SelectionIntent)
+	if repaired, ok := repairedNightlyVariant(binary, descriptor.Variant); ok {
+		descriptor.Variant = &repaired
+	}
 	if descriptor.Variant == nil && binary.SourceAsset != "" {
 		variant := describeReleaseCandidate(&Asset{Name: binary.SourceAsset}, "").Variant
 		descriptor.Variant = &variant
@@ -130,6 +134,27 @@ func StoredSelectionDescriptor(binary *config.Binary) *config.SelectionDescripto
 		}
 	}
 	return descriptor
+}
+
+// repairedNightlyVariant removes a release-specific nightly build that older
+// versions mistakenly persisted as a reusable variant. Require matching
+// evidence from both the stored version and source asset before repairing it.
+func repairedNightlyVariant(binary *config.Binary, stored *string) (string, bool) {
+	if binary == nil || stored == nil || !isNightlyVersionToken(*stored) {
+		return "", false
+	}
+	variant := strings.ToLower(strings.TrimSpace(*stored))
+	version := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(binary.Version), "v"))
+	source := strings.ToLower(binary.SourceAsset)
+	if !strings.HasSuffix(version, "-"+variant) || !containsDelimitedToken(source, variant) {
+		return "", false
+	}
+
+	corrected := describeReleaseCandidate(&Asset{Name: binary.SourceAsset}, "").Variant
+	if corrected == *stored {
+		return "", false
+	}
+	return corrected, true
 }
 
 func selectionDescriptorForCandidate(candidate ReleaseCandidate) *config.SelectionDescriptor {
