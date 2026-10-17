@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.8.0](https://github.com/aaronflorey/bin/compare/v2.7.0...v2.8.0) (2026-10-17)
+
+
+### Features
+
+* offer sudo retries for binary filesystem permission errors ([c3d1736](https://github.com/aaronflorey/bin/commit/c3d173666150ee58b920199c66aae4b27880117c))
+
+
+### Bug Fixes
+
+* **assets:** prevent empty-token matching panic ([5e55180](https://github.com/aaronflorey/bin/commit/5e5518034237a71908d49a04ea99d99550227565))
+* ignore nightly build IDs in release variants ([f966119](https://github.com/aaronflorey/bin/commit/f9661190edbf3c514e66c38d22b691d88654d084))
+* reconcile binaries taken over by mise ([2f48321](https://github.com/aaronflorey/bin/commit/2f4832164909d85ddbb131b6b8d27e9743d6e1c1))
+* restore release-please history boundary ([007f666](https://github.com/aaronflorey/bin/commit/007f6660773900dd5f1c16e47b55a042cc470d7e))
+
 ## [2.7.0](https://github.com/aaronflorey/bin/compare/v2.6.0...v2.7.0) (2026-09-30)
 
 
