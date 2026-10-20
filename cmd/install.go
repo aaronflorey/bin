@@ -20,6 +20,7 @@ type installCmd struct {
 
 type installOpts struct {
 	force               bool
+	newInstall          bool
 	provider            string
 	all                 bool
 	autoSelect          string
@@ -102,6 +103,7 @@ func newInstallCmd() *installCmd {
 	root.cmd = cmd
 	enableSpinner(root.cmd)
 	root.cmd.Flags().BoolVarP(&root.opts.force, "force", "f", false, "Force the installation even if the file already exists")
+	root.cmd.Flags().BoolVar(&root.opts.newInstall, "new", false, "Select a new package from the source instead of updating an existing entry")
 	root.cmd.Flags().BoolVarP(&root.opts.all, "all", "a", false, "Show all compatible download options (skip product scoring)")
 	root.cmd.Flags().StringVarP(&root.opts.provider, "provider", "p", "", "Forces to use a specific provider")
 	root.cmd.Flags().StringVarP(&root.opts.autoSelect, "select", "s", "", "Auto select installation file (skips interactive prompt)")
@@ -269,7 +271,10 @@ func (root *installCmd) installTarget(cmd *cobra.Command, target installTarget) 
 
 	for _, prefix := range prefixes {
 		resolved.fetchOpts.ReleaseTagPrefix = prefix
-		existing := existingBinaryForInstall(cfg.Bins, resolved.url, root.opts.provider, resolvedPath, prefix)
+		var existing *config.Binary
+		if !root.opts.newInstall {
+			existing = existingBinaryForInstall(cfg.Bins, resolved.url, root.opts.provider, resolvedPath, prefix)
+		}
 		if existing != nil {
 			log.Debugf("Found existing managed binary for %q at %s", resolved.url, existing.Path)
 			log.Infof("Binary already exists in config (%s). Updating it instead", existing.Path)

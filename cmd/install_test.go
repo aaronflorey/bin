@@ -35,6 +35,71 @@ func TestInstallHasPinFlag(t *testing.T) {
 	}
 }
 
+func TestInstallNewPackageFromSameSource(t *testing.T) {
+	for _, systemPackage := range []bool{false, true} {
+		t.Run(fmt.Sprintf("system-package=%t", systemPackage), func(t *testing.T) {
+			dir := setupTestConfig(t)
+			url := "https://example.test/acme/tool"
+			originalFactory := installProviderFactory
+			originalRegistry := lifecycleRegistry
+			t.Cleanup(func() {
+				installProviderFactory = originalFactory
+				lifecycleRegistry = originalRegistry
+			})
+			installProviderFactory = func(string, string) (providers.Provider, error) {
+				return testFetchProvider{file: &providers.File{
+					Data: strings.NewReader(testRunnablePayloadString(t)), Name: "tool", Version: "1.0.0",
+				}}, nil
+			}
+			first := newInstallCmd()
+			first.cmd.SetArgs([]string{url})
+			if err := first.cmd.Execute(); err != nil {
+				t.Fatal(err)
+			}
+			firstPath := filepath.Join(dir, "tool")
+			original := config.CloneBinary(config.Get().Bins[firstPath])
+
+			args := []string{"--new", "--non-interactive", url, "other"}
+			secondPath := filepath.Join(dir, "other")
+			if systemPackage {
+				secondPath = filepath.Join(dir, "Other.app", "Contents", "MacOS", "Other")
+				strategy := originalRegistry[installModeSystemPackage]
+				strategy.install = func(opts InstallOpts) (*InstallResult, error) {
+					if !opts.FetchOpts.SystemPackage || opts.FetchOpts.PackageType != "dmg" || opts.Force || opts.ConfigPath != "" || opts.Path != "" {
+						t.Fatalf("new package reused existing install options: %+v", opts)
+					}
+					if opts.FetchOpts.PackagePath != "" || opts.FetchOpts.SelectionIntent != nil || opts.RequestedAppBundle != "other" {
+						t.Fatalf("new package reused existing selection: %+v", opts)
+					}
+					config.Get().Bins[secondPath] = &config.Binary{Path: secondPath, URL: url, InstallMode: installModeSystemPackage, PackageType: "dmg"}
+					return &InstallResult{Name: "Other", Path: secondPath, Version: "1.0.0"}, nil
+				}
+				lifecycleRegistry = map[string]lifecycleStrategy{installModeSystemPackage: strategy}
+				args = append(args, "--prefer-system-package", "--package-type=dmg")
+			}
+			second := newInstallCmd()
+			second.cmd.SetArgs(args)
+			if err := second.cmd.Execute(); err != nil {
+				t.Fatal(err)
+			}
+			if len(config.Get().Bins) != 2 || config.Get().Bins[secondPath] == nil {
+				t.Fatalf("expected two managed packages, got %+v", config.Get().Bins)
+			}
+			if got := config.Get().Bins[firstPath]; got.Path != original.Path || got.Hash != original.Hash || got.RemoteName != original.RemoteName || got.InstallMode != original.InstallMode {
+				t.Fatalf("first package changed: %+v", got)
+			}
+
+			if !systemPackage {
+				collision := newInstallCmd()
+				collision.cmd.SetArgs([]string{"--new", "--non-interactive", url, "tool"})
+				if err := collision.cmd.Execute(); err == nil || !strings.Contains(err.Error(), "already exists") {
+					t.Fatalf("expected destination collision, got %v", err)
+				}
+			}
+		})
+	}
+}
+
 func TestInstallCompletionFlag(t *testing.T) {
 	installDir := setupTestConfig(t)
 	originalProviderFactory := installProviderFactory

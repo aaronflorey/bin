@@ -209,6 +209,19 @@ bin install --system-package --package-type dmg github.com/getpaseo/paseo Paseo
 
 Binary mode intentionally rejects Windows-only installers such as `.exe` on non-Windows platforms, so `.exe` assets are not a macOS fallback.
 
+To install another package from a source you already manage, add `--new`.
+For example, keep the imgopter CLI and also install its macOS app:
+
+```shell
+bin install --new --system-package --package-type dmg github.com/auron-labs/imgopter
+```
+
+For two direct binaries from one source, use `--new` with a different name or
+path and `--select` when needed to choose the other asset. Each installation
+keeps its own config entry and selection metadata for later updates. `--new`
+bypasses the existing-entry lookup; it does not imply `--force`. Without
+`--new`, installing an already managed source keeps the existing update behavior.
+
 ## 🎯 Supported providers
 
 ### GitHub Releases

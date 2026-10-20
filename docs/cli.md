@@ -38,6 +38,7 @@
 - Environment variables expand in explicit install destinations only; provider-derived names remain literal portable filename components.
 - `install --all` shows all compatible current-platform candidates but still excludes unsupported artifact shapes and does not bypass payload validation.
 - `install --select <token>` chooses an exact compatible asset before product ranking. It does not bypass platform or executable validation.
+- `install --new` selects another package from a source instead of updating its existing entry. Use a distinct name or path for another direct binary, or `--new --system-package --package-type dmg` to add a macOS app alongside its CLI. Existing destination overwrite checks still apply; `--new` does not imply `--force`.
 - Ambiguous products prompt interactively; ambiguous release lanes prompt for one lane. Both fail in non-interactive mode rather than selecting alphabetically.
 - On macOS, GUI app releases that ship a `.dmg` should be installed with `--system-package --package-type dmg`, for example `bin install --system-package --package-type dmg github.com/getpaseo/paseo Paseo`; binary mode intentionally ignores Windows `.exe` installers on non-Windows platforms.
 - `update` requires `--yes` or `--dry-run` in non-interactive mode when updates are available (`cmd/update.go`).
