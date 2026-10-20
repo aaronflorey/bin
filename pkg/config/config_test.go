@@ -121,6 +121,37 @@ func TestDetectLinuxLibC(t *testing.T) {
 			t.Fatalf("expected glibc aliases, got %v", libc)
 		}
 	})
+
+	for _, loader := range []string{
+		"/lib64/ld-linux-x86-64.so.2",
+		"/lib/ld-linux-aarch64.so.1",
+		"/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2",
+		"/lib/ld64.so.1",
+		"/lib64/ld64.so.2",
+	} {
+		t.Run("glibc with musl alongside "+loader, func(t *testing.T) {
+			osStat = func(name string) (fs.FileInfo, error) {
+				return nil, os.ErrNotExist
+			}
+			globFiles = func(pattern string) ([]string, error) {
+				var matches []string
+				for _, name := range []string{loader, "/lib/ld-musl-x86_64.so.1"} {
+					matched, err := filepath.Match(pattern, name)
+					if err != nil {
+						return nil, err
+					}
+					if matched {
+						matches = append(matches, name)
+					}
+				}
+				return matches, nil
+			}
+
+			if libc := detectLinuxLibC(); len(libc) != 2 || libc[0] != "glibc" || libc[1] != "gnu" {
+				t.Fatalf("expected glibc aliases with both loaders installed, got %v", libc)
+			}
+		})
+	}
 }
 
 func TestCheckAndLoadAllowsFreshBINCONFIGPath(t *testing.T) {

@@ -1292,6 +1292,17 @@ func detectLinuxLibC() []string {
 		return []string{"musl"}
 	}
 
+	// A musl loader can be installed alongside glibc without making the host musl-only.
+	for _, pattern := range []string{
+		"/lib/ld-linux*.so*", "/lib64/ld-linux*.so*", "/lib/*/ld-linux*.so*",
+		"/lib/ld64.so*", "/lib64/ld64.so*", "/lib/*/ld64.so*",
+	} {
+		matches, err := globFiles(pattern)
+		if err == nil && len(matches) > 0 {
+			return []string{"glibc", "gnu"}
+		}
+	}
+
 	for _, pattern := range []string{"/lib/ld-musl*", "/lib64/ld-musl*"} {
 		matches, err := globFiles(pattern)
 		if err == nil && len(matches) > 0 {
