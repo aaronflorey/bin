@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.9.0](https://github.com/aaronflorey/bin/compare/v2.8.0...v2.9.0) (2026-10-20)
+
+
+### Features
+
+* add --new flag to allow multiple bins in a source ([eb64e19](https://github.com/aaronflorey/bin/commit/eb64e19a4fa4f25f81e14666ae42166a926507b4))
+
+
+### Bug Fixes
+
+* detect glibc when musl is also installed ([ecce252](https://github.com/aaronflorey/bin/commit/ecce2521499ea796c5fefd14f19fb1cfe6c8ad7b))
+
 ## [2.8.0](https://github.com/aaronflorey/bin/compare/v2.7.0...v2.8.0) (2026-10-17)
 
 
